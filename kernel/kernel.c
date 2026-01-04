@@ -114,6 +114,7 @@ void kmain() {
     tss_init();
     pit_init(1000);
     pic_init(32, 40);
+    pic_unmask(2);
 
     scheduler_start();
     asm volatile ("sti");

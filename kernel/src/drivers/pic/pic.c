@@ -49,7 +49,27 @@ cpu_context_t *timer_handle(cpu_context_t *r){
     return rctx;
 }
 
+int irq_handler_spurrious(uint8_t irq){
+    if (irq == 7) {
+        uint8_t isr = pic_read_isr(PIC1_CMD);
+        if (!(isr & (1 << 7)))
+            return 1;
+    }
+
+    if (irq == 15) {
+        uint8_t isr = pic_read_isr(PIC2_CMD);
+        if (!(isr & (1 << 7))) {
+            PIC_EOI(irq);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 void irq_handler(uint8_t irq) {
+    if(irq_handler_spurrious(irq) == 1) return;
+
     switch (irq) {
         case 0:
             break;
@@ -58,9 +78,6 @@ void irq_handler(uint8_t irq) {
             PIC_EOI(irq);
             break;
         default:
-            serial_printf("%sthe PIC sent an Unimplemented Request [IRQ:%d]\n", LOG_WARN, irq);
-            // do not send EOI Here, it could be a spurious interrupt
-            // https://f.osdev.org/viewtopic.php?t=23291
             break;
     }
 }
