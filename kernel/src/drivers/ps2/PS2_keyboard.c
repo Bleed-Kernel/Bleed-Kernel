@@ -21,11 +21,8 @@ static keyboard_callback_t kb_callback = NULL;
 
 /// @brief flush the PS2 port of data
 static inline void PS2_Flush(void) {
-    for (int i = 0; i < 256; i++) {
-        if (!(inb(0x64) & 0x01))
-            break;
+    if ((inb(0x64) & 0x01))
         (void)inb(0x60);
-    }
 }
 
 /// @brief push a char onto the keyboard buffer stack

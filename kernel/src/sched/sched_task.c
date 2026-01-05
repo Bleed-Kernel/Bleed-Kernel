@@ -29,6 +29,19 @@ static void queue_task(task_t *task) {
     task->next = task_queue;
 }
 
+task_t *sched_get_task(uint64_t pid) {
+    if (!task_list_head) return NULL;
+
+    task_t *t = task_list_head;
+    do {
+        if (t->id == pid)
+            return t;
+        t = t->next;
+    } while (t != task_list_head);
+
+    return NULL;
+}
+
 task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss) {
     task_t *task = kmalloc(sizeof(task_t));
     if (!task) ke_panic("Failed to allocate task");

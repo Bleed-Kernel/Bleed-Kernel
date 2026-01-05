@@ -10,3 +10,4 @@ uint64_t sys_clear(uint64_t fd);
 void sys_yield();
 
 uint64_t sys_spawn(uint64_t user_path_ptr);
+long sys_waitpid(uint64_t pid);
