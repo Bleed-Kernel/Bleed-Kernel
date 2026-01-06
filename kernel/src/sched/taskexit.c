@@ -6,6 +6,17 @@
 __attribute__((noreturn))
 void exit(void) {
     task_t *current_task = get_current_task();
+    task_t *w = current_task->wait_queue;
+
+    while (w){
+        task_t *next = w->wait_next;
+
+        w->wait_next = NULL;
+        w->state = TASK_READY;
+        w = next;
+    }
+
+    current_task->wait_queue = NULL;
 
     sched_mark_task_dead();
     sched_yield();

@@ -26,8 +26,7 @@ uint64_t sys_spawn(uint64_t user_path_ptr) {
         return elf_load_ret;
     
     task_t *child = sched_create_task(cr3, entry, USER_CS, USER_SS);
-    child->parent = get_current_task();
-    child->waiting_parent = NULL;
+    child->wait_queue = NULL;
     child->state = TASK_READY;
 
     serial_printf("%sNew Task Created: PID %d\n", LOG_INFO, child->id);

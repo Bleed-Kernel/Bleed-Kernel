@@ -31,17 +31,16 @@ typedef struct task {
     task_state_t    state;
     cpu_context_t  *context;
 
-    uint8_t *kernel_stack;
-    uint32_t quantum_remaining;
+    uint8_t         *kernel_stack;
+    uint32_t        quantum_remaining;
 
-    paddr_t page_map;
+    paddr_t         page_map;
 
-    struct task *parent;
-    struct task *waiting_parent;
+    struct task     *wait_queue;
+    struct task     *wait_next;
 
-
-    struct task *next;
-    struct task *dead_next;
+    struct task     *next;
+    struct task     *dead_next;
 } task_t;
 
 typedef void (*task_itteration_fn)(task_t *task, void *userdata);
