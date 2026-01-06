@@ -7,6 +7,8 @@
 #include <mm/heap.h>
 #include <panic.h>
 
+#include "blit.h"
+
 extern volatile struct limine_framebuffer_request framebuffer_request;
 
 static uint32_t *fb_buffer = NULL;
@@ -16,6 +18,19 @@ uint32_t* framebuffer_get_buffer(void) {
     return fb_buffer;
 }
 
+void framebuffer_flush(fb_console_t *fb) {
+    if (!fb_buffer) return;
+
+    if (fb->dirty_top < fb->dirty_bottom) {
+        uint32_t* src = fb_buffer + fb->dirty_top * fb->pitch;
+        uint32_t* dst = fb->pixels + fb->dirty_top * fb->pitch;
+        framebuffer_blit(src, dst, fb->width, fb->dirty_bottom - fb->dirty_top);
+    }
+
+    fb->dirty_top = fb->height;
+    fb->dirty_bottom = 0;
+}
+
 void framebuffer_init_buffer(fb_console_t *fb) {
     size_t size = fb->pitch * fb->height * sizeof(uint32_t);
     if (size != fb_buffer_size) {
@@ -23,6 +38,14 @@ void framebuffer_init_buffer(fb_console_t *fb) {
         fb_buffer_size = size;
     }
     memset(fb_buffer, 0, fb_buffer_size);
+    fb->dirty_top = 0;
+    fb->dirty_bottom = fb->height;
+    framebuffer_flush(fb);
+}
+
+void framebuffer_mark_dirty(fb_console_t *fb, size_t y, size_t height) {
+    if (y < fb->dirty_top) fb->dirty_top = y;
+    if (y + height > fb->dirty_bottom) fb->dirty_bottom = y + height;
 }
 
 static inline void framebuffer_clear_row(uint32_t* buffer, size_t y, size_t pitch, uint32_t color) {
@@ -45,12 +68,17 @@ static void framebuffer_scroll_buffer(fb_console_t *fb) {
 
     fb->cursor_y = (fb->height / fb->font->height) - 1;
 
-    framebuffer_blit(fb_buffer, fb->pixels, fb->width, fb->height);
+    fb->dirty_top = 0;
+    fb->dirty_bottom = fb->height;
+
+    framebuffer_flush(fb);
 }
 
 static inline void framebuffer_draw_glyph_row_mem(fb_console_t *fb, size_t x, size_t y,
                                                   const uint8_t *glyph_row, uint32_t fg, uint32_t bg) {
     if (y >= fb->height || !fb_buffer) return;
+    framebuffer_mark_dirty(fb, y, 1);
+
     uint32_t* dst = fb_buffer + y * fb->pitch + x;
     size_t w = fb->font->width;
 
@@ -61,12 +89,6 @@ static inline void framebuffer_draw_glyph_row_mem(fb_console_t *fb, size_t x, si
                 dst[byte*8+bit] = (bits & (0x80 >> bit)) ? fg : bg;
         }
     }
-}
-
-void framebuffer_blit(uint32_t* source, uint32_t* destination, uint32_t width, uint32_t height) {
-    if (!source || !destination) return;
-    for (uint32_t i = 0; i < width * height; i++)
-        destination[i] = source[i];
 }
 
 static void framebuffer_render_char_mem(fb_console_t *fb, size_t row, size_t col, char c, uint32_t fg, uint32_t bg) {
@@ -107,7 +129,7 @@ void framebuffer_put_char(fb_console_t *fb, char c) {
     if (fb->cursor_y >= max_rows)
         framebuffer_scroll_buffer(fb);
     else
-        framebuffer_blit(fb_buffer, fb->pixels, fb->width, fb->height);
+        framebuffer_flush(fb);
 }
 
 void framebuffer_write_string(fb_console_t *fb, ansii_state_t *ansi, const char *str, spinlock_t *framebuffer_lock) {

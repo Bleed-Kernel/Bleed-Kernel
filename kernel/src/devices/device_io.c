@@ -5,19 +5,22 @@
 long tty_read(device_t *dev, void *buf, size_t len) {
     tty_t *tty = dev->priv;
 
+    const int mode_canonical = tty->flags & TTY_CANNONICAL;
+    //const int mode_echo = tty->flags & TTY_ECHO;  might need it one day
+
     if (tty->in_head == tty->in_tail)
         return 0;
 
-    if (tty->flags & TTY_CANNONICAL) {
+    if (mode_canonical) {
         size_t i = tty->in_tail;
         int found = 0;
 
         while (i != tty->in_head) {
-            if (tty->inbuffer[i % TTY_BUFFER_SZ] == '\n') {
+            if (tty->inbuffer[i] == '\n') {
                 found = 1;
                 break;
             }
-            i++;
+            i = (i + 1) % TTY_BUFFER_SZ;
         }
 
         if (!found)
@@ -28,7 +31,7 @@ long tty_read(device_t *dev, void *buf, size_t len) {
     while (count < len && tty->in_tail != tty->in_head) {
         char c = tty->inbuffer[tty->in_tail++ % TTY_BUFFER_SZ];
         ((char *)buf)[count++] = c;
-        if ((tty->flags & TTY_CANNONICAL) && c == '\n')
+        if ((mode_canonical) && c == '\n')
             break;
     }
 
@@ -38,9 +41,10 @@ long tty_read(device_t *dev, void *buf, size_t len) {
 int tty_write(device_t *dev, const void *buf, size_t len) {
     tty_t *tty = dev->priv;
     const char *c = buf;
-    
+
+    void (*putc)(tty_t*, char) = tty->ops->putchar;
     for (size_t i = 0; i < len; i++){
-        tty->ops->putchar(tty, c[i]);
+        putc(tty, c[i]);
     }
 
     return len;

@@ -43,7 +43,9 @@ void tty_process_input(tty_t *tty, char c) {
         return;
     }
 
-    tty->inbuffer[tty->in_head++ % TTY_BUFFER_SZ] = c;
+    size_t head = tty->in_head;
+    tty->inbuffer[head] = c;
+    tty->in_head = (head + 1) % TTY_BUFFER_SZ;
 
     if (tty->flags & TTY_ECHO)
         tty->ops->putchar(tty, c);
@@ -65,22 +67,6 @@ void tty_init(tty_t *tty, const char *name,
     tty->device.priv  = tty;
     
     spinlock_init(&lock);
-}
-
-void tty_input_char(tty_t *tty, char c) {
-    if (c == '\b') {
-        if (tty->in_head != tty->in_tail) {
-            tty->in_head--;
-            if (tty->flags & TTY_ECHO)
-                tty->ops->putchar(tty, '\b');
-        }
-        return;
-    }
-
-    tty->inbuffer[tty->in_head++ % TTY_BUFFER_SZ] = c;
-
-    if (tty->flags & TTY_ECHO)
-        tty->ops->putchar(tty, c);
 }
 
 void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, const char *name, fb_console_t *fb, uint32_t flags) {

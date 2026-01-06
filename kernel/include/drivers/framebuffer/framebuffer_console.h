@@ -14,4 +14,7 @@ typedef struct {
 
     size_t cursor_x;
     size_t cursor_y;
+
+    size_t dirty_top;
+    size_t dirty_bottom;
 } fb_console_t;

@@ -3,7 +3,7 @@
 #include <string.h>
 
 static device_t *device_list[MAX_DEVICES];
-static unsigned int device_list_count = 0;   // faster to save hwo many devices we have than check every time we register a new one
+static size_t device_list_count = 0;   // faster to save hwo many devices we have than check every time we register a new one
 
 /// @brief register a new device
 /// @param device device structure
@@ -15,7 +15,8 @@ int device_register(device_t *device){
         return -MAX_DEVICES_REACHED;
 
     for (size_t i = 0; i < device_list_count; i++){
-        if (strcmp(device_list[i]->name, device->name) == 0){
+        if (device_list[i]->name == device->name || 
+            strcmp(device_list[i]->name, device->name) == 0){
             return -DEV_EXISTS;
         }
     }

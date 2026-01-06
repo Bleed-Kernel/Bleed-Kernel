@@ -7,7 +7,6 @@
 /// @param c target
 void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii_state_t *st, char c) {
     if (!fb || !st) return;
-
     if (st->esc) {
         if (c == '[') {
             st->csi = 1;
@@ -40,7 +39,7 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
 
         if (c == 'm') {
             int i = 0;
-            while (i <= st->param_count) {
+            while (i + 4 <= st->param_count) {
                 int p = st->params[i];
                 if (p == 0) {
                     fb->fg = 0xFFFFFFFF;

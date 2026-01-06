@@ -15,6 +15,5 @@ device_t *console_get_active_console(void){
 
 int console_write(const void *string){
     if (!active_console || !active_console->write) return -1;
-
     return active_console->write(active_console, string, strlen(string));
 }
