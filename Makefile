@@ -11,17 +11,17 @@ KERNEL_SYM := initrd/etc/kernel.sym
 
 MEMSZ = 256M
 
-CFLAGS := -g -O2 -Wall -Wpedantic -Werror -Wextra -std=gnu11 \
+CFLAGS := -g -O2 -Wall -Werror -Wextra -std=gnu11 \
           -nostdinc -ffreestanding -fno-stack-protector \
           -fno-stack-check -fno-lto -fno-PIC -fno-pie \
           -ffunction-sections -fdata-sections -fno-omit-frame-pointer \
           -m64 -march=x86-64 -mabi=sysv -mno-80387 -mno-mmx -mno-sse2 -mno-red-zone \
-          -mcmodel=kernel -I kernel/include -I klibc/include
+          -mcmodel=kernel -I kernel/include -I klibc/include -I kernel/src/vendor/uacpi/include
 
 LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 --gc-sections \
            -T kernel.lds
 
-KERNEL_C := $(shell find kernel -name '*.c')
+KERNEL_C := $(shell find kernel -name '*.c' ! -path "kernel/src/vendor/uacpi/*")
 KERNEL_S := $(shell find kernel -name '*.S')
 
 KLIBC_C := $(shell find klibc -name '*.c')
@@ -31,7 +31,11 @@ KERNEL_OBJ := $(patsubst %.c,$(OBJDIR)/%.o,$(KERNEL_C)) \
               $(patsubst %.S,$(OBJDIR)/%.o,$(KERNEL_S))
 KLIBC_OBJ := $(patsubst %.c,$(OBJDIR)/%.o,$(KLIBC_C)) \
              $(patsubst %.S,$(OBJDIR)/%.o,$(KLIBC_S))
-OBJ := $(KERNEL_OBJ) $(KLIBC_OBJ)
+
+UACPI_C := $(shell find kernel/src/vendor/uacpi -name '*.c')
+UACPI_OBJ := $(patsubst %.c,$(OBJDIR)/%.o,$(UACPI_C))
+
+OBJ := $(KERNEL_OBJ) $(KLIBC_OBJ) $(UACPI_OBJ)
 
 .PHONY: all
 all: $(IMAGE_NAME).iso
@@ -62,6 +66,10 @@ limine/limine:
 	git clone https://codeberg.org/Limine/Limine.git limine --branch=v10.x-binary --depth=1
 	$(MAKE) -C limine
 
+kernel/src/vendor/uacpi:
+	@git clone https://github.com/uACPI/uACPI.git $@
+	rm -rf kernel/src/vendor/uacpi/tests
+
 edk2-ovmf:
 	curl -L https://github.com/osdev0/edk2-ovmf-nightly/releases/latest/download/edk2-ovmf.tar.gz | gunzip | tar -xf -
 
@@ -69,7 +77,7 @@ edk2-ovmf:
 initrd: $(KERNEL_SYM)
 	tar -cf initrd/initrd.tar initrd/etc/splash.txt initrd/fonts/ttyfont.psf initrd/bin/verdict initrd/etc/kernel.sym
 
-$(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
+$(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd kernel/src/vendor/uacpi
 	rm -rf iso_root
 	mkdir -p iso_root/boot
 	cp -v $(KERNEL_BIN) iso_root/boot/
@@ -91,7 +99,7 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 
 .PHONY: run
 run: $(IMAGE_NAME).iso
-	qemu-system-x86_64 -cdrom $(IMAGE_NAME).iso --enable-kvm -cpu host -boot d -m $(MEMSZ) -serial stdio -display sdl -D qemu.log -d int -monitor telnet:127.0.0.1:8080,server,nowait
+	qemu-system-x86_64 -cdrom $(IMAGE_NAME).iso --enable-kvm -cpu host -boot d -m $(MEMSZ) -serial stdio -display sdl -d int -D qemu.log
 
 .PHONY: run-uefi
 run-uefi: edk2-ovmf $(IMAGE_NAME).iso

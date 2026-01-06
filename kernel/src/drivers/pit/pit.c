@@ -15,8 +15,6 @@ void pit_init(uint32_t frequency) {
 
     outb(0x40, divisor & 0xFF);       // Low byte of the divisor
     outb(0x40, (divisor >> 8) & 0xFF); // High byte of the divisor
-
-    kprintf(LOG_OK "PIT Initialized: %d Hz\n", frequency);
 }
 
 /// @brief Current countdown value of PIT-0

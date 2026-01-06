@@ -3,7 +3,10 @@
 #include <fs/vfs.h>
 #include <mm/heap.h>
 #include <mm/pmm.h>
+#include <fs/vfs.h>
 #include <mm/paging.h>
+#include <sched/scheduler.h>
+#include <gdt/gdt.h>
 #include <stdio.h>
 #include <ansii.h>
 #include <string.h>
@@ -88,4 +91,25 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
 read_phdr:
     kfree(phdr, phdr_size);
     return r;
+}
+
+// helpers
+
+INode_t *elf_get_from_path(const char *path){
+    INode_t *file = NULL;
+    path_t filepath = vfs_path_from_abs(path);
+
+    vfs_lookup(&filepath, &file);
+    if (file)
+        return file;
+    else
+        return NULL;
+}
+
+task_t *elf_sched(INode_t *file){
+    paddr_t cr3 = paging_create_address_space();
+
+    uintptr_t entry;
+    if (file != NULL) elf_load(file, cr3, &entry);
+    return sched_create_task(cr3, entry, USER_CS, USER_SS);
 }

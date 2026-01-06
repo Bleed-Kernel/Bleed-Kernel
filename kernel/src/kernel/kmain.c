@@ -9,7 +9,6 @@
 #include <mm/pmm.h>
 #include <mm/heap.h>
 #include <mm/paging.h>
-#include <self-test/ktests.h>
 #include <drivers/serial/serial.h>
 #include <drivers/pic/pic.h>
 #include <drivers/pit/pit.h>
@@ -30,11 +29,14 @@
 #include <tss/tss.h>
 #include <panic.h>
 
+#include "kmain.h"
+
 extern volatile struct limine_module_request module_request;
+extern volatile struct limine_rsdp_request rsdp_request;
+
 extern void init_sse(void);
 
 static tty_t tty0;
-static tty_fb_backend_t tty0_backend;
 
 void initrd_load(){ 
     if (!module_request.response || module_request.response->module_count == 0){
@@ -56,46 +58,6 @@ void scheduler_start(void) {
     sched_bootstrap((void *)rsp);
 }
 
-task_t *load_elf_from_initrd(const char *path){
-    INode_t *file = NULL;
-    path_t filepath = vfs_path_from_abs(path);
-
-    vfs_lookup(&filepath, &file);
-    paddr_t cr3 = paging_create_address_space();
-
-    uintptr_t entry;
-    if (file != NULL) elf_load(file, cr3, &entry);
-    return sched_create_task(cr3, entry, USER_CS, USER_SS);
-}
-
-void kernel_self_test(){
-    paging_test_self_test();
-    pmm_test_self_test();
-    pit_test_self_test();
-    scheduler_test_self_test();
-    vfs_test_self_test();
-
-    tty0.ops->clear(&tty0);
-}
-
-void console_init(){
-    fb_console_t fb = {
-        .pixels = framebuffer_get_addr(0),
-        .width = framebuffer_get_width(0),
-        .height = framebuffer_get_height(0),
-        .pitch = framebuffer_get_pitch(0),
-        .font = psf_get_current_font(),
-        .fg = 0xFFFFFF,
-        .bg = 0x000000,
-    };
-
-    tty_init_framebuffer(&tty0, &tty0_backend, "tty0", &fb, TTY_ECHO | TTY_CANNONICAL);
-    device_register(&tty0.device);
-
-    device_t *tty = device_get_by_name("tty0");
-    console_set(tty);
-}
-
 void kmain() {
     asm volatile ("cli");
     init_sse();
@@ -107,7 +69,7 @@ void kmain() {
     initrd_load();
     psf_init("initrd/fonts/ttyfont.psf");
     stack_trace_load_symbols("initrd/etc/kernel.sym");
-    console_init();
+    tty0 = kernel_console_init();
 
     gdt_init();
     idt_init();
@@ -123,7 +85,9 @@ void kmain() {
     kernel_self_test();
     PS2_Keyboard_init();
 
-    load_elf_from_initrd("initrd/bin/verdict");
+    tty0.ops->clear(&tty0);
+
+    elf_sched(elf_get_from_path("initrd/bin/verdict"));
 
     for(;;){
         sched_yield();
