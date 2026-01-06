@@ -1,5 +1,6 @@
 #include <sched/scheduler.h>
 #include <panic.h>
+#include <stdio.h>
 #include <drivers/serial/serial.h>
 #include <ansii.h>
 
@@ -19,13 +20,12 @@ void exit(void) {
     current_task->wait_queue = NULL;
 
     sched_mark_task_dead();
-    sched_yield();
+    //sched_yield();
 
     serial_printf(
         "%sTask %d has exited, marking as dead for reaping\n",
         LOG_INFO,
         current_task->id
     );
-
     for (;;) { asm volatile ("hlt"); }
 }

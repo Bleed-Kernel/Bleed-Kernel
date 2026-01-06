@@ -45,6 +45,7 @@ task_t *sched_get_task(uint64_t pid) {
 task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss) {
     task_t *task = kmalloc(sizeof(task_t));
     if (!task) ke_panic("Failed to allocate task");
+    memset(task, 0, sizeof(task_t));
 
     task->id = next_pid++;
     task->state = TASK_READY;

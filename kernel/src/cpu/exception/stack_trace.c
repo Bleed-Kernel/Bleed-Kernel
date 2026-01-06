@@ -65,8 +65,6 @@ const char *stack_trace_symbol_lookup(uint64_t address, uint64_t *sym_addr_out){
 }
 
 void stack_trace_print(uint64_t *rbp) {
-    kprintf("\n%sStack trace:%s\n", ORANGE_FG, RESET);
-
     for (int i = 0; i < 16 && rbp; i++) {
         if ((uint64_t)rbp < 0x1000 || ((uint64_t)rbp & 0xF)) break;
 
