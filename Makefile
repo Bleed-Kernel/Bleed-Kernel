@@ -107,7 +107,7 @@ run-uefi: edk2-ovmf $(IMAGE_NAME).iso
 
 .PHONY: clean
 clean:
-	rm -rf bin $(IMAGE_NAME).iso iso_root edk2-ovmf
+	rm -rf bin $(IMAGE_NAME).iso iso_root
 	rm -f bin/kernel.sym.txt initrd/etc/kernel.sym
 	rm -f tools/mksymtab
 	find kernel klibc -name '*.o' -delete
