@@ -11,3 +11,6 @@ void sys_yield();
 
 uint64_t sys_spawn(uint64_t user_path_ptr);
 long sys_waitpid(uint64_t pid);
+
+void sys_shutdown(void);
+void sys_reboot(void);

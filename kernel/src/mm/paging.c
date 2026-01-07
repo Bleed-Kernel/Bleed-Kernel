@@ -10,10 +10,6 @@
 #include <panic.h>
 #include <sched/scheduler.h>
 
-#define PAGE_SIZE_4K       4096
-#define PAGE_SIZE_2M       (512 * PAGE_SIZE_4K)
-#define PADDR_ENTRY_MASK   0x000FFFFFFFFFF000ULL
-
 paddr_t kernel_page_map = 0;
 
 extern volatile struct limine_memmap_request memmap_request;
@@ -21,7 +17,7 @@ extern volatile struct limine_memmap_request memmap_request;
 /// @brief allocate an empty page frame and return the paddr
 /// @param vaddr out virtual address
 /// @return physical address
-static uint64_t paging_alloc_empty_frame(void **vaddr) {
+uint64_t paging_alloc_empty_frame(void **vaddr) {
     paddr_t paddr = pmm_alloc_pages(1);
     if(!paddr)
         kprintf(LOG_ERROR "Page Allocation Failed, Out of Memory?\n");

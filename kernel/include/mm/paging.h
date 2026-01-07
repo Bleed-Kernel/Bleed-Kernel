@@ -13,6 +13,10 @@
 #define PAGE_USER_RW        (PTE_WRITABLE | PTE_USER)
 #define PAGE_USER_RO        (PTE_USER)
 
+#define PAGE_SIZE_4K       4096
+#define PAGE_SIZE_2M       (512 * PAGE_SIZE_4K)
+#define PADDR_ENTRY_MASK   0x000FFFFFFFFFF000ULL
+
 #define PAGE_ALIGN_UP(n)   (((n) + (PAGE_SIZE-1))/PAGE_SIZE*PAGE_SIZE)
 #define PAGE_ALIGN_DOWN(n) ((n)/PAGE_SIZE*PAGE_SIZE)
 
@@ -48,3 +52,5 @@ void paging_switch_address_space(paddr_t cr3);
 /// @brief free address space CR3 provided
 /// @param cr3 target
 void paging_destroy_address_space(paddr_t cr3);
+
+uint64_t paging_alloc_empty_frame(void **vaddr);

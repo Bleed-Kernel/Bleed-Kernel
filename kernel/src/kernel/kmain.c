@@ -26,6 +26,7 @@
 #include <cpu/stack_trace.h>
 #include <syscalls/syscall.h>
 #include <exec/elf_load.h>
+#include <ACPI/acpi.h>
 #include <tss/tss.h>
 #include <panic.h>
 
@@ -65,6 +66,7 @@ void kmain() {
     pmm_init();
 
     reinit_paging();
+    acpi_init();
     vfs_mount_root();
     initrd_load();
     psf_init("initrd/fonts/ttyfont.psf");
@@ -84,6 +86,7 @@ void kmain() {
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS);
     kernel_self_test();
     PS2_Keyboard_init();
+
 
     tty0.ops->clear(&tty0);
 
