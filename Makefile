@@ -99,7 +99,7 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd kernel/src/vendor/uacpi
 
 .PHONY: run
 run: $(IMAGE_NAME).iso
-	qemu-system-x86_64 -cdrom $(IMAGE_NAME).iso --enable-kvm -cpu host -boot d -m $(MEMSZ) -serial stdio -display sdl -d int -D qemu.log
+	qemu-system-x86_64 -cdrom $(IMAGE_NAME).iso -boot d -m $(MEMSZ) -serial stdio -display sdl
 
 .PHONY: run-uefi
 run-uefi: edk2-ovmf $(IMAGE_NAME).iso
@@ -110,7 +110,6 @@ run-uefi: edk2-ovmf $(IMAGE_NAME).iso
 		-boot d \
 		-serial stdio \
 		-display sdl \
-		--enable-kvm \
 		$(QEMUFLAGS)
 
 .PHONY: clean
