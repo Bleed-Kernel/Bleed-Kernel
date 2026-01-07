@@ -4,7 +4,7 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <drivers/framebuffer/framebuffer_console.h>
 #include <mm/spinlock.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <panic.h>
 
 #include "blit.h"

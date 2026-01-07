@@ -1,6 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 
 char *user_copy_string(const char *user_ptr, size_t max_len) {
     if (!user_ptr) return NULL;

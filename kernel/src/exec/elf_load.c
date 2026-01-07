@@ -1,7 +1,7 @@
 #include <exec/elf.h>
 #include <stdint.h>
 #include <fs/vfs.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <mm/pmm.h>
 #include <fs/vfs.h>
 #include <mm/paging.h>

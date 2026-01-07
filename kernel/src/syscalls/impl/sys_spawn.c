@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <sched/scheduler.h>
 #include <fs/vfs.h>
 #include <drivers/serial/serial.h>

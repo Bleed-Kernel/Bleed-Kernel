@@ -5,7 +5,7 @@
 #include <drivers/serial/serial.h>
 #include <ansii.h>
 #include <status.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 
 #define TEST_DIR "/vfs_test"
 #define TEST_FILE "test_file.txt"

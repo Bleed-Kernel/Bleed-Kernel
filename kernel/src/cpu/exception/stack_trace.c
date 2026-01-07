@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <ansii.h>
 #include <drivers/serial/serial.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <fs/vfs.h>
 
 struct ksym{

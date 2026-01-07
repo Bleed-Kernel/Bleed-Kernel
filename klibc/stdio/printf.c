@@ -12,7 +12,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <lib/nanoprintf.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <drivers/serial/serial.h>
 #include <console/console.h>
 #include <devices/type/tty_device.h>

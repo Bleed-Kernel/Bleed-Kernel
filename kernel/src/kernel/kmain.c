@@ -7,7 +7,7 @@
 #include <idt/idt.h>
 #include <string.h>
 #include <mm/pmm.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <mm/paging.h>
 #include <drivers/serial/serial.h>
 #include <drivers/pic/pic.h>

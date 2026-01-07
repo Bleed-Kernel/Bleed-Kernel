@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <fs/vfs.h>
 #include <status.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <ansii.h>

@@ -1,5 +1,5 @@
 #include <sched/scheduler.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <panic.h>
 #include <mm/paging.h>
 #include <stdio.h>

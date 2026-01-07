@@ -1,6 +1,6 @@
 #include <sched/scheduler.h>
 #include <drivers/serial/serial.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <ansii.h>
 #include <sched/scheduler.h>
 #include <panic.h>

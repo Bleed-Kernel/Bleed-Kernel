@@ -1,6 +1,6 @@
 #include <string.h>
 #include <devices/devices.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <devices/type/tty_device.h>
 
 uint64_t sys_write(uint64_t fd, uint64_t user_buf, uint64_t len) {

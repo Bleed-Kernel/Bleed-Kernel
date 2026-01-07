@@ -6,7 +6,7 @@
 #include <cpu/io.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <stdarg.h>
 #include <format.h>
 #include <string.h>

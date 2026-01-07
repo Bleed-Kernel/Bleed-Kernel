@@ -1,5 +1,5 @@
 #include <fs/vfs.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <string.h>
 #include <stdio.h>
 #include <status.h>

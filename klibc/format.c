@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <mm/heap.h>
+#include <mm/kalloc.h>
 #include <stddef.h>
 
 char* utoa_base(uint64_t value, int base, int uppercase) {
