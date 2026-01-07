@@ -72,11 +72,11 @@ edk2-ovmf:
 initrd: $(KERNEL_SYM)
 	tar -cf initrd/initrd.tar initrd/etc/splash.txt initrd/fonts/ttyfont.psf initrd/bin/verdict initrd/etc/kernel.sym
 
-$(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd kernel/src/vendor/uacpi
+$(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 	rm -rf iso_root
 	mkdir -p iso_root/boot
 	cp -v $(KERNEL_BIN) iso_root/boot/
-	cp -v wallpaper.jpg iso_root/
+	cp -v wallpaper.png iso_root/
 	mkdir -p iso_root/boot/limine
 	cp -v limine.conf limine/limine-bios.sys limine/limine-bios-cd.bin limine/limine-uefi-cd.bin iso_root/boot/limine/
 	mkdir -p iso_root/EFI/BOOT
@@ -94,7 +94,7 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd kernel/src/vendor/uacpi
 
 .PHONY: run
 run: $(IMAGE_NAME).iso
-	qemu-system-x86_64 -cdrom $(IMAGE_NAME).iso -boot d -m $(MEMSZ) -serial stdio -display sdl
+	qemu-system-x86_64 -cdrom $(IMAGE_NAME).iso -boot d -m $(MEMSZ) -serial stdio
 
 .PHONY: run-uefi
 run-uefi: edk2-ovmf $(IMAGE_NAME).iso
