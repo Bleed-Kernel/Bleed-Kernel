@@ -1,7 +1,6 @@
 .vscode/
 bin/*
 *.iso
-edk2-ovmf
 limine/
 *.tar
 qemu.log
