@@ -71,6 +71,7 @@ void kmain() {
     initrd_load();
     psf_init("initrd/fonts/ttyfont.psf");
     stack_trace_load_symbols("initrd/etc/kernel.sym");
+    
     tty0 = kernel_console_init();
 
     gdt_init();
@@ -87,9 +88,7 @@ void kmain() {
     kernel_self_test();
     PS2_Keyboard_init();
 
-
     tty0.ops->clear(&tty0);
-
     elf_sched(elf_get_from_path("initrd/bin/verdict"));
 
     for(;;){

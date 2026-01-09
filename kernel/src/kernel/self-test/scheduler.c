@@ -28,7 +28,7 @@ static void sched_test_task() {
 }
 
 void scheduler_test_self_test(void) {
-    kprintf(LOG_INFO "Scheduler Self Test begin\n");
+    serial_printf(LOG_INFO "Scheduler Self Test begin\n");
 
     for (size_t i = 0; i < SCHED_TEST_TASKS; i++)
         task_counters[i] = 0;
@@ -40,7 +40,7 @@ void scheduler_test_self_test(void) {
         while (id == 0 || id == 1)
             id = sched_create_task(kernel_page_map, (uint64_t)sched_test_task, KERNEL_CS, KERNEL_SS)->id;
 
-        kprintf(LOG_INFO "Created test task %lu with ID %llu\n", i, id);
+        serial_printf(LOG_INFO "Created test task %lu with ID %llu\n", i, id);
     }
 
     while (1) {
@@ -57,11 +57,11 @@ void scheduler_test_self_test(void) {
     // verify it went well
     for (size_t i = 0; i < SCHED_TEST_TASKS; i++) {
         if (task_counters[i] != TASK_ITERATIONS){
-            kprintf("Task %zu did not complete (counter=%d)\n", i, task_counters[i]);
+            serial_printf("Task %zu did not complete (counter=%d)\n", i, task_counters[i]);
             ke_panic("Scheduler Failure in Boot Test");
         }
-        kprintf(LOG_INFO "Task %lu counter=%d\n", i, task_counters[i]);
+        serial_printf(LOG_INFO "Task %lu counter=%d\n", i, task_counters[i]);
     }
 
-    kprintf(LOG_OK "Scheduler Test Passed\n");
+    serial_printf(LOG_OK "Scheduler Test Passed\n");
 }

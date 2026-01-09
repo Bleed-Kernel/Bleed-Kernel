@@ -20,7 +20,7 @@ tty_t kernel_console_init(){
     device_register(&tty0.device);
 
     device_t *tty = device_get_by_name("tty0");
-    console_set(tty);
+    console_set(tty, tty0);
     
     return tty0;
 }

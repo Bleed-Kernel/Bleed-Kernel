@@ -60,3 +60,62 @@ void kprintf(const char *fmt, ...) {
 
     serial_printf("%s", buf);
 }
+
+void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...) {
+    char *buf = NULL;
+    size_t size = 256;
+
+    while (1) {
+        buf = kmalloc(size);
+        if (!buf) return;
+
+        va_list args;
+        va_start(args, fmt);
+        int written = npf_vsnprintf(buf, size, fmt, args);
+        va_end(args);
+
+        if (written < 0) {
+            kfree(buf, size);
+            return;
+        }
+
+        if ((size_t)written < size)
+            break;
+
+        kfree(buf, size);
+        size <<= 1;
+    }
+
+    device_t *dev = device_get_by_name("tty0");
+    if (!dev) goto out;
+
+    tty_t *tty = dev->priv;
+    if (!tty || !tty->backend) goto out;
+
+    tty_fb_backend_t *b = tty->backend;
+    fb_console_t *fb = &b->fb;
+    ansii_state_t *ansi = &b->ansi;
+    spinlock_t *lock = &b->fb_lock;
+
+    uint64_t cols = fb->width / fb->font->width;
+
+    if (x >= cols)
+        goto out;
+
+    fb->cursor_x = x;
+    fb->cursor_y = y;
+
+    size_t len = strlen(buf);
+    size_t max = cols - fb->cursor_x;
+    if (len > max)
+        buf[max] = '\0';
+
+    framebuffer_write_string(fb, ansi, buf, lock);
+
+out:
+    serial_printf("%s\n", buf);
+    kfree(buf, size);
+}
+
+
+

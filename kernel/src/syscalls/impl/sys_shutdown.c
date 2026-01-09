@@ -3,7 +3,6 @@
 #include <stdio.h>
 
 void sys_shutdown(void) {
-    kprintf("Bleed Kernel, Shutting Down Safely!\n");
     acpi_shutdown();
 
     while (1) {

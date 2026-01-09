@@ -14,7 +14,7 @@
 #define TEMP_CONTENT "Temporary drop test"
 
 void vfs_test_self_test(void) {
-    kprintf(LOG_INFO "VFS Self Test begin\n");
+    serial_printf(LOG_INFO "VFS Self Test begin\n");
 
     // create test directory under vfs_root
     INode_t* test_dir_inode = NULL;
@@ -24,7 +24,7 @@ void vfs_test_self_test(void) {
 
     // Persist directory for shell access
     test_dir_inode->shared = 1;
-    kprintf(LOG_INFO "VFS: created directory %s\n", TEST_DIR);
+    serial_printf(LOG_INFO "VFS: created directory %s\n", TEST_DIR);
 
     // create permanent test file
     char file_path_str[64];
@@ -47,7 +47,7 @@ void vfs_test_self_test(void) {
     // Test filesize accuracy
     size_t reported_size = vfs_filesize(test_file_inode);
     if (reported_size != content_len) ke_panic("VFS: filesize mismatch for permanent file");
-    kprintf(LOG_INFO "VFS: created permanent file %s with correct size %zu\n", file_path_str, reported_size);
+    serial_printf(LOG_INFO "VFS: created permanent file %s with correct size %zu\n", file_path_str, reported_size);
 
     char temp_path_str[64];
     size_t temp_len = strlen(TEMP_FILE);
@@ -70,12 +70,12 @@ void vfs_test_self_test(void) {
     reported_size = vfs_filesize(temp_inode);
     if (reported_size != temp_content_len) ke_panic("VFS: filesize mismatch for temp file");
 
-    kprintf(LOG_INFO "VFS: created temporary file %s with correct size %zu\n", temp_path_str, reported_size);
+    serial_printf(LOG_INFO "VFS: created temporary file %s with correct size %zu\n", temp_path_str, reported_size);
 
     // Drop the temp file
     vfs_drop(temp_inode);
     if (temp_inode->shared != 0) ke_panic("VFS: temp file drop failed");
 
-    kprintf(LOG_OK "Temporary drop test passed\n");
-    kprintf(LOG_OK "VFS self-test PASSED\n");
+    serial_printf(LOG_OK "Temporary drop test passed\n");
+    serial_printf(LOG_OK "VFS self-test PASSED\n");
 }
