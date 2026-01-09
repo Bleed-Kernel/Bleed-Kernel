@@ -7,6 +7,9 @@
 
 #define KERNEL_STACK_SIZE   8196
 
+#define USER_STACK_TOP 0x00007ffffffff000ULL
+#define USER_STACK_SIZE 16384
+
 #define MAX_TASKS           64
 #define QUANTUM             10
 

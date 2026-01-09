@@ -5,6 +5,7 @@
 #include <mm/pmm.h>
 #include <fs/vfs.h>
 #include <mm/paging.h>
+#include <mm/kalloc.h>
 #include <sched/scheduler.h>
 #include <gdt/gdt.h>
 #include <stdio.h>
@@ -78,11 +79,32 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
                 kfree(load_buffer, segment_bytes);
                 goto read_phdr;
             }
-            
-            for (size_t i = 0; i < segment_bytes / PAGE_SIZE; i++){
-                size_t off= (i * PAGE_SIZE);
-                paging_map_page(cr3, vaddr_to_paddr(load_buffer + off), vert_segment_start + off, pflags);
+
+            for (size_t j = 0; j < segment_bytes / PAGE_SIZE; j++){
+                size_t off = j * PAGE_SIZE;
+
+                // allocate a page for user-space
+                paddr_t phys = pmm_alloc_pages(1);
+                if (!phys) {
+                    r = -OUT_OF_MEMORY;
+                    kfree(load_buffer, segment_bytes);
+                    goto read_phdr;
+                }
+
+                // map page into task page table
+                paging_map_page(cr3, phys, vert_segment_start + off, pflags);
+
+                // copy contents from load_buffer into newly mapped page
+                size_t copy_size = PAGE_SIZE;
+                if (off == 0 && vert_offset != 0)
+                    copy_size -= vert_offset;
+
+                memcpy((void*)paddr_to_vaddr(phys) + (off == 0 ? vert_offset : 0),
+                       load_buffer + off,
+                       copy_size);
             }
+
+            kfree(load_buffer, segment_bytes);
         }
     }
 
@@ -111,5 +133,13 @@ task_t *elf_sched(INode_t *file){
 
     uintptr_t entry;
     if (file != NULL) elf_load(file, cr3, &entry);
-    return sched_create_task(cr3, entry, USER_CS, USER_SS);
+
+    task_t *task = sched_create_task(cr3, entry, USER_CS, USER_SS);
+
+    uint64_t *user_stack = (uint64_t *)(USER_STACK_TOP - USER_STACK_SIZE + USER_STACK_SIZE - 16);
+    user_stack[0] = 0;
+    user_stack[1] = 0;
+
+    task->context->rsp = (uint64_t)user_stack;
+    return task;
 }

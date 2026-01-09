@@ -7,9 +7,6 @@
 
 #include "priv_scheduler.h"
 
-#define USER_STACK_TOP 0x00007ffffffff000ULL
-#define USER_STACK_SIZE 16384
-
 extern task_t *task_queue;
 extern task_t *task_list_head;
 static uint64_t next_pid = 1;

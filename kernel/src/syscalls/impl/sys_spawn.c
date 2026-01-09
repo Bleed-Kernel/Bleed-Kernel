@@ -13,19 +13,12 @@ uint64_t sys_spawn(uint64_t user_path_ptr) {
     char *kpath = user_copy_string((const char *)user_path_ptr, 256);
     if (!kpath) return -1;
 
-    INode_t *file = NULL;
-    path_t filepath = vfs_path_from_abs(kpath);
-    vfs_lookup(&filepath, &file);
+    INode_t *file = elf_get_from_path(kpath);
     if (!file) return -1;
 
-    paddr_t cr3 = paging_create_address_space();
-    uintptr_t entry;
+    task_t *child = elf_sched(file);
+    if (!child) return -1;
 
-    int elf_load_ret = elf_load(file, cr3, &entry);
-    if (elf_load_ret < 0)
-        return elf_load_ret;
-    
-    task_t *child = sched_create_task(cr3, entry, USER_CS, USER_SS);
     child->wait_queue = NULL;
     child->state = TASK_READY;
 
@@ -33,3 +26,4 @@ uint64_t sys_spawn(uint64_t user_path_ptr) {
 
     return child->id;
 }
+
