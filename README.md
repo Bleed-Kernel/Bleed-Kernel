@@ -17,7 +17,7 @@ A 64-bit Operating System in C using the Limine Bootloader for UEFI and BIOS sys
 - [x]  Review Kernel Code (Quality Assurance)
 - [x]  Kernel Thread Context Switcher
 - [x]  ELF Loading
-- [ ]  ACPI
+- [x]  ACPI
 - [ ]  APIC
 - [ ]  HPET
 - [ ]  SMP
