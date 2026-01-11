@@ -75,9 +75,8 @@ static void tty_fb_putchar(tty_t *tty, char c) {
     framebuffer_ansi_char(&b->fb, &b->fb_lock, &b->ansi, c);
 }
 
-static void tty_fb_clear(tty_t *tty) {
+void fb_clear(fb_console_t *fb) {
     uint32_t* buffer = framebuffer_get_buffer();
-    fb_console_t *fb = &((tty_fb_backend_t *)tty->backend)->fb;
 
     for (uint64_t y = 0; y < fb->height; y++)
         for (uint64_t x = 0; x < fb->width; x++)
@@ -91,7 +90,6 @@ static void tty_fb_clear(tty_t *tty) {
 
 static struct tty_ops fb_ops = {
     .putchar = tty_fb_putchar,
-    .clear = tty_fb_clear,
 };
 
 void tty_process_input(tty_t *tty, char c) {

@@ -87,11 +87,9 @@ void kmain() {
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS);
     kernel_self_test();
     PS2_Keyboard_init();
-
-    tty0.ops->clear(&tty0);
-
+    
+    kprintf("\x1b[Jm");
     elf_sched(elf_get_from_path("initrd/bin/verdict"));
-
     for(;;){
         sched_yield();
     }

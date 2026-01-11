@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <drivers/framebuffer/framebuffer.h>
+#include <console/console.h>
 #include <drivers/framebuffer/framebuffer_console.h>
 
 /// @brief evaluate c and track its ansii state
@@ -62,6 +63,11 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
             st->csi = 0;
             return;
         }
+
+        if (c == 'J'){
+            fb_clear(fb);
+            return;
+        }
     }
 
     if (c == 0x1B) {
@@ -72,7 +78,7 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
     asm volatile("cli");
     unsigned long flags = irq_push();
     spinlock_acquire(framebuffer_lock);
-    framebuffer_put_char(fb, c);
+        framebuffer_put_char(fb, c);
     spinlock_release(framebuffer_lock);
     irq_restore(flags);
 }

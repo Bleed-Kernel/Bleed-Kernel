@@ -15,7 +15,7 @@ void acpi_poweroff_fallback(){
     // inform the user they can do it manually.
     // its also a cute nod to history from the windows 9x era
     tty_t tty = console_get_active_tty();
-    tty.ops->clear(&tty);
+    kprintf("\x1b[Jm");
 
     tty_fb_backend_t *b = tty.backend;
     fb_console_t *fb = &b->fb;

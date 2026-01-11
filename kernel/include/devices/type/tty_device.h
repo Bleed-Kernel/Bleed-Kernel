@@ -22,7 +22,6 @@ typedef struct {
 struct tty_ops {
     void (*putchar)(tty_t *, char c);
     void (*write)(tty_t *, const char *s);
-    void (*clear)(tty_t *);
 };
 
 typedef struct tty{
@@ -43,3 +42,5 @@ typedef struct tty{
 
 void tty_process_input(tty_t *tty, char c);
 void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, const char *name, fb_console_t *fb, uint32_t flags);
+
+void fb_clear(fb_console_t *fb);

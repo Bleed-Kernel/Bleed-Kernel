@@ -7,7 +7,7 @@ static size_t device_list_count = 0;   // faster to save hwo many devices we hav
 
 /// @brief register a new device
 /// @param device device structure
-/// @return success
+/// @return df
 int device_register(device_t *device){
     if (!device || !device->name)
         return -DEV_EXISTS;
