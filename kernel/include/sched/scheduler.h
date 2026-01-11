@@ -52,12 +52,11 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
 extern void sched_bootstrap(void *rsp);
 extern cpu_context_t *sched_tick(cpu_context_t *context);
 void scheduler_reap(void);
-void sched_mark_task_dead();
+void sched_mark_task_dead(task_t *task);
 task_t *sched_get_task(uint64_t pid);
 
 // api
 const char *task_state_str(task_state_t state);
-task_t *get_task_by_id(uint64_t tid);
 uint64_t get_task_count();
 task_t *get_current_task();
 void sched_yield(void);

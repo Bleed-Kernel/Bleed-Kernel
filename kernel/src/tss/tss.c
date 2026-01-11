@@ -14,8 +14,8 @@ void tss_init(){
     tss_segment->base_middle = tss_ptr>>16;
     tss_segment->base_high   = tss_ptr>>24;
     tss_segment->base_high2  = tss_ptr>>32;
-    tss_segment->access = 0x89;
-    tss_segment->_reserved = 0;
+    tss_segment->access      = 0x89;
+    tss_segment->_reserved   = 0;
     tss_segment->limit_flags = 0x20;
     __asm__ volatile(
         "ltr %0"

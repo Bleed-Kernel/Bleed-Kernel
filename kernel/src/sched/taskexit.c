@@ -19,8 +19,8 @@ void exit(void) {
 
     current_task->wait_queue = NULL;
 
-    sched_mark_task_dead();
-    //sched_yield();
+    sched_mark_task_dead(current_task);
+    sched_yield();
 
     serial_printf(
         "%sTask %d has exited, marking as dead for reaping\n",

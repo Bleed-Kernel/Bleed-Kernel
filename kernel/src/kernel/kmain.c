@@ -95,6 +95,5 @@ void kmain() {
         sched_yield();
     }
 
-    ke_panic("Kernel Main Thread Died");
     return;
 }

@@ -19,6 +19,7 @@ enum {
     SYS_WAITPID,
     SYS_SHUTDOWN,
     SYS_REBOOT,
+    SYS_TKILL,
 };
 
 #pragma GCC diagnostic push
@@ -32,7 +33,8 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_SPAWN, sys_spawn),
     SYSCALL(SYS_WAITPID, sys_waitpid),
     SYSCALL(SYS_SHUTDOWN, sys_shutdown),
-    SYSCALL(SYS_REBOOT, sys_reboot)
+    SYSCALL(SYS_REBOOT, sys_reboot),
+    SYSCALL(SYS_TKILL, sys_tkill)
 };
 #pragma GCC diagnostic pop
 

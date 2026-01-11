@@ -4,6 +4,7 @@
 #include <ansii.h>
 #include <sched/scheduler.h>
 #include <panic.h>
+#include <stdio.h>
 #include "priv_scheduler.h"
 
 extern task_t *task_queue;
@@ -35,18 +36,28 @@ static void unlink_from_list(task_t **head, task_t *task) {
         *head = (*head)->next;
 }
 
-void sched_mark_task_dead(void) {
-    current_task->state = TASK_DEAD;
-    current_task->dead_next = NULL;
-
-    if (!dead_task_head) {
-        dead_task_head = current_task;
-        dead_task_tail = current_task;
+void sched_mark_task_dead(task_t *task) {
+    if (!task){
+        kprintf(LOG_ERROR "Nothing Happend, This task does not exist\n");
         return;
     }
 
-    dead_task_tail->dead_next = current_task;
-    dead_task_tail = current_task;
+    if (task->id == 0 || task->id == 1){
+        kprintf("%sYou cannot kill Supervisor Tasks (Attempted to kill PID: %lld)\n", LOG_ERROR, task->id);
+        return;
+    }
+
+    task->state = TASK_DEAD;
+    task->dead_next = NULL;
+
+    if (!dead_task_head) {
+        dead_task_head = task;
+        dead_task_tail = task;
+        return;
+    }
+
+    dead_task_tail->dead_next = task;
+    dead_task_tail = task;
 }
 
 void scheduler_reap(void) {

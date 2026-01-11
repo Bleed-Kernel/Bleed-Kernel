@@ -14,3 +14,5 @@ long sys_waitpid(uint64_t pid);
 
 void sys_shutdown(void);
 void sys_reboot(void);
+
+void sys_tkill(long pid);
