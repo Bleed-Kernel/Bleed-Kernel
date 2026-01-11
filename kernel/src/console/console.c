@@ -4,15 +4,15 @@
 #include <stddef.h>
 
 static tty_t active_tty;
-static device_t *active_console = NULL;
+static INode_t *active_console = NULL;
 
-void console_set(device_t *console_device, tty_t tty_device){
+void console_set(INode_t *console_device, tty_t tty_device){
     active_console = console_device;
     active_tty = tty_device;
     return;
 }
 
-device_t *console_get_active_console(void){
+INode_t *console_get_active_console(void){
     return active_console;
 }
 tty_t console_get_active_tty(void){
@@ -20,6 +20,6 @@ tty_t console_get_active_tty(void){
 }
 
 int console_write(const void *string){
-    if (!active_console || !active_console->write) return -1;
-    return active_console->write(active_console, string, strlen(string));
+    if (!active_console || !active_console->ops->write) return -1;
+    return active_console->ops->write(active_console, string, strlen(string), 0);
 }

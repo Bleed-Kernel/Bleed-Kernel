@@ -6,8 +6,9 @@
 #include <mm/spinlock.h>
 #include <stdio.h>
 
-long tty_read(device_t *dev, void *buf, size_t len) {
-    tty_t *tty = dev->priv;
+long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
+    (void)offset;
+    tty_t *tty = dev->internal_data;
 
     const int mode_canonical = tty->flags & TTY_CANNONICAL;
     //const int mode_echo = tty->flags & TTY_ECHO;  might need it one day
@@ -42,20 +43,21 @@ long tty_read(device_t *dev, void *buf, size_t len) {
     return count;
 }
 
-int tty_write(device_t *dev, const void *buf, size_t len) {
-    tty_t *tty = dev->priv;
-    const char *c = buf;
+long tty_inode_write(INode_t* inode, const void* in_buffer, size_t size, size_t offset) {
+    (void) offset;
+    tty_t *tty = inode->internal_data;
+    const char *c = in_buffer;
 
     void (*putc)(tty_t*, char) = tty->ops->putchar;
-    for (size_t i = 0; i < len; i++){
+    for (size_t i = 0; i < size; i++){
         putc(tty, c[i]);
     }
 
-    return len;
+    return size;
 }
 
-int tty_ioctl(device_t *dev, unsigned long req, void *arg){
-    tty_t *tty = dev->priv;
+int tty_ioctl(INode_t *dev, unsigned long req, void *arg){
+    tty_t *tty = dev->internal_data;
 
     switch (req) {
     case 0:
@@ -75,6 +77,15 @@ static void tty_fb_putchar(tty_t *tty, char c) {
     framebuffer_ansi_char(&b->fb, &b->fb_lock, &b->ansi, c);
 }
 
+struct tty_ops tty_ops = {
+    .putchar = tty_fb_putchar,
+};
+
+struct INodeOps tty_inode_ops = {
+    .write = tty_inode_write,
+    .read = tty_read,
+};
+
 void fb_clear(fb_console_t *fb) {
     uint32_t* buffer = framebuffer_get_buffer();
 
@@ -87,10 +98,6 @@ void fb_clear(fb_console_t *fb) {
 
     framebuffer_blit(buffer, fb->pixels, fb->width, fb->height);
 }
-
-static struct tty_ops fb_ops = {
-    .putchar = tty_fb_putchar,
-};
 
 void tty_process_input(tty_t *tty, char c) {
     if (c == '\b') {
@@ -113,30 +120,25 @@ void tty_process_input(tty_t *tty, char c) {
         tty->ops->putchar(tty, c);
 }
 
-void tty_init(tty_t *tty, const char *name,
-              struct tty_ops *ops, void *backend,
+void tty_init(tty_t *tty, void *backend,
               spinlock_t lock, uint32_t flags) {
     memset(tty, 0, sizeof(*tty));
 
     tty->flags   = flags;
-    tty->ops     = ops;
     tty->backend = backend;
-
-    tty->device.name  = name;
-    tty->device.read  = tty_read;
-    tty->device.write = tty_write;
-    tty->device.ioctl = tty_ioctl;
-    tty->device.priv  = tty;
+    tty->device.ops = &tty_inode_ops;
+    tty->ops        = &tty_ops;
+    tty->device.internal_data  = tty;
 
     spinlock_init(&lock);
 }
 
-void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, const char *name, fb_console_t *fb, uint32_t flags) {
+void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, fb_console_t *fb, uint32_t flags) {
     spinlock_t framebuffer_lock = {0};
 
     backend->fb   = *fb;
     backend->ansi = (ansii_state_t){0};
     backend->fb_lock = framebuffer_lock;
 
-    tty_init(tty, name, &fb_ops, backend, backend->fb_lock, flags);
+    tty_init(tty, backend, backend->fb_lock, flags);
 }

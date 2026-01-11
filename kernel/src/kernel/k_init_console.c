@@ -16,10 +16,10 @@ tty_t kernel_console_init(){
         .bg = 0x000000,
     };
 
-    tty_init_framebuffer(&tty0, &tty0_backend, "tty0", &fb, TTY_ECHO | TTY_CANNONICAL);
-    device_register(&tty0.device);
+    tty_init_framebuffer(&tty0, &tty0_backend, &fb, TTY_ECHO | TTY_CANNONICAL);
+    device_register(&tty0.device, "tty0");
 
-    device_t *tty = device_get_by_name("tty0");
+    INode_t *tty = device_get_by_name("tty0");
     console_set(tty, tty0);
     
     return tty0;

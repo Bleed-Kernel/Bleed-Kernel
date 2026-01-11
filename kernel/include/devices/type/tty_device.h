@@ -21,11 +21,10 @@ typedef struct {
 
 struct tty_ops {
     void (*putchar)(tty_t *, char c);
-    void (*write)(tty_t *, const char *s);
 };
 
 typedef struct tty{
-    device_t device;
+    INode_t device;
 
     char inbuffer[TTY_BUFFER_SZ];
     char outbuffer[TTY_BUFFER_SZ];
@@ -41,6 +40,6 @@ typedef struct tty{
 } tty_t;
 
 void tty_process_input(tty_t *tty, char c);
-void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, const char *name, fb_console_t *fb, uint32_t flags);
+void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, fb_console_t *fb, uint32_t flags);
 
 void fb_clear(fb_console_t *fb);

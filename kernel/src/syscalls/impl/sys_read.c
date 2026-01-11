@@ -7,7 +7,7 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len){
     if (!user_buf || len == 0)
         return 0;
 
-    device_t *dev = NULL;
+    INode_t *dev = NULL;
 
     switch (fd) {
     case 0:
@@ -17,8 +17,8 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len){
         return (uint64_t)-1;
     }
 
-    if (!dev || !dev->read)
+    if (!dev || !dev->ops->read)
         return (uint64_t)-1;
-    
-    return dev->read(dev, (void *)user_buf, len);
+
+    return dev->ops->read(dev, (void *)user_buf, len, 0);
 }

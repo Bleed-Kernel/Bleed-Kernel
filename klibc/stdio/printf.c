@@ -47,9 +47,9 @@ void kprintf(const char *fmt, ...) {
     }
 
     tty_t *tty = NULL;
-    device_t *dev = device_get_by_name("tty0");
+    INode_t *dev = device_get_by_name("tty0");
     if (dev)
-        tty = dev->priv;
+        tty = dev->internal_data;
 
     if (tty && tty->backend) {
         fb_console_t *fb = &((tty_fb_backend_t *)tty->backend)->fb;
@@ -86,10 +86,10 @@ void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...) {
         size <<= 1;
     }
 
-    device_t *dev = device_get_by_name("tty0");
+    INode_t *dev = device_get_by_name("tty0");
     if (!dev) goto out;
 
-    tty_t *tty = dev->priv;
+    tty_t *tty = dev->internal_data;
     if (!tty || !tty->backend) goto out;
 
     tty_fb_backend_t *b = tty->backend;

@@ -54,11 +54,7 @@ typedef struct INode {
 
 typedef struct file {
     fd_type_t type;
-
-    union{
-        INode_t *inode;
-        device_t *device;
-    };
+    INode_t *inode;
     
     size_t offset;
     int flags;

@@ -87,7 +87,7 @@ void PS2_Keyboard_set_callback(keyboard_callback_t cb) {
 }
 
 void PS2_Keyboard_callback(char c){
-    tty_process_input((tty_t*)console_get_active_console()->priv, c);
+    tty_process_input((tty_t*)console_get_active_console()->internal_data, c);
 }
 
 /// @brief flush the PS2 keyboard and prepare for execution
