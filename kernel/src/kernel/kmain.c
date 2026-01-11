@@ -89,6 +89,7 @@ void kmain() {
     PS2_Keyboard_init();
 
     tty0.ops->clear(&tty0);
+
     elf_sched(elf_get_from_path("initrd/bin/verdict"));
 
     for(;;){

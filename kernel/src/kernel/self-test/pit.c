@@ -11,7 +11,7 @@ void pit_test_self_test(void) {
     pit_wait_ticks(100);
     uint64_t end = pit_read_interval_remaining();
 
-    if (end >= start) serial_printf(LOG_INFO "PIT ticks advanced by %llu\n", end - start);
+    if (end >= start) serial_printf(LOG_INFO "PIT ticks advanced by %u\n", end - start);
     else serial_printf(LOG_INFO "PIT wrapped ticks detected\n");
 
     serial_printf(LOG_OK "PIT OK\n");

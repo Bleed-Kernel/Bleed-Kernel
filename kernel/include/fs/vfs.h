@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <devices/devices.h>
 
 /*
     functions prefixed inode_ are operations where 
@@ -10,12 +11,29 @@
     itself
 */
 
+#define O_RDONLY  0x1
+#define O_WRONLY  0x2
+#define O_RDWR    (O_RDONLY | O_WRONLY)
+#define O_CREAT   0x4
+#define O_TRUNC   0x8
+#define O_APPEND  0x10
+
+#define MAX_FDS 256
+
+typedef struct fd_table fd_table_t;
+extern fd_table_t *current_fd_table;
+
 typedef struct INode INode_t;
 
 typedef enum {
     INODE_DIRECTORY,
     INODE_FILE
 } inode_type;
+
+typedef enum {
+    FD_TYPE_FS,
+    FD_TYPE_DEV
+} fd_type_t;
 
 typedef struct INodeOps{
     int    (*create)  (INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type);
@@ -33,6 +51,23 @@ typedef struct INode {
     const   INodeOps_t* ops;
     void*   internal_data;
 } INode_t;
+
+typedef struct file {
+    fd_type_t type;
+
+    union{
+        INode_t *inode;
+        device_t *device;
+    };
+    
+    size_t offset;
+    int flags;
+    int shared;
+} file_t;
+
+typedef struct fd_table{
+    file_t *fds[MAX_FDS];
+}fd_table_t;
 
 typedef struct filesystem {
     int (*mount)(INode_t** root);
@@ -75,6 +110,11 @@ int vfs_readdir (INode_t* dir, size_t index, INode_t** result);
 size_t vfs_filesize(INode_t* inode);
 path_t vfs_path_from_abs(const char* pstring);
 path_t vfs_parent_path(const path_t* path);
+
+int vfs_open(const char *path_str, int flags);
+long vfs_read(int fd, void *buf, size_t count);
+long vfs_write(int fd, const void *buf, size_t count);
+int vfs_close(int fd);
 
 int inode_create(INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type);
 long inode_read(INode_t* inode, void* buf, size_t count, size_t offset);

@@ -4,32 +4,36 @@
 #include <stdio.h>
 #include <status.h>
 #include <stdbool.h>
+#include <mm/kalloc.h>
 #include <drivers/serial/serial.h>
 
 extern const filesystem tempfs;
 
+fd_table_t *current_fd_table = NULL;
+
 INode_t* vfs_root = NULL;
 
-/// @brief return the root dir if it exsists
-/// @return root dir
 INode_t* vfs_get_root(){
     if (vfs_root) return vfs_root;
     else return NULL;
 }
 
-/// @brief VFS Mount the root directory
-/// @return success?
 int vfs_mount_root(){
     int r = tempfs.mount(&vfs_root);
     if (r < 0) {
         serial_printf("%s vfs_mount_root: tempfs.mount failed: %d\n", LOG_ERROR, r);
     }
     serial_printf("%sVFS Root Mounted\n", LOG_OK);
+
+    if (!current_fd_table) {
+        current_fd_table = kmalloc(sizeof(fd_table_t));
+        if (current_fd_table)
+            memset(current_fd_table, 0, sizeof(fd_table_t));
+    }
+
     return r;
 }
 
-/// @brief decrement shared, min 0, cannot drop VFS root
-/// @param inode target
 void vfs_drop(INode_t* inode){
     if (!inode) return;
     if (inode == vfs_get_root()) return;
@@ -37,10 +41,6 @@ void vfs_drop(INode_t* inode){
     inode->shared--;
 }
 
-/// @brief get an inode at a path
-/// @param path target path
-/// @param inode OUT inode
-/// @return success?
 int vfs_lookup(const path_t* path, INode_t** out_inode){
     INode_t* current_inode = path->start;
     const char* head = path->data, *head_end = path->data + path->data_length;
@@ -69,17 +69,12 @@ int vfs_lookup(const path_t* path, INode_t** out_inode){
     return 0;
 }
 
-/// @brief create an inode at a path
-/// @param path target path
-/// @param result result
-/// @param node_type file or directory or what?
-/// @return success?
 int vfs_create(const path_t* path, INode_t** out_result, inode_type node_type){
     INode_t* parent_inode = NULL;
     path_t parent = vfs_parent_path(path);
 
     int e = vfs_lookup(&parent, &parent_inode);
-    if (e < 0) return e; // file doesnt exsist (probably)
+    if (e < 0) return e;
 
     const char* name = parent.data + parent.data_length;
     size_t namelen = path->data_length - parent.data_length;
@@ -89,9 +84,6 @@ int vfs_create(const path_t* path, INode_t** out_result, inode_type node_type){
     return e;
 }
 
-/// @brief get the parent path by trimming components and trailing slashes
-/// @param path child path
-/// @return trimmed path
 path_t vfs_parent_path(const path_t* path){
     const char* end = path->data + path->data_length;
     while(end > path->data && *(end-1) == '/') end--;
@@ -104,9 +96,6 @@ path_t vfs_parent_path(const path_t* path){
     };
 }
 
-/// @brief get a path_t from an absoloute path (as a string)
-/// @param path path string
-/// @return path_t
 path_t vfs_path_from_abs(const char* path){
     return (path_t){
         .root = vfs_root,
@@ -116,9 +105,6 @@ path_t vfs_path_from_abs(const char* path){
     };
 }
 
-/// @brief read the files into a buffer and count the size
-/// @param inode target
-/// @return unsigned size
 size_t vfs_filesize(INode_t* inode) {
     if (!inode || !inode->ops->read) return 0;
 
@@ -144,6 +130,74 @@ long vfs_read_exact(INode_t *inode, void *out_buffer, size_t exact_count, size_t
         out_buffer = (char *)out_buffer + r;
         exact_count -= r;
         offset += r;
+    }
+
+    return 0;
+}
+
+int vfs_open(const char *path_str, int flags){
+    if (!current_fd_table) return status_print_error(OUT_OF_BOUNDS);
+
+    path_t path = vfs_path_from_abs(path_str);
+    INode_t *inode = NULL;
+
+    int l = vfs_lookup(&path, &inode);
+    if (l < 0){
+        if (!(flags & O_CREAT)) return l;
+        l = vfs_create(&path, &inode, INODE_FILE);
+        if (l < 0) return l;
+    }
+
+    file_t *f = kmalloc(sizeof(*f));
+    if (!f){
+        vfs_drop(inode);
+        return status_print_error(OUT_OF_MEMORY);
+    }
+
+    f->inode = inode;
+    f->offset = flags & O_TRUNC ? 0 : ((flags & O_APPEND) ? vfs_filesize(inode) : 0);
+    f->flags = flags;
+    f->shared = 1;
+
+    for (int fd = 0; fd < MAX_FDS; fd++){
+        if (!current_fd_table->fds[fd]){
+            current_fd_table->fds[fd] = f;
+            return fd;
+        }
+    }
+
+    kfree(f, sizeof(*f));
+    vfs_drop(inode);
+    return status_print_error(OUT_OF_BOUNDS);
+}
+
+long vfs_read(int fd, void *buf, size_t count){
+    file_t *f = current_fd_table->fds[fd];
+    if (!f || !(f->flags & O_RDONLY)) return -1;
+    long r = inode_read(f->inode, buf, count, f->offset);
+    if (r > 0) f->offset += r;
+    return r;
+}
+
+long vfs_write(int fd, const void *buf, size_t count){
+    file_t *f = current_fd_table->fds[fd];
+    if (!f || !(f->flags & O_WRONLY)) return -1;
+    long r = inode_write(f->inode, buf, count, f->offset);
+    if (r > 0) f->offset += r;
+    return r;
+}
+
+int vfs_close(int fd){
+    if (!current_fd_table || fd >= MAX_FDS) return status_print_error(FILE_NOT_FOUND);
+
+    file_t *f = current_fd_table->fds[fd];
+    if (!f) return status_print_error(FILE_NOT_FOUND);
+
+    current_fd_table->fds[fd] = NULL;
+
+    if (f->shared == 0){
+        vfs_drop(f->inode);
+        kfree(f, sizeof(*f));
     }
 
     return 0;

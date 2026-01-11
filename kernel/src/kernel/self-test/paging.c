@@ -27,7 +27,7 @@ static void paging_test_allocate_test_pages() {
         memset(v1, 0, PAGE_SIZE);
         memset(v2, 0, PAGE_SIZE);
 
-        serial_printf(LOG_INFO "Allocated page %zu: SEC1 paddr=%p, SEC2 paddr=%p\n", i, (void*)phys_SEC1[i], (void*)phys_SEC2[i]);
+        serial_printf(LOG_INFO "Allocated page %u: SEC1 paddr=%p, SEC2 paddr=%p\n", i, (void*)phys_SEC1[i], (void*)phys_SEC2[i]);
     }
 }
 
@@ -39,7 +39,7 @@ static void paging_test_map_and_init(paddr_t as, paddr_t *phys, uint64_t pattern
         if (!vaddr) ke_panic("paddr_to_vaddr failed during mapping");
 
         *(volatile uint64_t*)vaddr = pattern | i;
-        serial_printf(LOG_INFO "Initialized page %zu: vaddr=%p, pattern=0x%llx\n", i, vaddr, pattern | i);
+        serial_printf(LOG_INFO "Initialized page %u: vaddr=%p, pattern=0x%u\n", i, vaddr, pattern | i);
     }
 }
 
@@ -52,10 +52,10 @@ static void paging_test_verify(paddr_t as, paddr_t *phys, uint64_t pattern) {
 
         uint64_t val = *(volatile uint64_t*)vaddr;
         if (val != (pattern | i)) {
-            serial_printf(LOG_ERROR "Verification failed: vaddr=%p expected=0x%llx got=0x%llx\n", vaddr, pattern | i, val);
+            serial_printf(LOG_ERROR "Verification failed: vaddr=%p expected=0x%u got=0x%u\n", vaddr, pattern | i, val);
             ke_panic("Paging test mismatch");
         }
-        serial_printf(LOG_INFO "Verified page %zu: value=0x%llx\n", i, val);
+        serial_printf(LOG_INFO "Verified page %u: value=0x%u\n", i, val);
     }
 }
 
@@ -64,7 +64,7 @@ static void paging_test_cr3_stress_test() {
     for (size_t i = 0; i < 10000; i++) {
         paging_switch_address_space((i & 1) ? SEC1 : SEC2);
         if (i % 1000 == 0)
-            serial_printf(LOG_INFO "CR3 switch iteration %zu\n", i);
+            serial_printf(LOG_INFO "CR3 switch iteration %u\n", i);
     }
 }
 
@@ -75,7 +75,7 @@ static void paging_test_cleanup() {
     for (size_t i = 0; i < PAGING_TEST_PAGES; i++) {
         pmm_free_pages(phys_SEC1[i], 1);
         pmm_free_pages(phys_SEC2[i], 1);
-        serial_printf(LOG_INFO "Freed page %zu: SEC1 paddr=%p, SEC2 paddr=%p\n", i, (void*)phys_SEC1[i], (void*)phys_SEC2[i]);
+        serial_printf(LOG_INFO "Freed page %u: SEC1 paddr=%p, SEC2 paddr=%p\n", i, (void*)phys_SEC1[i], (void*)phys_SEC2[i]);
     }
 }
 

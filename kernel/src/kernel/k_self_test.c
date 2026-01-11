@@ -1,4 +1,5 @@
 #include <devices/type/tty_device.h>
+#include <drivers/serial/serial.h>
 #include <devices/devices.h>
 #include <console/console.h>
 #include <stdio.h>

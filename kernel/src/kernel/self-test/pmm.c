@@ -15,12 +15,12 @@ void pmm_test_self_test(void) {
     for (size_t i = 0; i < PMM_TEST_PAGES; i++) {
         pmm_pages[i] = pmm_alloc_pages(1);
         if (!pmm_pages[i]) ke_panic("PMM Allocation failed");
-        serial_printf(LOG_INFO "PMM allocated page %zu paddr=%p\n", i, (void*)pmm_pages[i]);
+        serial_printf(LOG_INFO "PMM allocated page %u paddr=%p\n", i, (void*)pmm_pages[i]);
     }
 
     for (size_t i = 0; i < PMM_TEST_PAGES; i++) {
         pmm_free_pages(pmm_pages[i], 1);
-        serial_printf(LOG_INFO "freed page %zu paddr=%p\n", i, (void*)pmm_pages[i]);
+        serial_printf(LOG_INFO "freed page %u paddr=%p\n", i, (void*)pmm_pages[i]);
     }
 
     serial_printf(LOG_OK "PMM Test Passed!\n");
