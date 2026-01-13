@@ -11,7 +11,6 @@
 #include "acpi_priv.h"
 
 struct acpi_rsdp *acpi_rsdp = NULL;
-
 struct acpi_fadt *fadt = NULL;
 
 static int acpi_checksum(void *ptr, size_t len) {

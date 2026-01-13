@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <boot/sysinfo/sysinfo.h>
+#include <ACPI/acpi_time.h>
 
 int sys_open(char *path_str, int flags);
 uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len);
@@ -21,3 +22,4 @@ void sys_reboot(void);
 void sys_tkill(long pid);
 
 system_memory_info_t *sys_meminfo();
+int sys_time(struct rtc_time* user_buf);

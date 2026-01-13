@@ -113,4 +113,5 @@ typedef struct acpi_fadt
     uint64_t hypervison_vendor_identity;
 } __attribute__((packed)) fadt_t;
 
+extern struct acpi_rsdp *acpi_rsdp;
 extern struct acpi_fadt *fadt;

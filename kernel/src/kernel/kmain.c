@@ -26,6 +26,7 @@
 #include <threads/exit.h>
 #include <cpu/stack_trace.h>
 #include <syscalls/syscall.h>
+#include <ACPI/acpi_time.h>
 #include <exec/elf_load.h>
 #include <ACPI/acpi.h>
 #include <tss/tss.h>
