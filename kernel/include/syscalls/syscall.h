@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <boot/sysinfo/sysinfo.h>
 
 uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len);
 uint64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len);
@@ -16,3 +17,5 @@ void sys_shutdown(void);
 void sys_reboot(void);
 
 void sys_tkill(long pid);
+
+system_memory_info_t *sys_meminfo();

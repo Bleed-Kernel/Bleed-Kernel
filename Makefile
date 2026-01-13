@@ -68,7 +68,7 @@ limine/limine:
 
 .PHONY: initrd
 initrd: $(KERNEL_SYM)
-	tar -cf initrd/initrd.tar initrd/etc/splash.txt initrd/fonts/ttyfont.psf initrd/bin/verdict initrd/etc/kernel.sym
+	tar -cf initrd/initrd.tar initrd/etc/splash.txt initrd/fonts/ttyfont.psf initrd/bin/verdict initrd/bin/meminfo initrd/etc/kernel.sym
 
 $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 	rm -rf iso_root

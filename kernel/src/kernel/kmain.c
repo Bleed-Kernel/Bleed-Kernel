@@ -18,6 +18,7 @@
 #include <sys/sleep.h>
 #include <fonts/psf.h>
 #include <drivers/framebuffer/framebuffer.h>
+#include <boot/sysinfo/sysinfo.h>
 #include <devices/type/tty_device.h>
 #include <devices/device_io.h>
 #include <console/console.h>
@@ -98,7 +99,9 @@ void kmain() {
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS);
     kernel_self_test();
+    
     kprintf("\x1b[J");
+
     PS2_Keyboard_init();
 
     elf_sched(elf_get_from_path("initrd/bin/verdict"));

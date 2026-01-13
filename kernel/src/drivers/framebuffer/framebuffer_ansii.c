@@ -8,6 +8,13 @@
 /// @param c target
 void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii_state_t *st, char c) {
     if (!fb || !st) return;
+    
+    if (c == 'J'){
+        fb_clear(fb);
+        st->csi = 0;
+        return;
+    }
+
     if (st->esc) {
         if (c == '[') {
             st->csi = 1;
@@ -16,12 +23,6 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
             st->substate = 0;
         }
         st->esc = 0;
-        return;
-    }
-
-    if (c == 'J'){
-        fb_clear(fb);
-        st->csi = 0;
         return;
     }
 
