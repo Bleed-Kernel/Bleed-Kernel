@@ -19,6 +19,12 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
         return;
     }
 
+    if (c == 'J'){
+        fb_clear(fb);
+        st->csi = 0;
+        return;
+    }
+
     if (st->csi) {
         if (c >= '0' && c <= '9') {
             if (st->substate == 0)
@@ -61,11 +67,6 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
                 i++;
             }
             st->csi = 0;
-            return;
-        }
-
-        if (c == 'J'){
-            fb_clear(fb);
             return;
         }
     }

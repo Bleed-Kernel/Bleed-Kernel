@@ -1,31 +1,20 @@
-#include <string.h>
-#include <devices/devices.h>
+#include <fs/vfs.h>
+#include <stdint.h>
 #include <mm/kalloc.h>
-#include <devices/type/tty_device.h>
+#include <string.h>
 
 uint64_t sys_write(uint64_t fd, uint64_t user_buf, uint64_t len) {
-    if (!user_buf || len == 0)
-        return 0;
+    if (fd >= MAX_FDS || !current_fd_table || !user_buf || len == 0) return 0;
 
-    INode_t *dev = NULL;
+    file_t* f = current_fd_table->fds[fd];
+    if (!f || !(f->flags & O_WRONLY || f->flags & O_RDWR)) return -1;
 
-    switch (fd) {
-    case 1: case 2:
-        dev = device_get_by_name("tty0");
-        break;
-    default:
-        return (uint64_t)-1;
-    }
-
-    if (!dev || !dev->ops->write)
-        return (uint64_t)-1;
-
-    char *kbuf = (char *)kmalloc(len);
+    char* kbuf = kmalloc(len);
     if (!kbuf) return -1;
 
-    memcpy(kbuf, (const void *)user_buf, len);
-
-    uint64_t written = dev->ops->write(dev, kbuf, len, 0);
+    memcpy(kbuf, (void*)user_buf, len);
+    long written = inode_write(f->inode, kbuf, len, f->offset);
+    if (written > 0) f->offset += written;
 
     kfree(kbuf, len);
     return written;

@@ -1,24 +1,13 @@
-#include <string.h>
-#include <devices/devices.h>
-#include <mm/kalloc.h>
-#include <devices/type/tty_device.h>
+#include <fs/vfs.h>
+#include <stdint.h>
 
-uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len){
-    if (!user_buf || len == 0)
-        return 0;
+uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
+    if (fd >= MAX_FDS || !current_fd_table) return -1;
 
-    INode_t *dev = NULL;
+    file_t* f = current_fd_table->fds[fd];
+    if (!f || !(f->flags & O_RDONLY || f->flags & O_RDWR)) return -1;
 
-    switch (fd) {
-    case 0:
-        dev = device_get_by_name("tty0");
-        break;
-    default:
-        return (uint64_t)-1;
-    }
-
-    if (!dev || !dev->ops->read)
-        return (uint64_t)-1;
-
-    return dev->ops->read(dev, (void *)user_buf, len, 0);
+    long r = inode_read(f->inode, (void*)user_buf, len, f->offset);
+    if (r > 0) f->offset += r;
+    return r;
 }

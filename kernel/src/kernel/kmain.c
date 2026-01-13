@@ -84,11 +84,23 @@ void kmain() {
     scheduler_start();
     asm volatile ("sti");
 
+    INode_t* tty_inode = device_get_by_name("tty0");
+    if (tty_inode) {
+        file_t* f0 = kmalloc(sizeof(file_t));
+        f0->inode = tty_inode;
+        f0->flags = O_RDWR;
+        f0->offset = 0;
+        f0->shared = 1;
+        current_fd_table->fds[0] = f0;
+        current_fd_table->fds[1] = f0;
+        current_fd_table->fds[2] = f0;
+    }
+
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS);
     kernel_self_test();
+    kprintf("\x1b[J");
     PS2_Keyboard_init();
-    
-    kprintf("\x1b[Jm");
+
     elf_sched(elf_get_from_path("initrd/bin/verdict"));
     for(;;){
         sched_yield();

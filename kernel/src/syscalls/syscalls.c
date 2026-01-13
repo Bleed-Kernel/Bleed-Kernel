@@ -12,12 +12,14 @@ typedef uint64_t (*SyscallHandler)(uint64_t, uint64_t, uint64_t, uint64_t, uint6
 enum {
     SYS_READ,
     SYS_WRITE,
-    SYS_EXIT,
+    SYS_OPEN,
+    SYS_CLOSE,
     SYS_YEILD,
     SYS_SPAWN,
-    SYS_WAITPID,
     SYS_SHUTDOWN,
     SYS_REBOOT,
+    SYS_EXIT,
+    SYS_WAITPID,
     SYS_TKILL,
 };
 
