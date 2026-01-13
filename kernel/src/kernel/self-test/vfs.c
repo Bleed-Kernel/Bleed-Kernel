@@ -105,7 +105,6 @@ void vfs_test_self_test(void) {
     const char *append_msg = " APPEND_OK";
     if (vfs_write(fda, append_msg, strlen(append_msg)) <= 0)
         ke_panic("VFS: append write failed");
-    kprintf(LOG_OK "Append Worked\n");
 
     if (vfs_close(fda) < 0) ke_panic("VFS: vfs_close failed on append");
 

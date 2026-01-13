@@ -29,6 +29,8 @@ enum {
 SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_READ, sys_read),
     SYSCALL(SYS_WRITE, sys_write),
+    SYSCALL(SYS_OPEN, sys_open),
+    SYSCALL(SYS_CLOSE, sys_close),
     SYSCALL(SYS_EXIT, sys_exit),
     SYSCALL(SYS_YEILD, sys_yield),
     SYSCALL(SYS_SPAWN, sys_spawn),

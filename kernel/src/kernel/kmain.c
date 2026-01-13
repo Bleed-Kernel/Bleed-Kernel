@@ -86,6 +86,7 @@ void kmain() {
     asm volatile ("sti");
 
     INode_t* tty_inode = device_get_by_name("tty0");
+
     if (tty_inode) {
         file_t* f0 = kmalloc(sizeof(file_t));
         f0->inode = tty_inode;
