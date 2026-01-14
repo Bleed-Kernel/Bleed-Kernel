@@ -40,7 +40,7 @@ extern volatile struct limine_rsdp_request rsdp_request;
 
 extern void init_sse(void);
 
-static tty_t tty0;
+tty_t tty0;
 
 void initrd_load(){ 
     if (!module_request.response || module_request.response->module_count == 0){
@@ -134,6 +134,7 @@ void kmain() {
     shell_start();
 
     for (;;) {
+        prototype_clock();
         sched_yield();
     }
 

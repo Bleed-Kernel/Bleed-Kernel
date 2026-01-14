@@ -108,6 +108,7 @@ void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...) {
     if (x >= cols)
         goto out;
 
+    if (fb->cursor_y == 0) fb->cursor_y = 1;
     /* save cursor */
     uint64_t old_x = fb->cursor_x;
     uint64_t old_y = fb->cursor_y;
@@ -122,12 +123,10 @@ void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...) {
 
     framebuffer_write_string(fb, ansi, buf, lock);
 
-    /* restore cursor */
     fb->cursor_x = old_x;
     fb->cursor_y = old_y;
 
 out:
-    serial_printf("%s\n", buf);
     kfree(buf, size);
 }
 
