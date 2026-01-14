@@ -106,8 +106,20 @@ void kmain() {
     kprintf("\x1b[J");
 
     PS2_Keyboard_init();
-    
-    elf_sched(elf_get_from_path("initrd/bin/verdict")); 
+
+    char shell_path[256] = {0};
+    kprintf(LOG_INFO "Opening initrd/etc/shell%s\n", shell_path);
+    int sfd = vfs_open("initrd/etc/shell", O_RDONLY);
+    kprintf(LOG_INFO "Reading Shell path %s\n", shell_path);
+    long r = vfs_read(sfd, shell_path, 256);
+    kprintf(LOG_INFO "Starting Shell: %s\n", shell_path);
+
+    if (r > 0){
+        kprintf("\x1b[J");
+        elf_sched(elf_get_from_path(shell_path));
+    }else{
+        kprintf(LOG_ERROR "Shell path was invalid or couldnt be read.\nSorry, you're sorta on your own here\n");
+    }
 
     for (;;) {
         sched_yield();

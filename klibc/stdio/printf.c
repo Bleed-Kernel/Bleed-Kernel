@@ -39,26 +39,33 @@ void kprintf(const char *fmt, ...) {
         }
 
         if ((size_t)written < size) {
+            // exact fit, done
+            size = (size_t)written;
             break;
         }
 
+        // buffer too small, free and grow
         kfree(buf, size);
-        size *= 2;
+        size = (size_t)written + 1;
     }
 
-    tty_t *tty = NULL;
+    // Output to tty framebuffer if available
     INode_t *dev = device_get_by_name("tty0");
-    if (dev)
-        tty = dev->internal_data;
-
-    if (tty && tty->backend) {
-        fb_console_t *fb = &((tty_fb_backend_t *)tty->backend)->fb;
-        ansii_state_t *ansi = &((tty_fb_backend_t *)tty->backend)->ansi;
-        spinlock_t framebuffer_lock = ((tty_fb_backend_t *)tty->backend)->fb_lock;
-        framebuffer_write_string(fb, ansi, buf, &framebuffer_lock);
+    if (dev) {
+        tty_t *tty = dev->internal_data;
+        if (tty && tty->backend) {
+            tty_fb_backend_t *backend = (tty_fb_backend_t *)tty->backend;
+            fb_console_t *fb = &backend->fb;
+            ansii_state_t *ansi = &backend->ansi;
+            spinlock_t *framebuffer_lock = &backend->fb_lock;
+            framebuffer_write_string(fb, ansi, buf, framebuffer_lock);
+        }
     }
 
+    // Also write to serial
     serial_printf("%s", buf);
+
+    kfree(buf, size);
 }
 
 void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...) {
