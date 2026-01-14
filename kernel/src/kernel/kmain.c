@@ -62,6 +62,31 @@ void scheduler_start(void) {
     sched_bootstrap((void *)rsp);
 }
 
+void shell_start(){
+    // strictly speaking this doenst have to be a shell at all
+    // its just the program that runs at boot? this could be anything tbh
+    char shell_path[256] = {0};
+    kprintf(LOG_INFO "Opening initrd/etc/shell%s\n", shell_path);
+    int sfd = vfs_open("initrd/etc/shell", O_RDONLY);
+    kprintf(LOG_INFO "Reading Shell path %s\n", shell_path);
+    long r = vfs_read(sfd, shell_path, 256);
+
+    if (r < 0)
+        kprintf(LOG_ERROR "The Shell Path file, expected at %sinitrd/etc/shell%s "\
+                "did not read, reboot and try again or use another OS to correct the file\n", RGB_FG(212, 44, 44), RESET);
+
+    vfs_close(sfd);
+    kprintf(LOG_INFO "Starting Shell: %s\n", shell_path);
+
+    sfd = vfs_open(shell_path, O_RDONLY);
+    if (sfd > 4){
+        kprintf(LOG_ERROR "The Shell Path provided in %sinitrd/etc/shell%s was invalid, theres not much you can do from here\n", RGB_FG(212, 44, 44), RESET);
+    }else{
+        kprintf("\x1b[J");
+        elf_sched(elf_get_from_path(shell_path));
+    }
+}
+
 void kmain() {
     asm volatile ("cli");
     init_sse();
@@ -106,20 +131,7 @@ void kmain() {
     kprintf("\x1b[J");
 
     PS2_Keyboard_init();
-
-    char shell_path[256] = {0};
-    kprintf(LOG_INFO "Opening initrd/etc/shell%s\n", shell_path);
-    int sfd = vfs_open("initrd/etc/shell", O_RDONLY);
-    kprintf(LOG_INFO "Reading Shell path %s\n", shell_path);
-    long r = vfs_read(sfd, shell_path, 256);
-    kprintf(LOG_INFO "Starting Shell: %s\n", shell_path);
-
-    if (r > 0){
-        kprintf("\x1b[J");
-        elf_sched(elf_get_from_path(shell_path));
-    }else{
-        kprintf(LOG_ERROR "Shell path was invalid or couldnt be read.\nSorry, you're sorta on your own here\n");
-    }
+    shell_start();
 
     for (;;) {
         sched_yield();
