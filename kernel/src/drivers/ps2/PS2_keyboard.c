@@ -7,10 +7,14 @@
 #include <stdbool.h>
 #include <ansii.h>
 #include <console/console.h>
+#include <input/keyboard_dispatch.h>
+#include <input/keyboard_input.h>
 
 #define KBD_PORT 0x60
 
 static bool shift = false;
+static bool ctrl = false;
+static bool alt = false;
 static bool caps = false;
 
 #define BUF_SIZE 128
@@ -25,59 +29,48 @@ static inline void PS2_Flush(void) {
         (void)inb(0x60);
 }
 
-/// @brief push a char onto the keyboard buffer stack
-static void push_char(char c) {
-    int next = (head + 1) % BUF_SIZE;
-    if (next != tail) {
-        buf[head] = c;
-        head = next;
+char tty_key_to_ascii(const keyboard_event_t *ev) {
+    uint16_t sc = ev->keycode;
+    if (sc >= 128) return 0;
+    if (ev->keymod & KEYMOD_SHIFT)
+        return keymap_shift[sc];
+    if (ev->keymod & KEYMOD_CAPS) {
+        char c = keymap[sc];
+        if (c >= 'a' && c <= 'z')
+            c -= 32;
+        return c;
     }
-}
-
-/// @brief pop a char off the keyboard buffer stack 
-static int pop_char(void) {
-    if (tail == head) return -1;
-    char c = buf[tail];
-    tail = (tail + 1) % BUF_SIZE;
-    return c;
+    return keymap[sc];
 }
 
 /// @brief Handle PS2 Keyboard Interrupt from the PIC
 /// @param irq value
 void PS2_Keyboard_Interrupt(uint8_t irq) {
-    uint8_t sc = inb(KBD_PORT);
+    uint8_t sc = inb(0x60);
+    uint8_t released = sc & 0x80;
+    sc &= 0x7F;
 
-    if (sc & 0x80) {
-        sc &= ~0x80;
-        if (sc == 0x2A || sc == 0x36) shift = false;
-        PIC_EOI(irq);
-        return;
-    }
+    if (sc == 0x2A || sc == 0x36)
+        shift = !released;
+    else if (sc == 0x1D)
+        ctrl = !released;
+    else if (sc == 0x38)
+        alt = !released;
+    else if (sc == 0x3A && !released)
+        caps ^= 1;
 
-    if (sc == 0x2A || sc == 0x36) { shift = true; PIC_EOI(irq); return; }
-    if (sc == 0x3A) { caps = !caps; PIC_EOI(irq); return; }
+    keyboard_event_t ev = {
+        .keycode = sc,
+        .action  = released ? KEY_RELEASE : KEY_DOWN,
+        .keymod  =
+            (shift ? KEYMOD_SHIFT : 0) |
+            (ctrl  ? KEYMOD_CTRL  : 0) |
+            (alt   ? KEYMOD_ALT   : 0) |
+            (caps  ? KEYMOD_CAPS  : 0)
+    };
 
-    char c = 0;
-    if (sc < 128) {
-        c = shift ? keymap_shift[sc] : keymap[sc];
-        if (c >= 'a' && c <= 'z' && (caps ^ shift)) c -= 32;
-    }
-
-    if (c && kb_callback) {
-        kb_callback(c);
-    }
-
-    if (c) push_char(c);
+    keyboard_input_dispatch(&ev);
     PIC_EOI(irq);
-}
-
-/// @brief blocking get char
-/// @return char ascii code int
-int PS2_Keyboard_get_char(void) {
-    int c;
-    while ((c = pop_char()) == -1)
-        __asm__ volatile("hlt");
-    return c;
 }
 
 /// @brief set the PS2 Keyboard Handler

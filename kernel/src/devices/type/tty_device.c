@@ -2,8 +2,12 @@
 #include <devices/type/tty_device.h>
 #include <drivers/framebuffer/framebuffer.h>
 #include <drivers/framebuffer/framebuffer_console.h>
+#include <drivers/ps2/PS2_keyboard.h>
+#include <input/keyboard_input.h>
+#include <input/keyboard_dispatch.h>
 #include <devices/device_io.h>
 #include <mm/spinlock.h>
+#include <console/console.h>
 #include <stdio.h>
 
 long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
@@ -72,6 +76,19 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg){
     return -1;
 }
 
+static void tty_input_listener(const keyboard_event_t *ev) {
+    if (ev->action != KEY_DOWN)
+        return;
+
+    char c = tty_key_to_ascii(ev);
+    if (!c)
+        return;
+
+    tty_t *tty =
+        (tty_t*)console_get_active_console()->internal_data;
+    tty_process_input(tty, c);
+}
+
 static void tty_fb_putchar(tty_t *tty, char c) {
     tty_fb_backend_t *b = tty->backend;
     framebuffer_ansi_char(&b->fb, &b->fb_lock, &b->ansi, c);
@@ -131,6 +148,7 @@ void tty_init(tty_t *tty, void *backend,
     tty->device.internal_data  = tty;
 
     spinlock_init(&lock);
+    keyboard_register_listener(tty_input_listener);
 }
 
 void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, fb_console_t *fb, uint32_t flags) {

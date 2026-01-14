@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <devices/type/tty_device.h>
+#include <input/keyboard_input.h>
 
 typedef void (*keyboard_callback_t)(char c);
 
@@ -30,3 +31,5 @@ static const char keymap_shift[128] = {
     'S','D','F','G','H','J','K','L',':','@','~',0,'|','Z','X','C',
     'V','B','N','M','<','>','?',0,'*',0,' ',0
 };
+
+char tty_key_to_ascii(const keyboard_event_t *ev);
