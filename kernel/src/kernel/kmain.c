@@ -29,6 +29,7 @@
 #include <ACPI/acpi_time.h>
 #include <mm/vmm.h>
 #include <exec/elf_load.h>
+#include <devices/type/kbd_device.h>
 #include <ACPI/acpi.h>
 #include <tss/tss.h>
 #include <panic.h>
@@ -97,6 +98,7 @@ void kmain() {
     acpi_init();
     vfs_mount_root();
     initrd_load();
+    kbd_device_init();
     psf_init("initrd/fonts/ttyfont.psf");
     stack_trace_load_symbols("initrd/etc/kernel.sym");
     
@@ -124,6 +126,18 @@ void kmain() {
         current_fd_table->fds[1] = f0;
         current_fd_table->fds[2] = f0;
     }
+
+    INode_t* kbd_inode = device_get_by_name("kbd0");
+    if (kbd_inode) {
+        file_t* kbd_fd = kmalloc(sizeof(file_t));
+        kbd_fd->inode = kbd_inode;
+        kbd_fd->flags = O_RDONLY;
+        kbd_fd->offset = 0;
+        kbd_fd->shared = 0;
+
+        current_fd_table->fds[3] = kbd_fd;
+    }
+
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS);
     kernel_self_test();
