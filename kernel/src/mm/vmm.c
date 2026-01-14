@@ -1,59 +1,50 @@
 #include <stdint.h>
-#include <mm/paging.h>
 #include <stddef.h>
-#include <string.h>
-#include <status.h>
+#include <mm/pmm.h>
+#include <mm/paging.h>
+#include <drivers/serial/serial.h>
+#include <ansii.h>
 
-#define VM_USER_START 0x40000000ULL
-#define VM_USER_END   0x8000000000ULL
-#define VM_PAGE_COUNT ((VM_USER_END - VM_USER_START) / PAGE_SIZE_4K)
+typedef paddr_t vmm_cr3_t;
 
-static uint8_t *vm_bitmap = NULL;
+int vmm_map_pages(vmm_cr3_t cr3, void* virt, size_t page_count, uint64_t flags) {
+    uintptr_t va = (uintptr_t)virt;
+    for (size_t i = 0; i < page_count; i++) {
+        paddr_t phys = pmm_alloc_pages(1);
+        if (!phys) return -1;
 
-
-void init_vmm(void) {
-    size_t bitmap_bytes = (VM_PAGE_COUNT + 7) / 8;
-    vm_bitmap = (uint8_t*)pmm_alloc_pages((bitmap_bytes + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K);
-    memset(vm_bitmap, 0, bitmap_bytes);
-}
-
-void* vm_alloc(size_t pages) {
-    if (!pages || !vm_bitmap) return NULL;
-
-    size_t free_run = 0;
-    size_t start_index = 0;
-
-    for (size_t i = 0; i < VM_PAGE_COUNT; i++) {
-        size_t byte = vm_bitmap[i / 8];
-        int bit = (byte >> (i % 8)) & 1;
-
-        if (!bit) {
-            if (free_run == 0) start_index = i;
-            free_run++;
-            if (free_run == pages) {
-                for (size_t j = 0; j < pages; j++)
-                    vm_bitmap[(start_index + j) / 8] |= (1 << ((start_index + j) % 8));
-
-                return (void*)(VM_USER_START + start_index * PAGE_SIZE_4K);
-            }
-        } else {
-            free_run = 0;
-        }
+        paging_map_page(cr3, phys, va + i * PAGE_SIZE, flags);
     }
-
-    return NULL;
+    return 0;
 }
 
-void vm_free(void* vaddr, size_t pages) {
-    if (!vaddr || !pages) return;
-    uintptr_t addr = (uintptr_t)vaddr;
-
-    if (addr < VM_USER_START || addr >= VM_USER_END) return;
-
-    size_t start_index = (addr - VM_USER_START) / PAGE_SIZE_4K;
-
-    for (size_t i = 0; i < pages; i++) {
-        vm_bitmap[(start_index + i) / 8] &= ~(1 << ((start_index + i) % 8));
+void vmm_unmap_pages(vmm_cr3_t cr3, void* virt, size_t page_count) {
+    uintptr_t va = (uintptr_t)virt;
+    for (size_t i = 0; i < page_count; i++) {
+        paging_map_page(cr3, 0, va + i * PAGE_SIZE, 0);
     }
 }
 
+vmm_cr3_t vmm_create_address_space() {
+    return paging_create_address_space();
+}
+
+void vmm_destroy_address_space(vmm_cr3_t cr3) {
+    paging_destroy_address_space(cr3);
+}
+
+void vmm_switch_address_space(vmm_cr3_t cr3) {
+    paging_switch_address_space(cr3);
+}
+
+void* vmm_alloc_pages(size_t pages) {
+    paddr_t phys = pmm_alloc_pages(pages);
+    if (!phys) return NULL;
+    void* vaddr = paddr_to_vaddr(phys);
+    for (size_t i = 0; i < pages * PAGE_SIZE; i++) ((uint8_t*)vaddr)[i] = 0;
+    return vaddr;
+}
+
+void vmm_free_pages(void* addr, size_t pages) {
+    pmm_free_pages(vaddr_to_paddr(addr), pages);
+}

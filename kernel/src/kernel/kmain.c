@@ -27,6 +27,7 @@
 #include <cpu/stack_trace.h>
 #include <syscalls/syscall.h>
 #include <ACPI/acpi_time.h>
+#include <mm/vmm.h>
 #include <exec/elf_load.h>
 #include <ACPI/acpi.h>
 #include <tss/tss.h>
@@ -105,9 +106,10 @@ void kmain() {
     kprintf("\x1b[J");
 
     PS2_Keyboard_init();
+    
+    elf_sched(elf_get_from_path("initrd/bin/verdict")); 
 
-    elf_sched(elf_get_from_path("initrd/bin/verdict"));
-    for(;;){
+    for (;;) {
         sched_yield();
     }
 

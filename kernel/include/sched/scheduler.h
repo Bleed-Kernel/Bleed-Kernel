@@ -29,6 +29,12 @@ typedef enum {
     TASK_DEAD
 } task_state_t;
 
+typedef struct user_alloc {
+    void* vaddr;
+    size_t pages;
+    struct user_alloc* next;
+} user_alloc_t;
+
 typedef struct task {
     uint64_t        id;
     task_state_t    state;
@@ -38,6 +44,7 @@ typedef struct task {
     uint32_t        quantum_remaining;
 
     paddr_t         page_map;
+    user_alloc_t    *alloc_list;
 
     struct task     *wait_queue;
     struct task     *wait_next;

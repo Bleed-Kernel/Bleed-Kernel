@@ -1,6 +1,8 @@
 #ifndef SERIAL_H
 #define SERIAL_H
 
+#include <stdint.h>
+
 /// @brief initialse and test the serial port so its ready for writing
 /// @return success
 int serial_init();

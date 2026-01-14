@@ -98,9 +98,12 @@ void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...) {
     spinlock_t *lock = &b->fb_lock;
 
     uint64_t cols = fb->width / fb->font->width;
-
     if (x >= cols)
         goto out;
+
+    /* save cursor */
+    uint64_t old_x = fb->cursor_x;
+    uint64_t old_y = fb->cursor_y;
 
     fb->cursor_x = x;
     fb->cursor_y = y;
@@ -111,6 +114,10 @@ void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...) {
         buf[max] = '\0';
 
     framebuffer_write_string(fb, ansi, buf, lock);
+
+    /* restore cursor */
+    fb->cursor_x = old_x;
+    fb->cursor_y = old_y;
 
 out:
     serial_printf("%s\n", buf);

@@ -23,6 +23,8 @@ enum {
     SYS_TKILL,
     SYS_MEMINFO,
     SYS_TIME,
+    SYS_ALLOC,
+    SYS_FREE
 };
 
 #pragma GCC diagnostic push
@@ -40,7 +42,9 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_REBOOT, sys_reboot),
     SYSCALL(SYS_TKILL, sys_tkill),
     SYSCALL(SYS_MEMINFO, sys_meminfo),
-    SYSCALL(SYS_TIME, sys_time)
+    SYSCALL(SYS_TIME, sys_time),
+    SYSCALL(SYS_ALLOC, sys_alloc),
+    SYSCALL(SYS_FREE, sys_free)
 };
 #pragma GCC diagnostic pop
 

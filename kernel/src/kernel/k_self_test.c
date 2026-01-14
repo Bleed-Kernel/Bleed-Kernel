@@ -33,4 +33,5 @@ void kernel_self_test(){
     pit_test_self_test();
     scheduler_test_self_test();
     vfs_test_self_test();
+    vmm_test_self_test();
 }
