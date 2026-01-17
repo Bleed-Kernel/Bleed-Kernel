@@ -87,9 +87,11 @@ int tempfs_lookup(INode_t* dir, const char* name, size_t namelen, INode_t** resu
     while(data && size > 0){
         for (size_t i = 0; i < size && i < MAX_ENTRIES_PER_DATA_CHUNK; i++){
             INode_t* child_node = directory_entries(data)[i];
+            if (!child_node) continue;
+
             tempfs_INode_t* child_tempfs_node = child_node->internal_data;
-            
-            if (strlen(child_tempfs_node->name) == namelen && (memcmp(child_tempfs_node->name, name, namelen) == 0)) {
+            if (strlen(child_tempfs_node->name) == namelen &&
+                memcmp(child_tempfs_node->name, name, namelen) == 0) {
                 *result = child_node;
                 return 0;
             }
@@ -229,8 +231,7 @@ int tempfs_create(INode_t* parent, const char* name, size_t namelen, INode_t** r
 /// @return always 0
 int tempfs_readdir(INode_t* dir, size_t index, INode_t** result){
     tempfs_INode_t* data = dir->internal_data;
-    size_t capacity = data->capacity;
-    if (index >= capacity) return status_print_error(FILE_NOT_FOUND);
+    if (index >= data->capacity) return status_print_error(FILE_NOT_FOUND);
 
     tempfs_data_t* chunk = data->data;
     size_t idx = index;
@@ -243,9 +244,12 @@ int tempfs_readdir(INode_t* dir, size_t index, INode_t** result){
     if (!chunk) return status_print_error(FILE_NOT_FOUND);
 
     *result = directory_entries(chunk)[idx];
-    if (*result) (*result)->shared++;
+    if (!*result) return status_print_error(FILE_NOT_FOUND);
+    (*result)->shared++;
+
     return 0;
 }
+
 
 /// @brief mount the root directory of the fs
 /// @param root root node

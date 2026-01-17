@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <mm/kalloc.h>
 #include <drivers/serial/serial.h>
+#include <sched/scheduler.h>
 
 extern const filesystem tempfs;
 
@@ -121,6 +122,18 @@ size_t vfs_filesize(INode_t* inode) {
     return total;
 }
 
+path_t vfs_path_from_relative(const char *path, INode_t *cwd) {
+    INode_t *start = cwd ? cwd : vfs_get_root();
+    if (!start) start = vfs_get_root();
+    if (path[0] == '/') start = vfs_get_root();
+    return (path_t){
+        .root = vfs_get_root(),
+        .start = start,
+        .data = path,
+        .data_length = strlen(path),
+    };
+}
+
 long vfs_read_exact(INode_t *inode, void *out_buffer, size_t exact_count, size_t offset){
     while (exact_count > 0){
         long r = inode_read(inode, out_buffer, exact_count, offset);
@@ -131,6 +144,31 @@ long vfs_read_exact(INode_t *inode, void *out_buffer, size_t exact_count, size_t
         exact_count -= r;
         offset += r;
     }
+
+    return 0;
+}
+
+int vfs_chdir(const char *path_str) {
+    if (!path_str) return -FILE_NOT_FOUND;
+
+    task_t *task = get_current_task();
+    if (!task) return -1;
+
+    path_t path = vfs_path_from_relative(path_str, task->current_directory);
+    INode_t *inode = NULL;
+    int r = vfs_lookup(&path, &inode);
+    if (r < 0) return r;
+
+    if (inode->type != INODE_DIRECTORY) {
+        vfs_drop(inode);
+        return -FILE_NOT_FOUND;
+    }
+
+    if (task->current_directory)
+        vfs_drop(task->current_directory);
+
+    task->current_directory = inode;
+    inode->shared++; // Increment since task now owns a reference
 
     return 0;
 }

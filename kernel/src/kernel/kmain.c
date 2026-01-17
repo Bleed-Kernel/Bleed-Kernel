@@ -147,8 +147,8 @@ void kmain() {
     PS2_Keyboard_init();
     shell_start();
 
+
     for (;;) {
-        prototype_clock();
         sched_yield();
     }
 

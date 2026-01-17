@@ -107,8 +107,7 @@ void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...) {
     uint64_t cols = fb->width / fb->font->width;
     if (x >= cols)
         goto out;
-
-    if (fb->cursor_y == 0) fb->cursor_y = 1;
+        
     /* save cursor */
     uint64_t old_x = fb->cursor_x;
     uint64_t old_y = fb->cursor_y;

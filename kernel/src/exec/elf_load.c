@@ -141,5 +141,8 @@ task_t *elf_sched(INode_t *file){
     user_stack[1] = 0;
 
     task->context->rsp = (uint64_t)user_stack;
+
+    task->current_directory = vfs_get_root();
+    task->current_directory->shared++;
     return task;
 }

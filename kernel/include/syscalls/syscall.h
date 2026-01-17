@@ -4,10 +4,12 @@
 #include <stdint.h>
 #include <boot/sysinfo/sysinfo.h>
 #include <ACPI/acpi_time.h>
+#include <fs/vfs.h>
 
 int sys_open(char *path_str, int flags);
 uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len);
 uint64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len);
+
 int sys_close(int fd);
 void sys_exit();
 uint64_t sys_clear(uint64_t fd);
@@ -26,3 +28,6 @@ int sys_time(struct rtc_time* user_buf);
 
 uintptr_t sys_alloc(uint64_t pages);
 uintptr_t sys_free(uint64_t addr, uint64_t pages);
+
+long sys_chdir(const char *user_path);
+long sys_getcwd(char *buf, size_t size);

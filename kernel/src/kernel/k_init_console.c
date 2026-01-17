@@ -16,7 +16,7 @@ tty_t kernel_console_init(){
         .bg = 0x000000,
     };
 
-    tty_init_framebuffer(&tty0, &tty0_backend, &fb, TTY_CANNONICAL);
+    tty_init_framebuffer(&tty0, &tty0_backend, &fb, TTY_ECHO | TTY_CANNONICAL);
     device_register(&tty0.device, "tty0");
 
     INode_t *tty = device_get_by_name("tty0");

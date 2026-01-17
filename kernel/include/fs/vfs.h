@@ -18,7 +18,8 @@
 #define O_TRUNC   0x8
 #define O_APPEND  0x10
 
-#define MAX_FDS 256
+#define PATH_MAX    4096
+#define MAX_FDS     256
 
 typedef struct fd_table fd_table_t;
 extern fd_table_t *current_fd_table;
@@ -75,6 +76,11 @@ typedef struct path{
     size_t      data_length;
 } path_t;
 
+typedef struct dirent {
+    char name[256];
+    int type;
+} dirent_t;
+
 /// @brief mount the root directory of the fs
 /// @param root root node
 /// @return success?
@@ -100,16 +106,18 @@ int vfs_lookup(const path_t* path, INode_t** inode);
 
 long vfs_read_exact(INode_t *inode, void *out_buffer, size_t exact_count, size_t offset);
 
-
 int vfs_create(const path_t* path, INode_t** result, inode_type node_type);
 int vfs_readdir (INode_t* dir, size_t index, INode_t** result);
 size_t vfs_filesize(INode_t* inode);
+
 path_t vfs_path_from_abs(const char* pstring);
+path_t vfs_path_from_relative(const char *path, INode_t *cwd); 
 path_t vfs_parent_path(const path_t* path);
 
 int vfs_open(const char *path_str, int flags);
 long vfs_read(int fd, void *buf, size_t count);
 long vfs_write(int fd, const void *buf, size_t count);
+int vfs_chdir(const char *path_str);
 int vfs_close(int fd);
 
 int inode_create(INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type);

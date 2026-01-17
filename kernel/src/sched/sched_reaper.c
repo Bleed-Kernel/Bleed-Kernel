@@ -5,6 +5,7 @@
 #include <sched/scheduler.h>
 #include <panic.h>
 #include <stdio.h>
+
 #include "priv_scheduler.h"
 
 extern task_t *task_queue;
@@ -58,6 +59,8 @@ void sched_mark_task_dead(task_t *task) {
 
     dead_task_tail->dead_next = task;
     dead_task_tail = task;
+
+    vfs_drop(task->current_directory);
 }
 
 void scheduler_reap(void) {
@@ -89,6 +92,8 @@ void scheduler_reap(void) {
             kfree(task, sizeof(task_t));
 
             reaped++;
+            if (task->id > 1 && task->id < MAX_PIDS)
+                pid_list[task->id] = 0;
         }
         
         sched_yield();

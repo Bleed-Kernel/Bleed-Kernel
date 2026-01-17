@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <mm/paging.h>
+#include <fs/vfs.h>
 
 #define KERNEL_STACK_SIZE   8196
 
@@ -45,6 +46,8 @@ typedef struct task {
 
     paddr_t         page_map;
     user_alloc_t    *alloc_list;
+    
+    INode_t         *current_directory;
 
     struct task     *wait_queue;
     struct task     *wait_next;

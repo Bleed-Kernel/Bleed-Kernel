@@ -24,7 +24,9 @@ enum {
     SYS_MEMINFO,
     SYS_TIME,
     SYS_ALLOC,
-    SYS_FREE
+    SYS_FREE,
+    SYS_CHDIR,
+    SYS_GETCWD,
 };
 
 #pragma GCC diagnostic push
@@ -44,7 +46,9 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_MEMINFO, sys_meminfo),
     SYSCALL(SYS_TIME, sys_time),
     SYSCALL(SYS_ALLOC, sys_alloc),
-    SYSCALL(SYS_FREE, sys_free)
+    SYSCALL(SYS_FREE, sys_free),
+    SYSCALL(SYS_CHDIR, sys_chdir),
+    SYSCALL(SYS_GETCWD, sys_getcwd),
 };
 #pragma GCC diagnostic pop
 

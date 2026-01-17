@@ -4,12 +4,25 @@
 #include <string.h>
 #include <mm/paging.h>
 #include <stdio.h>
+#include <ansii.h>
 
 #include "priv_scheduler.h"
 
 extern task_t *task_queue;
 extern task_t *task_list_head;
-static uint64_t next_pid = 1;
+
+uint8_t pid_list[MAX_PIDS] = {0};
+
+int alloc_pid(){
+    for (int i = 1; i < MAX_PIDS; i++){
+        if (!pid_list[i]){
+            pid_list[i] = 1;
+            return i;
+        }
+    }
+
+    return -1;
+}
 
 static void queue_task(task_t *task) {
     if (!task_queue) {
@@ -44,7 +57,13 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     if (!task) ke_panic("Failed to allocate task");
     memset(task, 0, sizeof(task_t));
 
-    task->id = next_pid++;
+    uint64_t pid = alloc_pid();
+    if (pid > 0){
+        task->id = pid;
+    }else{
+        kprintf(LOG_ERROR "Failed to allocate PID to task\n");
+    }
+
     task->state = TASK_READY;
     task->quantum_remaining = QUANTUM;
     task->page_map = cr3;
@@ -79,6 +98,10 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     // Queue the task
     queue_task(task);
     if (!task_list_head) task_list_head = task;
+
+    //set cwd
+    task->current_directory = vfs_get_root();
+    task->current_directory->shared++;
 
     return task;
 }
