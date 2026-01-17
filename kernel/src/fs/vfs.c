@@ -81,6 +81,10 @@ int vfs_create(const path_t* path, INode_t** out_result, inode_type node_type){
     size_t namelen = path->data_length - parent.data_length;
 
     e = inode_create(parent_inode, name, namelen, out_result, node_type);
+    if (e == 0 && *out_result) {
+        (*out_result)->parent = parent_inode;
+    }
+
     vfs_drop(parent_inode);
     return e;
 }
@@ -154,7 +158,21 @@ int vfs_chdir(const char *path_str) {
     task_t *task = get_current_task();
     if (!task) return -1;
 
-    path_t path = vfs_path_from_relative(path_str, task->current_directory);
+    INode_t *start_inode = NULL;
+
+    if (path_str[0] == '/') {
+        start_inode = vfs_get_root();
+    } else {
+        start_inode = task->current_directory ? task->current_directory : vfs_get_root();
+    }
+
+    path_t path = (path_t){
+        .root = vfs_get_root(),
+        .start = start_inode,
+        .data = path_str,
+        .data_length = strlen(path_str),
+    };
+
     INode_t *inode = NULL;
     int r = vfs_lookup(&path, &inode);
     if (r < 0) return r;
@@ -164,6 +182,7 @@ int vfs_chdir(const char *path_str) {
         return -FILE_NOT_FOUND;
     }
 
+    // Drop old cwd
     if (task->current_directory)
         vfs_drop(task->current_directory);
 

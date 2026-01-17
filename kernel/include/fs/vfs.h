@@ -47,10 +47,11 @@ typedef struct INodeOps{
 } INodeOps_t;
 
 typedef struct INode {
-    long  shared;
+    long    shared;
     int     type;
     const   INodeOps_t* ops;
     void*   internal_data;
+    struct  INode* parent;
 } INode_t;
 
 typedef struct file {

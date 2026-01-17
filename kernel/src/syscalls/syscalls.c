@@ -27,6 +27,7 @@ enum {
     SYS_FREE,
     SYS_CHDIR,
     SYS_GETCWD,
+    SYS_READDIR
 };
 
 #pragma GCC diagnostic push
@@ -49,6 +50,7 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_FREE, sys_free),
     SYSCALL(SYS_CHDIR, sys_chdir),
     SYSCALL(SYS_GETCWD, sys_getcwd),
+    SYSCALL(SYS_READDIR, sys_readdir),
 };
 #pragma GCC diagnostic pop
 

@@ -93,14 +93,13 @@ void kmain() {
     init_sse();
     serial_init();
     pmm_init();
-
-    reinit_paging();
-    acpi_init();
     vfs_mount_root();
     initrd_load();
     kbd_device_init();
     psf_init("initrd/fonts/ttyfont.psf");
     stack_trace_load_symbols("initrd/etc/kernel.sym");
+    reinit_paging();
+    acpi_init();
     
     tty0 = kernel_console_init();
 
@@ -141,13 +140,10 @@ void kmain() {
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS);
     kernel_self_test();
-    
     kprintf("\x1b[J");
 
     PS2_Keyboard_init();
     shell_start();
-
-
     for (;;) {
         sched_yield();
     }
