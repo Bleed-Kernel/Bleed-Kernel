@@ -1,8 +1,8 @@
 /*
-    this can be really funny on UEFI, and by that i mean it may cause the system
-    not to boot :/
-    for now i only want to write to serial but maybe recv later?
+    I am aware i dont have to use spinlocks here because you can wait for serial
+    to be ready, but for consistancy across all devices im gonna just use my spinlock
 */
+
 #include <cpu/io.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -11,18 +11,18 @@
 #include <format.h>
 #include <string.h>
 #include <status.h>
+#include <mm/spinlock.h>
 
 #define PORT_COM1   0x3F8
 #define SERIAL_TIMEOUT 100000
 
 static int serial_available = 0;
+static spinlock_t serial_lock;
 
 static int is_serial_transmit_empty(){
     return inb(PORT_COM1 + 5) & 0x20;
 }
 
-/// @brief initialse and test the serial port so its ready for writing
-/// @return success
 int serial_init(){
     outb(PORT_COM1 + 4, 0x0F);
     uint8_t test = inb(PORT_COM1 + 4);
@@ -48,11 +48,10 @@ int serial_init(){
 
     outb(PORT_COM1 + 4, 0x0F);
     serial_available = 1;
+    spinlock_init(&serial_lock);
     return 0;
 }
 
-/// @brief put a single char, handles newline ansii
-/// @param c character to put
 void serial_put_char(char c){
     if (!serial_available) return;
 
@@ -67,8 +66,6 @@ void serial_put_char(char c){
     outb(PORT_COM1, c);
 }
 
-/// @brief write a string to serial
-/// @param str const string
 void serial_write(const char* str) {
     if (!serial_available) return;
 
@@ -77,8 +74,6 @@ void serial_write(const char* str) {
     }
 }
 
-/// @brief write a hex value to the screen from a uint
-/// @param value uint value
 void serial_write_hex(uint64_t value){
     if (!serial_available) return;
 
@@ -90,19 +85,19 @@ void serial_write_hex(uint64_t value){
         value >>= 4;
     }
     buffer[16] = '\0';
+
     serial_write("0x");
     serial_write(buffer);
 }
 
-/// @brief Write a formatted string to COM1
-/// @param fmt formatted string
-/// @param  VARDIC
 void serial_printf(const char* fmt, ...) {
     if (!serial_available) return;
 
     va_list args;
     va_start(args, fmt);
-
+    
+    unsigned long flags = irq_push();
+    spinlock_acquire(&serial_lock);
     while (*fmt) {
         if (*fmt != '%') {
             serial_put_char(*fmt++);
@@ -167,7 +162,6 @@ void serial_printf(const char* fmt, ...) {
                 break;
 
             default:
-                // Unknown specifier, print literally.
                 serial_put_char('%');
                 serial_put_char(*fmt);
                 break;
@@ -175,6 +169,7 @@ void serial_printf(const char* fmt, ...) {
 
         fmt++;
     }
-
+    spinlock_release(&serial_lock);
+    irq_restore(flags);
     va_end(args);
 }
