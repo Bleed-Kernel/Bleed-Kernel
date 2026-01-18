@@ -137,12 +137,10 @@ void kmain() {
         current_fd_table->fds[3] = kbd_fd;
     }
 
-
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS);
-    kernel_self_test();
-    kprintf("\x1b[J");
-
+    
     PS2_Keyboard_init();
+    kernel_self_test();
     shell_start();
     for (;;) {
         sched_yield();
