@@ -4,8 +4,9 @@
 #include <mm/pmm.h>
 #include <mm/paging.h>
 #include <mm/vmm.h>
+#include <sched/scheduler.h>
 
-#define HEAP_START          0xFFFFFFFF81000000ULL
+#define HEAP_START          0x0000000010000000ULL
 #define HEAP_INITIAL_PAGES  16
 #define HEAP_MAX_PAGES      2048
 #define ALIGNMENT           8
@@ -26,7 +27,7 @@ static bool expand_heap(size_t pages) {
     if ((heap_end + pages * PAGE_SIZE) > ((uint8_t*)HEAP_START + HEAP_MAX_PAGES * PAGE_SIZE))
         return false;
 
-    if (vmm_map_pages(kernel_page_map, heap_end, pages, PTE_PRESENT | PTE_WRITABLE) != 0)
+    if (vmm_map_pages(get_current_task()->page_map, heap_end, pages, PTE_PRESENT | PTE_WRITABLE) != 0)
         return false;
 
     heap_end += pages * PAGE_SIZE;
