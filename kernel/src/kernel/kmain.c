@@ -141,7 +141,7 @@ void kmain() {
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS);
 
     PS2_Keyboard_init();
-    //kernel_self_test();
+    kernel_self_test();
 
     shell_start();
     for (;;) {
