@@ -33,6 +33,7 @@
 #include <ACPI/acpi.h>
 #include <tss/tss.h>
 #include <panic.h>
+#include <mm/heap.h>
 
 #include "kmain.h"
 
@@ -141,6 +142,7 @@ void kmain() {
     
     PS2_Keyboard_init();
     kernel_self_test();
+    
     shell_start();
     for (;;) {
         sched_yield();
