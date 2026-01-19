@@ -4,6 +4,7 @@
 #include <ansii.h>
 #include <threads/exit.h>
 #include <syscalls/syscall.h>
+#include <mm/heap.h>
 
 #define SYSCALL(idx, func) [idx] = (SyscallHandler)func
 
@@ -23,8 +24,7 @@ enum {
     SYS_TKILL,
     SYS_MEMINFO,
     SYS_TIME,
-    SYS_ALLOC,
-    SYS_FREE,
+    SYS_SBRK,
     SYS_CHDIR,
     SYS_GETCWD,
     SYS_READDIR
@@ -46,8 +46,7 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_TKILL, sys_tkill),
     SYSCALL(SYS_MEMINFO, sys_meminfo),
     SYSCALL(SYS_TIME, sys_time),
-    SYSCALL(SYS_ALLOC, sys_alloc),
-    SYSCALL(SYS_FREE, sys_free),
+    SYSCALL(SYS_SBRK, sys_sbrk),
     SYSCALL(SYS_CHDIR, sys_chdir),
     SYSCALL(SYS_GETCWD, sys_getcwd),
     SYSCALL(SYS_READDIR, sys_readdir),

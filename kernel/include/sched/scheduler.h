@@ -52,6 +52,9 @@ typedef struct task {
     struct task     *wait_queue;
     struct task     *wait_next;
 
+    uintptr_t       heap_base;
+    uintptr_t       heap_end;
+
     struct task     *next;
     struct task     *dead_next;
 } task_t;

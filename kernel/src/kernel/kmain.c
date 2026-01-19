@@ -33,7 +33,6 @@
 #include <ACPI/acpi.h>
 #include <tss/tss.h>
 #include <panic.h>
-#include <mm/heap.h>
 
 #include "kmain.h"
 
@@ -67,6 +66,7 @@ void scheduler_start(void) {
 void shell_start(){
     // strictly speaking this doenst have to be a shell at all
     // its just the program that runs at boot? this could be anything tbh
+
     char shell_path[256] = {0};
     kprintf(LOG_INFO "Opening initrd/etc/shell%s\n", shell_path);
     int sfd = vfs_open("initrd/etc/shell", O_RDONLY);
@@ -75,16 +75,16 @@ void shell_start(){
 
     if (r < 0)
         kprintf(LOG_ERROR "The Shell Path file, expected at %sinitrd/etc/shell%s "\
-                "did not read, reboot and try again or use another OS to correct the file\n", RGB_FG(212, 44, 44), RESET);
+            "did not read, reboot and try again or use another OS to correct the file\n", RGB_FG(212, 44, 44), RESET);
 
     vfs_close(sfd);
+    kprintf("\x1b[J");
     kprintf(LOG_INFO "Starting Shell: %s\n", shell_path);
 
     sfd = vfs_open(shell_path, O_RDONLY);
     if (sfd > 4){
         kprintf(LOG_ERROR "The Shell Path provided in %sinitrd/etc/shell%s was invalid, theres not much you can do from here\n", RGB_FG(212, 44, 44), RESET);
     }else{
-        kprintf("\x1b[J");
         elf_sched(elf_get_from_path(shell_path));
     }
 }
@@ -141,8 +141,8 @@ void kmain() {
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS);
 
     PS2_Keyboard_init();
-    kernel_self_test();
-    
+    //kernel_self_test();
+
     shell_start();
     for (;;) {
         sched_yield();
