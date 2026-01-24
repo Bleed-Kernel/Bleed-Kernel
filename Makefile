@@ -11,7 +11,7 @@ KERNEL_SYM := initrd/etc/kernel.sym
 
 MEMSZ = 256M
 
-CFLAGS := -O2 -Wall -Werror -Wextra -std=gnu11 \
+CFLAGS := -g -O2 -Wall -Werror -Wextra -std=gnu11 \
           -nostdinc -ffreestanding -fno-stack-protector \
           -fno-stack-check -fno-lto -fno-PIC -fno-pie \
           -ffunction-sections -fdata-sections -fno-omit-frame-pointer \
