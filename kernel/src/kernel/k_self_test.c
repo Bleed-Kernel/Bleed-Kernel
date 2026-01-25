@@ -7,7 +7,6 @@
 #include "self-test/ktests.h"
 
 void kernel_self_test(){
-    /*
     tty_t tty = console_get_active_tty();
 
     tty_fb_backend_t *b = tty.backend;
@@ -28,12 +27,10 @@ void kernel_self_test(){
     kprintf_at(x1, y,     "   %s", starting);
     kprintf(RESET);
     kprintf_at(x1, y + 1,     "%s", kernel_tests);
-    */
 
     paging_test_self_test();
     pmm_test_self_test();
     pit_test_self_test();
     vfs_test_self_test();
     vmm_test_self_test();
-    //kprintf("\x1b[J");
 }

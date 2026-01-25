@@ -27,7 +27,8 @@ void sys_tkill(long pid);
 system_memory_info_t *sys_meminfo();
 int sys_time(struct rtc_time* user_buf);
 
-uintptr_t sys_sbrk(intptr_t increment);
+uintptr_t sys_alloc(uint64_t pages);
+uintptr_t sys_free(uint64_t addr, uint64_t pages);
 
 long sys_chdir(const char *user_path);
 long sys_getcwd(char *buf, size_t size);

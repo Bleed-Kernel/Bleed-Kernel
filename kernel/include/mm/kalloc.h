@@ -10,7 +10,3 @@ void* kmalloc(size_t bytes);
 /// @param addr address
 /// @param bytes size to free
 void kfree(void* addr, size_t bytes);
-
-void *malloc(size_t bytes);
-
-void free(void *address);

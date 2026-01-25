@@ -1,7 +1,6 @@
 #include <mm/pmm.h>
 #include <stddef.h>
 #include <drivers/serial/serial.h>
-#include <mm/heap.h>
 
 /// @brief allocate BYTES (rounded up to the nearist 4kib)
 /// @param bytes bytes (will be rounded to nearist 4kib)
@@ -20,12 +19,4 @@ void* kmalloc(size_t bytes){
 /// @param bytes size to free
 void kfree(void* addr, size_t bytes){
     pmm_free_pages(vaddr_to_paddr(addr), (bytes + (PAGE_SIZE - 1)) / PAGE_SIZE);
-}
-
-void *malloc(size_t bytes){
-    return heap_allocate(bytes);
-}
-
-void free(void *address){
-    heap_free(address);
 }
