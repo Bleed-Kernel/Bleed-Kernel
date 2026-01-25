@@ -62,9 +62,11 @@ extern void ke_exception_handler(void *frame){
     uint64_t sym_addr;
     const char *name = stack_trace_symbol_lookup(rip, &sym_addr);
 
-    serial_printf("Kernel Panic\n\
-                  Vector: %d\n\
-                  RIP: %p\n", vector, (void *)rip);
+    serial_write("Kernel Panic!\n");
+    serial_write_hex(vector);
+    serial_write("\n");
+    serial_write_hex(f->rip);
+    serial_write("\n");
 
     kprintf("\n");
     kprintf(RED_FG "===============================================\n");

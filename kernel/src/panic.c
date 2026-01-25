@@ -10,6 +10,8 @@ __attribute__((noreturn))
 void ke_panic(const char* reason){
     __asm__ volatile ("cli");
 
+    serial_write("Kernel Panic!\n");
+
     kprintf("\n");
     kprintf(RED_FG "===============================================\n");
     kprintf("   !!!  FATAL KERNEL EXCEPTION OCCURRED  !!!\n");
