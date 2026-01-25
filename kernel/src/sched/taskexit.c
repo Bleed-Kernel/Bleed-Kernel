@@ -9,11 +9,14 @@
 
 __attribute__((noreturn))
 void exit(void) {
+    int alloc_count;
+
     task_t *current_task = get_current_task();
     task_t *w = current_task->wait_queue;
 
     user_alloc_t *alloc = current_task->alloc_list;
     while (alloc) {
+        alloc_count++;
         user_alloc_t *next = alloc->next;
 
         vmm_unmap_pages(current_task->page_map, alloc->vaddr, alloc->pages);
@@ -38,9 +41,10 @@ void exit(void) {
     sched_yield();
 
     serial_printf(
-        "%sTask %d has exited, marking as dead for reaping\n",
+        "%sTask %d has exited, marking as dead for reaping and cleared %d allocations\n",
         LOG_INFO,
-        current_task->id
+        current_task->id,
+        alloc
     );
     for (;;) { asm volatile ("hlt"); }
 }

@@ -60,9 +60,7 @@ void serial_put_char(char c){
         serial_put_char('\r');
     }
 
-    uint32_t timeout = SERIAL_TIMEOUT;
-    while (!is_serial_transmit_empty() && timeout--) { }
-    if (timeout == 0) return;
+    while (!is_serial_transmit_empty()) { }
 
     outb(PORT_COM1, c);
 }
