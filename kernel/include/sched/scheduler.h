@@ -38,6 +38,7 @@ typedef struct user_alloc {
 
 typedef struct task {
     uint64_t        id;
+    char            name[128];
     task_state_t    state;
     cpu_context_t  *context;
 
@@ -58,7 +59,7 @@ typedef struct task {
 
 typedef void (*task_itteration_fn)(task_t *task, void *userdata);
 
-task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss);
+task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, char *task_name);
 extern void sched_bootstrap(void *rsp);
 extern cpu_context_t *sched_tick(cpu_context_t *context);
 void scheduler_reap(void);

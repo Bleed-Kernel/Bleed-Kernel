@@ -6,8 +6,11 @@
 #include <drivers/serial/serial.h>
 #include <ansii.h>
 #include <tss/tss.h>
+#include <string.h>
 
 #include "priv_scheduler.h"
+
+#define KERNEL_TASK_NAME    "bleed kernel"
 
 task_t *current_task   = NULL;
 task_t *task_queue     = NULL;
@@ -73,12 +76,15 @@ void sched_bootstrap(void *rsp) {
     kernel_task->quantum_remaining = QUANTUM;
     kernel_task->context           = (cpu_context_t *)rsp;
     kernel_task->next              = kernel_task;
+    
+    strncpy(kernel_task->name, KERNEL_TASK_NAME, 128-1);
 
     kernel_task->page_map = kernel_page_map;
 
     current_task   = kernel_task;
     task_queue     = kernel_task;
     task_list_head = kernel_task;
+    
 
     serial_printf(LOG_OK "Kernel Task Created, tid:0\n");
 }

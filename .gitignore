@@ -7,3 +7,5 @@ qemu.log
 
 tools/mksymtab
 initrd/etc/kernel.sym
+
+update-mirror.sh

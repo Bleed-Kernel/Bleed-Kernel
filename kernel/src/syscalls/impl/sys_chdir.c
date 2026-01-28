@@ -7,7 +7,7 @@
 long sys_chdir(const char *user_path) {
     if (!user_path) return -FILE_NOT_FOUND;
 
-    char *kbuf = from_user_copy_string(user_path, PATH_MAX);
+    char *kbuf = str_copy_from_user(user_path, PATH_MAX);
     if (!kbuf) return -1;
 
     int r = vfs_chdir(kbuf);

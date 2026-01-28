@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <sched/scheduler.h>
+#include <drivers/serial/serial.h>
 #include <mm/kalloc.h>
 #include <mm/vmm.h>
 
@@ -23,5 +24,6 @@ uintptr_t sys_alloc(uint64_t pages) {
     t->alloc_list = alloc;
 
     user_heap_base += pages * PAGE_SIZE;
+
     return (uintptr_t)va;
 }

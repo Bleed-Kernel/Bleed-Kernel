@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <boot/sysinfo/sysinfo.h>
 #include <ACPI/acpi_time.h>
+#include <user/user_task.h>
 #include <fs/vfs.h>
 
 int sys_open(char *path_str, int flags);
@@ -32,3 +33,6 @@ uintptr_t sys_free(uint64_t addr, uint64_t pages);
 
 long sys_chdir(const char *user_path);
 long sys_getcwd(char *buf, size_t size);
+
+int sys_taskinfo(uint64_t pid, user_task_info_t *user_task);
+int sys_taskcount(uint64_t *user_count);

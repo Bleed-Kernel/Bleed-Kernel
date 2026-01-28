@@ -134,7 +134,7 @@ task_t *elf_sched(INode_t *file){
     uintptr_t entry;
     if (file != NULL) elf_load(file, cr3, &entry);
 
-    task_t *task = sched_create_task(cr3, entry, USER_CS, USER_SS);
+    task_t *task = sched_create_task(cr3, entry, USER_CS, USER_SS, file->internal_data);
 
     uint64_t *user_stack = (uint64_t *)(USER_STACK_TOP - USER_STACK_SIZE + USER_STACK_SIZE - 16);
     user_stack[0] = 0;

@@ -1,1 +1,6 @@
-The Bleed Kernel, By Mellurboo
+The Bleed Kernel by Myles Wilson,
+    The Bleed Kernel will always be Open Source
+    and we use GPLv3, run 'cat /initrd/etc/LICENCE' to view
+    the full licence file.
+
+For Support Contact me at 'myles@bleedkernel.com'

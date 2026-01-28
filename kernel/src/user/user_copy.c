@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <mm/kalloc.h>
 
-char *from_user_copy_string(const char *user_ptr, size_t max_len) {
+char *str_copy_from_user(const char *user_ptr, size_t max_len) {
     if (!user_ptr) return NULL;
     char *kbuf = kmalloc(max_len);
     if (!kbuf) return NULL;
@@ -19,7 +19,7 @@ char *from_user_copy_string(const char *user_ptr, size_t max_len) {
     return kbuf;
 }
 
-int from_kernel_copy_user(void *user_dst, const void *kernel_src, size_t len) {
+int copy_to_user(void *user_dst, const void *kernel_src, size_t len) {
     if (!user_dst || !kernel_src) return -1;
 
     uintptr_t dst = (uintptr_t)user_dst;

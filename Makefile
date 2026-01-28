@@ -86,8 +86,8 @@ install-userprogs: userprogs
 
 .PHONY: initrd
 initrd: $(KERNEL_SYM) install-userprogs
-	tar -cf initrd/initrd.tar initrd/etc/splash.txt initrd/etc/shell initrd/etc/path \
-		initrd/fonts/ttyfont.psf initrd/bin/* initrd/etc/kernel.sym
+	tar -cf initrd/initrd.tar \
+		initrd/fonts/* initrd/bin/* initrd/etc/*
 
 $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 	rm -rf iso_root

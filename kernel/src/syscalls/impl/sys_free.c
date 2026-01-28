@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <sched/scheduler.h>
+#include <drivers/serial/serial.h>
 #include <mm/pmm.h>
 #include <mm/vmm.h>
 #include <mm/kalloc.h>
@@ -25,6 +26,6 @@ uintptr_t sys_free(uint64_t addr, uint64_t pages) {
         prev = &iter->next;
         iter = iter->next;
     }
-
+    serial_printf("vmm freed at: %p\n", addr);
     return (uintptr_t)-1;
 }
