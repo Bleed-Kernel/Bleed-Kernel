@@ -43,10 +43,8 @@ void sched_mark_task_dead(task_t *task) {
         return;
     }
 
-    if (task->id == 0 || task->id == 1){
-        kprintf("%sYou cannot kill Supervisor Tasks (Attempted to kill PID: %lld)\n", LOG_ERROR, task->id);
-        return;
-    }
+    if (task->id == 0 || task->id == 1)
+        kprintf(LOG_WARN "You have killed a Supervisor Task, the system may behave unpredictably\n run the 'reboot' command to restart your machine\n");
 
     task->state = TASK_DEAD;
     task->dead_next = NULL;
