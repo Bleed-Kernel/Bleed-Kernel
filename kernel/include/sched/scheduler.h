@@ -66,8 +66,6 @@ void scheduler_reap(void);
 void sched_mark_task_dead(task_t *task);
 task_t *sched_get_task(uint64_t pid);
 
-// api
-const char *task_state_str(task_state_t state);
 uint64_t get_task_count();
 task_t *get_current_task();
 void sched_yield(void);

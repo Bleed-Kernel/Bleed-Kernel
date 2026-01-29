@@ -38,7 +38,11 @@ OBJ := $(KERNEL_OBJ) $(KLIBC_OBJ)
 DEPS := $(OBJ:.o=.d)
 -include $(DEPS)
 
-USER_PROGS := verdict meminfo specseek
+# if you are compiling for the bleed kernel and want to make it easy to place in initrd
+# make sure the user program binary compiles to USER_BASE/{your_program_root}/bin/{binary_name}
+# the binary name and root directory name must match the USER_PROGS entry
+
+USER_PROGS := verdict meminfo specseek taskman
 USER_BASE := ../bleed-user
 
 .PHONY: all

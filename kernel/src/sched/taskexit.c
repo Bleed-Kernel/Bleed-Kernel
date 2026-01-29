@@ -9,7 +9,7 @@
 
 __attribute__((noreturn))
 void exit(void) {
-    int alloc_count;
+    int alloc_count = 0;
 
     task_t *current_task = get_current_task();
     task_t *w = current_task->wait_queue;
@@ -27,7 +27,7 @@ void exit(void) {
     }
     current_task->alloc_list = NULL;
 
-    while (w){
+    while (w) {
         task_t *next = w->wait_next;
 
         w->wait_next = NULL;
@@ -44,7 +44,7 @@ void exit(void) {
         "%sTask %d has exited, marking as dead for reaping and cleared %d allocations\n",
         LOG_INFO,
         current_task->id,
-        alloc
+        alloc_count
     );
     for (;;) { asm volatile ("hlt"); }
 }

@@ -6,13 +6,16 @@ long sys_waitpid(uint64_t pid) {
     task_t *child = sched_get_task(pid);
 
     if (!child) return -1;
-    if (child->state == TASK_DEAD) {
-        return 0;
-    }
-    
-    current->wait_next = child->wait_queue;
-    child->wait_queue = current;
 
-    sched_yield();
-    return 0;
+    for (;;) {
+        if (child->state == TASK_DEAD) {
+            return 0;
+        }
+
+        current->state = TASK_BLOCKED;
+        current->wait_next = child->wait_queue;
+        child->wait_queue = current;
+
+        sched_yield();
+    }
 }
