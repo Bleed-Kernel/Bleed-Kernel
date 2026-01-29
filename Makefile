@@ -61,8 +61,8 @@ $(SYM_TOOL): tools/mksymtab.c
 
 $(KERNEL_SYM): $(KERNEL_BIN) $(SYM_TOOL)
 	@mkdir -p $(dir $@)
-	nm -n --defined-only $(KERNEL_BIN) > bin/kernel.sym.txt
-	$(SYM_TOOL) bin/kernel.sym.txt $@
+	nm -n --defined-only $(KERNEL_BIN) > bin/kernel.sym
+	$(SYM_TOOL) bin/kernel.sym $@
 
 limine/limine:
 	rm -rf limine
@@ -118,7 +118,7 @@ run: $(IMAGE_NAME).iso
 .PHONY: clean
 clean:
 	rm -rf bin $(IMAGE_NAME).iso iso_root
-	rm -f bin/kernel.sym.txt initrd/etc/kernel.sym
+	rm -f initrd/etc/kernel.sym
 	rm -f tools/mksymtab
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete
