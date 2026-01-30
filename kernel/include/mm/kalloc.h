@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 #include <stddef.h>
 
 /// @brief allocate BYTES (rounded up to the nearist 4kib)

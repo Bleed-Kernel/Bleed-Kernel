@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <devices/devices.h>
+#include <user/user_file.h>
 
 /*
     functions prefixed inode_ are operations where 
@@ -11,12 +12,13 @@
     itself
 */
 
-#define O_RDONLY  0x1
-#define O_WRONLY  0x2
-#define O_RDWR    (O_RDONLY | O_WRONLY)
-#define O_CREAT   0x4
-#define O_TRUNC   0x8
-#define O_APPEND  0x10
+#define O_RDONLY 0x0
+#define O_WRONLY 0x1
+#define O_RDWR   0x2
+#define O_MODE   0x3
+#define O_CREAT  0x4
+#define O_TRUNC  0x8
+#define O_APPEND 0x10
 
 #define PATH_MAX    4096
 #define MAX_FDS     256
@@ -114,6 +116,7 @@ size_t vfs_filesize(INode_t* inode);
 path_t vfs_path_from_abs(const char* pstring);
 path_t vfs_path_from_relative(const char *path, INode_t *cwd); 
 path_t vfs_parent_path(const path_t* path);
+user_file_t *vfs_file_stat(int fd);
 
 int vfs_open(const char *path_str, int flags);
 long vfs_read(int fd, void *buf, size_t count);

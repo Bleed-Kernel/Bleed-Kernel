@@ -36,3 +36,5 @@ long sys_getcwd(char *buf, size_t size);
 
 int sys_taskinfo(uint64_t pid, user_task_info_t *user_task);
 int sys_taskcount(uint64_t *user_count);
+
+int sys_stat(int fd, user_file_t *user_buf);

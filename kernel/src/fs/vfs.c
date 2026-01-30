@@ -2,11 +2,13 @@
 #include <string.h>
 #include <ansii.h>
 #include <stdio.h>
+#include <string.h>
 #include <status.h>
 #include <stdbool.h>
 #include <mm/kalloc.h>
 #include <drivers/serial/serial.h>
 #include <sched/scheduler.h>
+#include <user/user_file.h>
 
 extern const filesystem tempfs;
 
@@ -213,7 +215,7 @@ int vfs_open(const char *path_str, int flags){
 
     f->inode = inode;
     f->offset = flags & O_TRUNC ? 0 : ((flags & O_APPEND) ? vfs_filesize(inode) : 0);
-    f->flags = flags;
+    f->flags = flags & (O_MODE | O_APPEND | O_TRUNC);
     f->shared = 1;
 
     for (int fd = 0; fd < MAX_FDS; fd++){
@@ -228,17 +230,40 @@ int vfs_open(const char *path_str, int flags){
     return status_print_error(OUT_OF_BOUNDS);
 }
 
-long vfs_read(int fd, void *buf, size_t count){
+long vfs_read(int fd, void *buf, size_t count) {
+    if (!current_fd_table || fd >= MAX_FDS)
+        return -1;
+
     file_t *f = current_fd_table->fds[fd];
-    if (!f || !(f->flags & O_RDONLY)) return -1;
+    if (!f)
+        return -1;
+
+    int mode = f->flags & O_MODE;
+    if (mode != O_RDONLY && mode != O_RDWR)
+        return -1;
+
+    uint64_t filesize = vfs_filesize(f->inode);
+    if (f->offset >= filesize)
+        return 0; // EOF
+
+    if (count > filesize - f->offset)
+        count = filesize - f->offset;
+
     long r = inode_read(f->inode, buf, count, f->offset);
-    if (r > 0) f->offset += r;
+    if (r > 0)
+        f->offset += r;
+
     return r;
 }
 
 long vfs_write(int fd, const void *buf, size_t count){
     file_t *f = current_fd_table->fds[fd];
-    if (!f || !(f->flags & O_WRONLY)) return -1;
+    if (!f) return -1;
+
+    int mode = f->flags & O_MODE;
+    if (mode != O_WRONLY && mode != O_RDWR)
+        return -1;
+
     long r = inode_write(f->inode, buf, count, f->offset);
     if (r > 0) f->offset += r;
     return r;
