@@ -54,3 +54,7 @@ void paging_switch_address_space(paddr_t cr3);
 void paging_destroy_address_space(paddr_t cr3);
 
 uint64_t paging_alloc_empty_frame(void **vaddr);
+
+uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create);
+
+void paging_unmap_page(paddr_t cr3, uint64_t vaddr);

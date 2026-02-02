@@ -6,6 +6,7 @@
 #include <drivers/serial/serial.h>
 #include <console/console.h>
 #include <devices/type/tty_device.h>
+#include <panic.h>
 #include "../acpi_priv.h"
 
 void acpi_poweroff_fallback(){
@@ -44,6 +45,11 @@ __attribute__((noreturn))
 void acpi_shutdown(void) {
     uint16_t cmd = ACPI_PM1_SLEEP_CMD(0x5);
     outw(PM1A_CNT, cmd);
+
+    if (fadt->pm1a_cnt_blk == 0) {
+        ke_panic("ACPI: Invalid PM1A control block");
+    }
+
     if (PM1B_CNT)
         outw(PM1B_CNT, cmd);
 

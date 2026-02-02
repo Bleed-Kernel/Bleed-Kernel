@@ -1,18 +1,23 @@
+// note to self. these files are getting really, really messy i gotta clean this up
+
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
 #include <stdint.h>
 #include <stddef.h>
 #include <mm/paging.h>
+#include <mm/userspace/mmap.h>
 #include <fs/vfs.h>
 
 #define KERNEL_STACK_SIZE   8196
 
-#define USER_STACK_TOP 0x00007ffffffff000ULL
-#define USER_STACK_SIZE 16384
+#define USER_STACK_TOP      0x00007ffffffff000ULL
+#define USER_STACK_SIZE     16384
 
 #define MAX_TASKS           64
 #define QUANTUM             10
+
+typedef struct user_heap user_heap_t;
 
 typedef struct cpu_context {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
@@ -36,6 +41,13 @@ typedef struct user_alloc {
     struct user_alloc* next;
 } user_alloc_t;
 
+#define P_KERNEL    0
+#define P_USER      1
+typedef enum {
+    PRIVILEGE_KERNEL,
+    PRIVILEGE_USER
+} task_privil_t;
+
 typedef struct task {
     uint64_t        id;
     char            name[128];
@@ -47,8 +59,10 @@ typedef struct task {
 
     paddr_t         page_map;
     user_alloc_t    *alloc_list;
-    
+    user_heap_t     *heap;
+
     INode_t         *current_directory;
+    task_privil_t   task_privilege;
 
     struct task     *wait_queue;
     struct task     *wait_next;
@@ -71,6 +85,10 @@ task_t *get_current_task();
 void sched_yield(void);
 
 void itterate_each_task(task_itteration_fn fn, void *userdata);
+
+void* task_mmap(task_t* task, size_t pages);
+void task_munmap(task_t* task, void* addr);
+void sched_init_task_heap(task_t* task);
 
 extern task_t *task_list_head;
 #endif

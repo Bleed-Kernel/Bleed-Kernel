@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <mm/pmm.h>
 #include <ansii.h>
+#include <panic.h>
+#include <drivers/serial/serial.h>
 
 #include "acpi_priv.h"
 
@@ -24,8 +26,12 @@ static int acpi_checksum(void *ptr, size_t len) {
 static void *acpi_get_rsdp(void) {
     extern volatile struct limine_rsdp_request rsdp_request;
 
-    if (!rsdp_request.response || !rsdp_request.response->address)
-        ke_panic("ACPI: Limine did not provide RSDP");
+    if (!rsdp_request.response) {
+            ke_panic("ACPI: No RSDP response from bootloader");
+        }
+    if (!rsdp_request.response->address) {
+            ke_panic("ACPI: Invalid RSDP address from bootloader");
+        }
 
     return rsdp_request.response->address;
 }
@@ -36,9 +42,17 @@ static struct acpi_sdt *acpi_find_sdt(const char sig[4]) {
         if (!acpi_checksum(xsdt, xsdt->header.length))
             return NULL;
 
+        if (xsdt->header.length < sizeof(struct acpi_sdt)) {
+            serial_printf(LOG_ERROR "ACPI: Invalid XSDT length\n");
+            return NULL;
+        }
+
         size_t entries = (xsdt->header.length - sizeof(struct acpi_sdt)) / 8;
         for (size_t i = 0; i < entries; i++) {
             struct acpi_sdt *tbl = paddr_to_vaddr(xsdt->tables[i]);
+            if (!tbl) {
+                ke_panic("ACPI: Invalid table virtual address");
+            }
             if (!memcmp(tbl->signature, sig, 4))
                 return tbl;
         }
@@ -83,9 +97,14 @@ void acpi_init(void) {
         ke_panic("ACPI: bad FADT checksum");
 
     if (fadt->smi_cmd && fadt->acpi_enable) {
+        serial_printf(LOG_INFO "ACPI: Enabling via SMI_CMD=0x%x\n", fadt->smi_cmd);
         outb(fadt->smi_cmd, fadt->acpi_enable);
 
-        while (!(inw(fadt->pm1a_cnt_blk) & 1))
-            ;
+        int timeout = 1000000;
+        while (!(inw(fadt->pm1a_cnt_blk) & 1) && timeout-- > 0)
+            asm("pause");
+        if (timeout <= 0) {
+            ke_panic("ACPI: Enable timeout");
+        }
     }
 }

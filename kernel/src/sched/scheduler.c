@@ -7,6 +7,7 @@
 #include <ansii.h>
 #include <tss/tss.h>
 #include <string.h>
+#include <mm/spinlock.h>
 
 #include "priv_scheduler.h"
 
@@ -71,11 +72,12 @@ void sched_bootstrap(void *rsp) {
     if (!kernel_task)
         ke_panic("Failed to allocate kernel task");
 
-    kernel_task->id                = 0;
-    kernel_task->state             = TASK_RUNNING;
-    kernel_task->quantum_remaining = QUANTUM;
-    kernel_task->context           = (cpu_context_t *)rsp;
-    kernel_task->next              = kernel_task;
+    kernel_task->id                 = 0;
+    kernel_task->state              = TASK_RUNNING;
+    kernel_task->quantum_remaining  = QUANTUM;
+    kernel_task->context            = (cpu_context_t *)rsp;
+    kernel_task->next               = kernel_task;
+    kernel_task->task_privilege     = P_KERNEL;
     
     strncpy(kernel_task->name, KERNEL_TASK_NAME, 128-1);
 

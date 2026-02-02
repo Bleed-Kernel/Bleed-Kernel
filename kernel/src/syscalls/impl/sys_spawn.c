@@ -10,8 +10,14 @@
 #include <ansii.h>
 
 uint64_t sys_spawn(uint64_t user_path_ptr) {
-    char *kpath = str_copy_from_user((const char *)user_path_ptr, 256);
-    if (!kpath) return -1;
+    if (!user_path_ptr) return -1;
+
+    char kpath[256];
+    for (size_t i = 0; i < sizeof(kpath); i++) kpath[i] = 0;
+
+    task_t *caller = get_current_task();
+    if (copy_from_user(caller, kpath, (const char *)user_path_ptr, sizeof(kpath)) != 0)
+        return -1;
 
     INode_t *file = elf_get_from_path(kpath);
     if (!file) return -1;
@@ -26,4 +32,3 @@ uint64_t sys_spawn(uint64_t user_path_ptr) {
 
     return child->id;
 }
-

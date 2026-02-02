@@ -9,6 +9,7 @@
 #include <drivers/serial/serial.h>
 #include <sched/scheduler.h>
 #include <user/user_file.h>
+#include <mm/spinlock.h>
 
 extern const filesystem tempfs;
 

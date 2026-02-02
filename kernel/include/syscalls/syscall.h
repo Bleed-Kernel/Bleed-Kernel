@@ -34,7 +34,12 @@ uintptr_t sys_free(uint64_t addr, uint64_t pages);
 long sys_chdir(const char *user_path);
 long sys_getcwd(char *buf, size_t size);
 
-int sys_taskinfo(uint64_t pid, user_task_info_t *user_task);
-int sys_taskcount(uint64_t *user_count);
+uint64_t sys_taskinfo(uint64_t pid, uint64_t user_info_ptr);
+uint64_t sys_taskcount(void);
 
 int sys_stat(int fd, user_file_t *user_buf);
+
+void *sys_mmap(size_t pages);
+void sys_munmap(void *addr);
+
+int sys_test_usercopy(uint64_t user_buf_ptr, uint64_t len);

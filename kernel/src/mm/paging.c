@@ -154,6 +154,18 @@ paddr_t paging_create_address_space(void){
     return pml4_paddr;
 }
 
+void paging_unmap_page(paddr_t cr3, uint64_t vaddr) {
+    uint64_t *pte = paging_get_page(cr3, vaddr, 0);
+    if (!pte)
+        return;
+
+    if (!(*pte & PTE_PRESENT))
+        return;
+
+    *pte = 0;
+    __asm__ volatile ("invlpg (%0)" :: "r"(vaddr) : "memory");
+}
+
 /// @brief switch the current CR3 address space context
 /// @param cr3 cr3 paddr
 void paging_switch_address_space(paddr_t cr3){
@@ -165,4 +177,40 @@ void paging_switch_address_space(paddr_t cr3){
 void paging_destroy_address_space(paddr_t cr3){
     if (!cr3) return;
     pmm_free_pages(cr3, 1);
+}
+
+uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create) {
+    uint64_t *pml4 = (uint64_t*)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
+    if (!pml4) return NULL;
+
+    size_t pml4_index = (vaddr >> 39) & 0x1FF;
+    size_t pdpt_index = (vaddr >> 30) & 0x1FF;
+    size_t pd_index   = (vaddr >> 21) & 0x1FF;
+    size_t pt_index   = (vaddr >> 12) & 0x1FF;
+
+    uint64_t *pdpt = (uint64_t*)paddr_to_vaddr(pml4[pml4_index] & PADDR_ENTRY_MASK);
+    if (!pdpt) {
+        if (!create) return NULL;
+        paddr_t paddr = paging_alloc_empty_frame((void**)&pdpt);
+        if (!pdpt) return NULL;
+        pml4[pml4_index] = paddr | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
+    }
+
+    uint64_t *pd = (uint64_t*)paddr_to_vaddr(pdpt[pdpt_index] & PADDR_ENTRY_MASK);
+    if (!pd) {
+        if (!create) return NULL;
+        paddr_t paddr = paging_alloc_empty_frame((void**)&pd);
+        if (!pd) return NULL;
+        pdpt[pdpt_index] = paddr | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
+    }
+
+    uint64_t *pt = (uint64_t*)paddr_to_vaddr(pd[pd_index] & PADDR_ENTRY_MASK);
+    if (!pt) {
+        if (!create) return NULL;
+        paddr_t paddr = paging_alloc_empty_frame((void**)&pt);
+        if (!pt) return NULL;
+        pd[pd_index] = paddr | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
+    }
+
+    return &pt[pt_index];
 }

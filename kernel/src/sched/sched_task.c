@@ -84,14 +84,9 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     memset(task, 0, sizeof(task_t));
 
     uint64_t pid = alloc_pid();
-    if (pid > 0){
-        task->id = pid;
-    }else{
-        kprintf(LOG_ERROR "Failed to allocate PID to task\n");
-    }
+    if (pid > 0) task->id = pid;
 
     strcpy(task->name, task_name);
-
     task->state = TASK_READY;
     task->quantum_remaining = QUANTUM;
     task->page_map = cr3;
@@ -114,12 +109,15 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     ctx->ss  = ss;
     ctx->rflags = 0x202;
     ctx->rsp = (cs & 0x3) ? USER_STACK_TOP : kernel_stack_top;
+    
+    task->task_privilege = (cs & 0x3) ? P_USER : P_KERNEL;
     task->context = ctx;
+
+    sched_init_task_heap(task);
 
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
     queue_task(task);
-    if (!task_list_head) task_list_head = task;
     spinlock_release(&sched_lock);
     irq_restore(flags);
 
@@ -130,28 +128,24 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
 }
 
 void itterate_each_task(task_itteration_fn fn, void *userdata) {
-    if (!task_list_head || !fn)
-        return;
+    if (!task_list_head || !fn) return;
 
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
 
     task_t *start = task_list_head;
     task_t *task = start;
-    if (task) {
-        do {
-            fn(task, userdata);
-            task = task->next;
-        } while (task != start);
-    }
+    do {
+        fn(task, userdata);
+        task = task->next;
+    } while (task != start);
 
     spinlock_release(&sched_lock);
     irq_restore(flags);
 }
 
 uint64_t get_task_count(void) {
-    if (!task_list_head)
-        return 0;
+    if (!task_list_head) return 0;
 
     uint64_t count = 0;
     unsigned long flags = irq_push();
@@ -159,15 +153,21 @@ uint64_t get_task_count(void) {
 
     task_t *start = task_list_head;
     task_t *task = start;
-    if (task) {
-        do {
-            count++;
-            task = task->next;
-        } while (task != start);
-    }
+    do {
+        count++;
+        task = task->next;
+    } while (task != start);
 
     spinlock_release(&sched_lock);
     irq_restore(flags);
-
     return count;
+}
+
+void sched_init_task_heap(task_t* task) {
+    if (!task) return;
+    user_heap_t* heap = kmalloc(sizeof(user_heap_t));
+    heap->task = task;
+    heap->current = 0x0000004000000000ULL;
+    heap->end = heap->current;
+    task->heap = heap;
 }

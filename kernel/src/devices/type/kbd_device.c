@@ -6,6 +6,8 @@
 #include <string.h>
 #include <devices/type/kbd_device.h>
 #include <mm/kalloc.h>
+#include <drivers/serial/serial.h>
+#include <ansii.h>
 
 typedef struct {
     INode_t device;
@@ -53,6 +55,8 @@ static void kbd_listener(const keyboard_event_t *ev) {
     if (next_head != kbd0->tail) {
         kbd0->buffer[kbd0->head] = c;
         kbd0->head = next_head;
+    }else{
+        serial_printf("%sKBD: Buffer overflow, dropping key\n", LOG_WARN);
     }
 
     spinlock_release(&kbd0->lock);
