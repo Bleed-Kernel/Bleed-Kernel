@@ -4,6 +4,7 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <drivers/framebuffer/framebuffer_console.h>
 #include <mm/spinlock.h>
+#include <fonts/utf-8.h>
 #include <mm/kalloc.h>
 #include <panic.h>
 
@@ -55,6 +56,26 @@ static inline void framebuffer_clear_row(uint32_t* buffer, size_t y, size_t pitc
         row[i] = color;
 }
 
+static void framebuffer_render_glyph_index(fb_console_t *fb, size_t row, size_t col, uint16_t idx, uint32_t fg, uint32_t bg) {
+    const uint8_t *glyph = psf_get_glyph_font(fb->font, idx);
+    if (!glyph) return;
+
+    size_t px = col * fb->font->width;
+    size_t py = row * fb->font->height;
+
+    for (uint32_t r = 0; r < fb->font->height; r++) {
+        uint32_t* dst = fb_buffer + (py + r) * fb->pitch + px;
+        for (unsigned int byte = 0; byte < fb->font->bytes_per_row; byte++) {
+            uint8_t bits = glyph[r * fb->font->bytes_per_row + byte];
+            for (int bit = 0; bit < 8 && (byte * 8 + bit) < fb->font->width; bit++) {
+                if (px + byte * 8 + bit < fb->width)
+                    dst[byte * 8 + bit] = (bits & (0x80 >> bit)) ? fg : bg;
+            }
+        }
+        framebuffer_mark_dirty(fb, py + r, 1);
+    }
+}
+
 static void framebuffer_scroll_buffer(fb_console_t *fb) {
     size_t row_px = fb->font->height;
     if (!fb_buffer) return;
@@ -91,19 +112,7 @@ static inline void framebuffer_draw_glyph_row_mem(fb_console_t *fb, size_t x, si
     }
 }
 
-static void framebuffer_render_char_mem(fb_console_t *fb, size_t row, size_t col, char c, uint32_t fg, uint32_t bg) {
-    if (!c) return;
-    const uint8_t *glyph = psf_get_glyph_font(fb->font, (uint16_t)c);
-    if (!glyph) return;
-
-    size_t px = col * fb->font->width;
-    size_t py = row * fb->font->height;
-
-    for (uint32_t r = 0; r < fb->font->height; r++)
-        framebuffer_draw_glyph_row_mem(fb, px, py + r, &glyph[r * fb->font->bytes_per_row], fg, bg);
-}
-
-void framebuffer_put_char(fb_console_t *fb, char c) {
+void framebuffer_put_char(fb_console_t *fb, uint32_t c) {
     if (!fb_buffer) framebuffer_init_buffer(fb);
 
     size_t max_cols = fb->width / fb->font->width;
@@ -115,8 +124,8 @@ void framebuffer_put_char(fb_console_t *fb, char c) {
     case '\b': if (fb->cursor_x) fb->cursor_x--; break;
     case '\t': fb->cursor_x = (fb->cursor_x + 8) & ~7; break;
     default:
-        if ((uint8_t)c < 0x20) return;
-        framebuffer_render_char_mem(fb, fb->cursor_y, fb->cursor_x, c, fb->fg, fb->bg);
+        uint16_t idx = psf_lookup_glyph(fb->font, c);
+        framebuffer_render_glyph_index(fb, fb->cursor_y, fb->cursor_x, idx, fb->fg, fb->bg);
         fb->cursor_x++;
         break;
     }
@@ -132,7 +141,16 @@ void framebuffer_put_char(fb_console_t *fb, char c) {
         framebuffer_flush(fb);
 }
 
-void framebuffer_write_string(fb_console_t *fb, ansii_state_t *ansi, const char *str, spinlock_t *framebuffer_lock) {
-    while (*str)
-        framebuffer_ansi_char(fb, framebuffer_lock, ansi, *str++);
+void framebuffer_write_string(fb_console_t *fb, ansii_state_t *ansi, const char *str, spinlock_t *lock) {
+    const uint8_t *p = (const uint8_t *)str;
+    while (*p) {
+        uint32_t cp;
+        size_t len = utf8_decode(p, &cp);
+        if (!len) {
+            p++;
+            continue;
+        }
+        framebuffer_ansi_char(fb, lock, ansi, cp);
+        p += len;
+    }
 }

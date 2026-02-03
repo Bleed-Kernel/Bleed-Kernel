@@ -37,7 +37,7 @@ uint64_t framebuffer_get_bpp(int idx);
 /// @param c character
 /// @param fg foreground colour
 /// @param bg background colour
-void framebuffer_put_char(fb_console_t *fb, char c);
+void framebuffer_put_char(fb_console_t *fb, uint32_t c);
 
 /// @brief recursivly write characters from a string to the framebuffer
 /// @param str target
@@ -50,7 +50,7 @@ void framebuffer_write_string(
 
 /// @brief evaluate c and track its ansii state
 /// @param c target
-void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii_state_t *st, char c);
+void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii_state_t *st, uint32_t c);
 
 /// @brief clear the framebuffer
 /// @param color bg colour to clear with

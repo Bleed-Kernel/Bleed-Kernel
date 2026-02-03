@@ -5,15 +5,30 @@
 #include <stdbool.h>
 #include <fs/vfs.h>
 
+#define PSF1_MAGIC0 0x36
+#define PSF1_MAGIC1 0x04
+
+#define PSF2_MAGIC  0x864AB572
+
+#define PSF_UNICODE_MAX 0x110000
+#define PSF_GLYPH_INVALID 0xFFFF
+
 typedef struct psf_font {
-    uint8_t    *glyphs;
-    size_t      glyph_count;
-    uint32_t    width;
-    uint32_t    height;
-    uint32_t    bytes_per_row;
-    bool        has_unicode_table;
-    uint8_t    *unicode_table;
-    size_t      unicode_table_size;
+    uint8_t  *glyphs;
+    size_t    glyph_count;
+
+    uint32_t  width;
+    uint32_t  height;
+    uint32_t  bytes_per_row;
+    uint32_t  bytes_per_glyph;
+
+    bool      has_unicode_table;
+    uint8_t  *unicode_table;
+    size_t    unicode_table_size;
+
+    uint16_t *unicode_map;
+
+    bool      is_psf2;
 } psf_font_t;
 
 /// @return current loaded font
@@ -35,6 +50,8 @@ psf_font_t* psf_load_font(INode_t *inode);
 /// @param code unsigned 16 code
 /// @return constant uint8 glyph
 const uint8_t* psf_get_glyph_font(const psf_font_t *font, uint16_t code);
+
+uint16_t psf_lookup_glyph(const psf_font_t *font, uint32_t codepoint);
 
 /// @brief free a font and all of its contents, including structure
 /// @param font target font

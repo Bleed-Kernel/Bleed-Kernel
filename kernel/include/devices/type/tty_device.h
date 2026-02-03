@@ -17,6 +17,9 @@ typedef struct {
     fb_console_t fb;
     ansii_state_t ansi;
     spinlock_t fb_lock;
+    uint8_t utf8_buf[4];
+    int utf8_len;
+    int utf8_expected;
 } tty_fb_backend_t;
 
 struct tty_ops {

@@ -9,6 +9,7 @@
 #include <mm/spinlock.h>
 #include <mm/kalloc.h>
 #include <console/console.h>
+#include <fonts/utf-8.h>
 #include <stdio.h>
 
 long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
@@ -51,11 +52,10 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
 long tty_inode_write(INode_t* inode, const void* in_buffer, size_t size, size_t offset) {
     (void) offset;
     tty_t *tty = inode->internal_data;
-    const char *c = in_buffer;
+    const uint8_t *c = in_buffer;
 
-    void (*putc)(tty_t*, char) = tty->ops->putchar;
-    for (size_t i = 0; i < size; i++){
-        putc(tty, c[i]);
+    for (size_t i = 0; i < size; i++) {
+        tty->ops->putchar(tty, (char)c[i]);
     }
 
     return size;
@@ -92,7 +92,32 @@ static void tty_input_listener(const keyboard_event_t *ev) {
 
 static void tty_fb_putchar(tty_t *tty, char c) {
     tty_fb_backend_t *b = tty->backend;
-    framebuffer_ansi_char(&b->fb, &b->fb_lock, &b->ansi, c);
+    uint8_t byte = (uint8_t)c;
+
+    if (b->utf8_len == 0) {
+        if (byte < 0x80) {
+            framebuffer_ansi_char(&b->fb, &b->fb_lock, &b->ansi, (uint32_t)byte);
+            return;
+        } else if ((byte & 0xE0) == 0xC0) {
+            b->utf8_expected = 2;
+        } else if ((byte & 0xF0) == 0xE0) {
+            b->utf8_expected = 3;
+        } else if ((byte & 0xF8) == 0xF0) {
+            b->utf8_expected = 4;
+        } else {
+            return;
+        }
+        b->utf8_buf[b->utf8_len++] = byte;
+    } else {
+        b->utf8_buf[b->utf8_len++] = byte;
+        if (b->utf8_len == b->utf8_expected) {
+            uint32_t codepoint = 0;
+            utf8_decode(b->utf8_buf, &codepoint);
+            framebuffer_ansi_char(&b->fb, &b->fb_lock, &b->ansi, codepoint);
+            b->utf8_len = 0;
+            b->utf8_expected = 0;
+        }
+    }
 }
 
 struct tty_ops tty_ops = {
@@ -153,11 +178,11 @@ void tty_init(tty_t *tty, void *backend,
 }
 
 void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, fb_console_t *fb, uint32_t flags) {
-    spinlock_t framebuffer_lock = {0};
-
-    backend->fb   = *fb;
+    backend->fb = *fb;
     backend->ansi = (ansii_state_t){0};
-    backend->fb_lock = framebuffer_lock;
+    backend->fb_lock = (spinlock_t){0};
+    backend->utf8_len = 0;
+    backend->utf8_expected = 0;
 
     tty_init(tty, backend, backend->fb_lock, flags);
 }
