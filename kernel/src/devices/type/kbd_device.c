@@ -62,15 +62,23 @@ static void kbd_listener(const keyboard_event_t *ev) {
     spinlock_release(&kbd0->lock);
 }
 
-void kbd_device_init() {
+void kbd_device_init(INode_t* kbd_inode) {
     kbd0 = kmalloc(sizeof(kbd_device_t));
     memset(kbd0, 0, sizeof(*kbd0));
     spinlock_init(&kbd0->lock);
+    if (kbd_inode) {
+        file_t* kbd_fd = kmalloc(sizeof(file_t));
+        kbd_fd->inode = kbd_inode;
+        kbd_fd->flags = O_RDONLY;
+        kbd_fd->offset = 0;
+        kbd_fd->shared = 1;
 
-    kbd0->device.ops = &kbd_inode_ops;
-    kbd0->device.internal_data = kbd0;
+        device_register(&kbd0->device, "kbd0");
+        
+        kbd_inode->ops = &kbd_inode_ops;
+        kbd_inode->internal_data = kbd0;
 
-    device_register(&kbd0->device, "kbd0");
-
-    keyboard_register_listener(kbd_listener);
+        current_fd_table->fds[3] = kbd_fd;
+        keyboard_register_listener(kbd_listener);
+    }
 }

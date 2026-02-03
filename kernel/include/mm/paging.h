@@ -6,6 +6,8 @@
 #define PTE_PRESENT     (1ULL<<0)
 #define PTE_WRITABLE    (1ULL<<1)
 #define PTE_USER        (1ULL<<2)
+
+#define PTE_PCD         (1ULL << 4)
 #define PTE_PS          (1ULL<<7)
 
 #define PAGE_KERNEL_RW      (PTE_WRITABLE | PTE_PS)

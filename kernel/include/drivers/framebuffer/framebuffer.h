@@ -30,6 +30,8 @@ uint64_t framebuffer_get_width(int idx);
 /// @return framebuffer (y)
 uint64_t framebuffer_get_height(int idx);
 
+uint64_t framebuffer_get_bpp(int idx);
+
 /// @brief write a character to the framebuffer
 /// @param font text font
 /// @param c character

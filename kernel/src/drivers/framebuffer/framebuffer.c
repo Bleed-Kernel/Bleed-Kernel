@@ -23,3 +23,7 @@ uint64_t framebuffer_get_width(int idx) {
 uint64_t framebuffer_get_height(int idx) {
     return framebuffer_request.response->framebuffers[idx]->height;
 }
+
+uint64_t framebuffer_get_bpp(int idx) {
+    return framebuffer_request.response->framebuffers[idx]->bpp;
+}

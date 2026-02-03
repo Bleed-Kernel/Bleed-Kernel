@@ -30,7 +30,8 @@ enum {
     SYS_MMAP,
     SYS_MUNMAP,
     SYS_TASKCOUNT,
-    SYS_TASKINFO
+    SYS_TASKINFO,
+    SYS_MAPFB
 };
 
 #pragma GCC diagnostic push
@@ -56,7 +57,8 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_MMAP, sys_mmap),
     SYSCALL(SYS_MUNMAP, sys_munmap),
     SYSCALL(SYS_TASKINFO, sys_taskinfo),
-    SYSCALL(SYS_TASKCOUNT, sys_taskcount)
+    SYSCALL(SYS_TASKCOUNT, sys_taskcount),
+    SYSCALL(SYS_MAPFB, sys_mapfb)
 };
 #pragma GCC diagnostic pop
 

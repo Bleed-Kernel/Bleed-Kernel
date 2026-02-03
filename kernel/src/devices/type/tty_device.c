@@ -7,6 +7,7 @@
 #include <input/keyboard_dispatch.h>
 #include <devices/device_io.h>
 #include <mm/spinlock.h>
+#include <mm/kalloc.h>
 #include <console/console.h>
 #include <stdio.h>
 
@@ -159,4 +160,17 @@ void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, fb_console_t *f
     backend->fb_lock = framebuffer_lock;
 
     tty_init(tty, backend, backend->fb_lock, flags);
+}
+
+void tty_device_init(INode_t* tty_inode){
+    file_t* f0 = kmalloc(sizeof(file_t));
+    memset(f0, 0, sizeof(*f0));
+
+    f0->inode = tty_inode;
+    f0->flags = O_RDWR;
+    f0->offset = 0;
+    f0->shared = 1;
+    current_fd_table->fds[0] = f0;
+    current_fd_table->fds[1] = f0;
+    current_fd_table->fds[2] = f0;
 }

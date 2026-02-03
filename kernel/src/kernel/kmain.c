@@ -29,6 +29,7 @@
 #include <ACPI/acpi_time.h>
 #include <mm/vmm.h>
 #include <exec/elf_load.h>
+#include <devices/type/fb_device.h>
 #include <devices/type/kbd_device.h>
 #include <ACPI/acpi.h>
 #include <tss/tss.h>
@@ -95,7 +96,6 @@ void kmain() {
     pmm_init();
     vfs_mount_root();
     initrd_load();
-    kbd_device_init();
     psf_init("initrd/fonts/ttyfont.psf");
     stack_trace_load_symbols("initrd/etc/kernel.sym");
     reinit_paging();
@@ -113,35 +113,20 @@ void kmain() {
     scheduler_start();
     asm volatile ("sti");
 
+    fb_device_init();
+
     INode_t* tty_inode = device_get_by_name("tty0");
-
-    if (tty_inode) {
-        file_t* f0 = kmalloc(sizeof(file_t));
-        f0->inode = tty_inode;
-        f0->flags = O_RDWR;
-        f0->offset = 0;
-        f0->shared = 1;
-        current_fd_table->fds[0] = f0;
-        current_fd_table->fds[1] = f0;
-        current_fd_table->fds[2] = f0;
-    }
-
+    tty_device_init(tty_inode);
+    
     INode_t* kbd_inode = device_get_by_name("kbd0");
-    if (kbd_inode) {
-        file_t* kbd_fd = kmalloc(sizeof(file_t));
-        kbd_fd->inode = kbd_inode;
-        kbd_fd->flags = O_RDONLY;
-        kbd_fd->offset = 0;
-        kbd_fd->shared = 0;
-
-        current_fd_table->fds[3] = kbd_fd;
-    }
+    kbd_device_init(kbd_inode);
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
 
     PS2_Keyboard_init();
     kernel_self_test();
     shell_start();
+
     for (;;) {
         sched_yield();
     }

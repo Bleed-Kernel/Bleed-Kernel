@@ -43,3 +43,4 @@ void *sys_mmap(size_t pages);
 void sys_munmap(void *addr);
 
 int sys_test_usercopy(uint64_t user_buf_ptr, uint64_t len);
+void* sys_mapfb(task_t *task, size_t *out_pages);

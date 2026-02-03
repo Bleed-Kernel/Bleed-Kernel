@@ -43,3 +43,4 @@ void tty_process_input(tty_t *tty, char c);
 void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, fb_console_t *fb, uint32_t flags);
 
 void fb_clear(fb_console_t *fb);
+void tty_device_init(INode_t* tty_inode);
