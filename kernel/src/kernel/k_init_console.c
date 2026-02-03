@@ -10,7 +10,7 @@ tty_t kernel_console_init(){
         .pixels = framebuffer_get_addr(0),
         .width = framebuffer_get_width(0),
         .height = framebuffer_get_height(0),
-        .pitch = framebuffer_get_pitch(0),
+        .pitch = framebuffer_get_pitch(0) / 4,
         .font = psf_get_current_font(),
         .fg = 0xFFFFFF,
         .bg = 0x000000,

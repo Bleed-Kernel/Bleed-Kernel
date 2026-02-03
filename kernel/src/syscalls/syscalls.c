@@ -14,6 +14,7 @@ enum {
     SYS_WRITE,
     SYS_OPEN,
     SYS_CLOSE,
+    SYS_IOCTL,
     SYS_YEILD,
     SYS_SPAWN,
     SYS_SHUTDOWN,
@@ -31,7 +32,7 @@ enum {
     SYS_MUNMAP,
     SYS_TASKCOUNT,
     SYS_TASKINFO,
-    SYS_MAPFB
+    SYS_MAPFB,
 };
 
 #pragma GCC diagnostic push
@@ -41,6 +42,7 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_WRITE, sys_write),
     SYSCALL(SYS_OPEN, sys_open),
     SYSCALL(SYS_CLOSE, sys_close),
+    SYSCALL(SYS_IOCTL, sys_ioctl),
     SYSCALL(SYS_YEILD, sys_yield),
     SYSCALL(SYS_SPAWN, sys_spawn),
     SYSCALL(SYS_SHUTDOWN, sys_shutdown),

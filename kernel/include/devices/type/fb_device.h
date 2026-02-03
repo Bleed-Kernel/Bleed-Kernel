@@ -14,7 +14,13 @@ typedef struct {
     size_t pitch;
 } fb_device_t;
 
-__attribute__((used))
-static fb_device_t *fb0 = NULL;
+struct fb_info {
+    uint64_t width;
+    uint64_t height;
+    uint64_t pitch;
+    uint64_t bpp;
+};
 
-void fb_device_init(void);
+#define FB_IOC_GET_INFO 0x5001
+
+void fb_device_init();

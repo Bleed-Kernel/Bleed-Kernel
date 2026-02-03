@@ -92,6 +92,21 @@ int vfs_create(const path_t* path, INode_t** out_result, inode_type node_type){
     return e;
 }
 
+int vfs_ioctl(int fd, unsigned long request, void* arg) {
+    if (fd < 0 || fd >= MAX_FDS) return -1;
+    
+    file_t *file = current_fd_table->fds[fd];
+    if (!file || !file->inode) return -1;
+
+    INode_t *inode = file->inode;
+
+    if (inode->ops && inode->ops->ioctl) {
+        return inode->ops->ioctl(inode, request, arg);
+    }
+
+    return -1;
+}
+
 path_t vfs_parent_path(const path_t* path){
     const char* end = path->data + path->data_length;
     while(end > path->data && *(end-1) == '/') end--;

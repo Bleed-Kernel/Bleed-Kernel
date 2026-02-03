@@ -2,19 +2,11 @@
 #include <mm/spinlock.h>
 #include <mm/kalloc.h>
 #include <drivers/framebuffer/framebuffer.h>
+#include <devices/type/fb_device.h>
 #include <mm/paging.h>
 #include <stdio.h>
 #include <string.h>
 #include <sched/scheduler.h>
-
-typedef struct {
-    INode_t device;
-    spinlock_t lock;
-    void    *fb_phys;
-    size_t width;
-    size_t height;
-    size_t pitch;
-} fb_device_t;
 
 static fb_device_t *fb0 = NULL;
 
@@ -58,23 +50,52 @@ static long fb_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     return read_len;
 }
 
+static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
+    fb_device_t *fb = inode->internal_data;
+    
+    switch (request) {
+        case FB_IOC_GET_INFO: {
+            struct fb_info info = {
+                .width  = fb->width,
+                .height = fb->height,
+                .pitch  = fb->pitch,
+                .bpp    = 32
+            };
+            memcpy(arg, &info, sizeof(struct fb_info));
+            return 0;
+        }
+        default:
+            return -1;
+    }
+}
+
 static struct INodeOps fb_inode_ops = {
     .write = fb_write,
     .read  = fb_read,
+    .ioctl = fb_ioctl,
 };
 
-void fb_device_init(void) {
+void fb_device_init() {
     fb0 = kmalloc(sizeof(fb_device_t));
     memset(fb0, 0, sizeof(*fb0));
     spinlock_init(&fb0->lock);
 
-    fb0->fb_phys = framebuffer_get_addr(0);
+    fb0->fb_phys = (uintptr_t)framebuffer_get_addr(0);
     fb0->width   = framebuffer_get_width(0);
     fb0->height  = framebuffer_get_height(0);
     fb0->pitch   = framebuffer_get_pitch(0);
 
     fb0->device.ops = &fb_inode_ops;
     fb0->device.internal_data = fb0;
+    fb0->device.type = INODE_FILE;
+
+    file_t* fb_fd = kmalloc(sizeof(file_t));
+    fb_fd->inode = &fb0->device;
+    fb_fd->flags = O_RDWR;
+    fb_fd->offset = 0;
+    fb_fd->shared = 1;
+
+    current_fd_table->fds[4] = fb_fd;
 
     device_register(&fb0->device, "fb0");
 }

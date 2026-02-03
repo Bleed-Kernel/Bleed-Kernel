@@ -43,6 +43,7 @@ typedef struct INodeOps{
     long   (*read)    (INode_t* inode, void* out_buffer, size_t size, size_t offset);
     long   (*write)   (INode_t* inode, const void* in_buffer, size_t size, size_t offset);
     int    (*lookup)  (INode_t* dir, const char* name, size_t name_length, INode_t** result);
+    int    (*ioctl)   (INode_t* inode, unsigned long request, void* arg);
     void   (*drop)    (INode_t* inode);
     int    (*readdir) (INode_t* dir, size_t index, INode_t** result);
     size_t (*size)    (INode_t* inode);
@@ -123,6 +124,7 @@ long vfs_read(int fd, void *buf, size_t count);
 long vfs_write(int fd, const void *buf, size_t count);
 int vfs_chdir(const char *path_str);
 int vfs_close(int fd);
+int vfs_ioctl(int fd, unsigned long request, void* arg);
 
 int inode_create(INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type);
 long inode_read(INode_t* inode, void* buf, size_t count, size_t offset);

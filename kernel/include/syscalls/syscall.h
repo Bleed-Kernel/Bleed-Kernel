@@ -16,6 +16,7 @@ int sys_close(int fd);
 void sys_exit();
 uint64_t sys_clear(uint64_t fd);
 void sys_yield();
+uint64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg);
 
 uint64_t sys_spawn(uint64_t user_path_ptr);
 long sys_waitpid(uint64_t pid);

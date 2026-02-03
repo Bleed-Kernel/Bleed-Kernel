@@ -13,7 +13,7 @@ void *framebuffer_get_addr(int idx) {
 }
 
 uint64_t framebuffer_get_pitch(int idx) {
-    return framebuffer_request.response->framebuffers[idx]->pitch / 4;
+    return framebuffer_request.response->framebuffers[idx]->pitch;
 }
 
 uint64_t framebuffer_get_width(int idx) {

@@ -111,7 +111,6 @@ void kmain() {
     pic_unmask(2);
 
     scheduler_start();
-    asm volatile ("sti");
 
     fb_device_init();
 
@@ -120,6 +119,8 @@ void kmain() {
     
     INode_t* kbd_inode = device_get_by_name("kbd0");
     kbd_device_init(kbd_inode);
+
+    asm volatile ("sti");
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
 
