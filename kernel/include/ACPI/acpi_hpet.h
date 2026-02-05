@@ -6,8 +6,12 @@
 #define femtosecondsPerMillisecond  1000000000000
 #define femtosecondsPerMicrosecond  1000000000
 
-#define HPET_GENERAL_CONFIG  0x10
-#define HPET_MAIN_COUNTER   0xF0
+#define HPET_MAINCOUNTER_ENABLE 0b1
+#define HPET_LEGACY_REPLACEMENT 0b01
+#define HPET_TIMER_INTERUPTS    0b100
+#define HPET_TIMER_PERIODIC     0b1000
+
+#define HPET_MAIN_COUNTER       0xF0
 
 #define HPET_ENABLE_CNF   (1 << 0)
 #define HPET_LEGACY_CNF   (1 << 1)

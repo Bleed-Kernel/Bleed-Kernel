@@ -48,7 +48,7 @@ static inline void *memcpy(void *dest, const void *src, uint64_t n) {
     const uint8_t *psrc = (const uint8_t *)src;
 
     for (uint64_t i = 0; i < n; i++) {
-        pdest[i] = psrc[i];
+        *pdest++ = *psrc++;
     }
 
     return dest;

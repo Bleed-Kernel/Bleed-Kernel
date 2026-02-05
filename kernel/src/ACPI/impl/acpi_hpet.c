@@ -6,6 +6,7 @@
 #include <mm/paging.h>
 #include <ansii.h>
 #include <drivers/pic/pic.h>
+#include <sched/scheduler.h>
 
 #define HPET_FREQUENCY          1000
 
@@ -25,8 +26,8 @@ void acpi_init_hpet(void){
 
     paging_map_page(kernel_page_map, (uint64_t)hpet->address.address, (uint64_t)address, PTE_PRESENT | PTE_WRITABLE);
     
-    *(uint32_t*)(address + 0x10)    |= 0b11;
-    *(uint32_t*)(address + 0x100)   |= 0b1100;
+    *(uint32_t*)(address + 0x10)    |= HPET_MAINCOUNTER_ENABLE  |   HPET_LEGACY_REPLACEMENT;
+    *(uint32_t*)(address + 0x100)   |= HPET_TIMER_INTERUPTS     |   HPET_TIMER_PERIODIC;
 
     femtosecondsPerTick = *(uint64_t*)address >> 32;
     serial_printf(LOG_OK "HPET is at %u femtoseconds per tick\n", femtosecondsPerTick);
@@ -47,7 +48,7 @@ void wait_fs(uint64_t femtoseconds) {
     uint64_t target = start + ticks;
 
     while (hpet_read_counter() < target) {
-        __asm__ volatile ("pause");
+        sched_yield();
     }
 }
 

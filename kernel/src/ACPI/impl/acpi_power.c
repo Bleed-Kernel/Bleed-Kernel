@@ -87,6 +87,12 @@ void acpi_shutdown(void) {
         outw((uint16_t)fadt->pm1b_cnt_blk, SLP_TYPb | SLP_EN);
     }
 
+    //virtulizers last just incase these have some sort of unintended effect on real hw
+    outw(0xB004, 0x2000);   // bochs
+    outw(0x4004, 0x3400);   // vbox
+    outw(0x604, 0x2000);    // QEMU
+    outw(0x600, 0x34);      // Cloud Hypervisor
+
     acpi_poweroff_fallback();
     asm volatile("cli");
     for(;;) asm volatile("hlt");
@@ -94,6 +100,7 @@ void acpi_shutdown(void) {
 
 __attribute__((noreturn))
 void acpi_reboot(void) {
+    asm volatile ("cli");
     kprintf(
         "%sACPI Reboot attempted: Reset Register Address: %p, Reset Value: %u\nOffsets:\n\treset_reg: %ld\n\treset_value: %ld\n",
         LOG_INFO,

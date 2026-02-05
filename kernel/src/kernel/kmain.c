@@ -43,7 +43,6 @@ extern volatile struct limine_rsdp_request rsdp_request;
 
 extern void avx_enable(void);
 extern void sse_enable(void);
-
 tty_t tty0;
 
 void initrd_load(){ 
