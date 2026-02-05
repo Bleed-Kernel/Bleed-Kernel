@@ -251,23 +251,27 @@ long vfs_read(int fd, void *buf, size_t count) {
         return -1;
 
     file_t *f = current_fd_table->fds[fd];
-    if (!f)
-        return -1;
+    if (!f || !f->inode)
+        return -2;
 
     int mode = f->flags & O_MODE;
     if (mode != O_RDONLY && mode != O_RDWR)
-        return -1;
+        return -3;
 
-    uint64_t filesize = vfs_filesize(f->inode);
-    if (f->offset >= filesize)
-        return 0; // EOF
+    if (f->inode->type == INODE_FILE) {
+        uint64_t filesize = vfs_filesize(f->inode);
+        if (f->offset >= filesize)
+            return 0;
 
-    if (count > filesize - f->offset)
-        count = filesize - f->offset;
+        if (count > filesize - f->offset)
+            count = filesize - f->offset;
+    }
 
     long r = inode_read(f->inode, buf, count, f->offset);
-    if (r > 0)
+
+    if (r > 0 && f->inode->type == INODE_FILE) {
         f->offset += r;
+    }
 
     return r;
 }

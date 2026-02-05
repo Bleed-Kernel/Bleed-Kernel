@@ -9,22 +9,16 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
 
     file_t *f = current_fd_table->fds[fd];
     if (!f)
-        return -1;
+        return -2;
 
-    int mode = f->flags & O_MODE;
-    if (mode != O_RDONLY && mode != O_RDWR)
-        return -1;
+    char kbuf[512]; 
+    size_t batch_size = (len > sizeof(kbuf)) ? sizeof(kbuf) : len;
 
-    char *kbuf = kmalloc(len);
-    if (!kbuf)
-        return -1;
-
-    long r = inode_read(f->inode, kbuf, len, f->offset);
-    if (r > 0) {
-        memcpy((void *)user_buf, kbuf, r);
-        f->offset += r;
+    long total_read = vfs_read((int)fd, kbuf, batch_size);
+    
+    if (total_read > 0) {
+        memcpy((void *)user_buf, kbuf, total_read);
     }
 
-    kfree(kbuf, len);
-    return r;
+    return (uint64_t)total_read;
 }
