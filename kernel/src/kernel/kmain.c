@@ -130,7 +130,6 @@ void kmain() {
     PS2_Keyboard_init();
     kernel_self_test();
 
-    wait_s(10);
     shell_start();
 
     for (;;) {
