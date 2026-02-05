@@ -34,6 +34,7 @@
 #include <ACPI/acpi.h>
 #include <tss/tss.h>
 #include <panic.h>
+#include <ACPI/acpi_hpet.h>
 
 #include "kmain.h"
 
@@ -108,7 +109,7 @@ void kmain() {
     gdt_init();
     idt_init();
     tss_init();
-    pit_init(1000);
+    acpi_init_hpet();
     pic_init(32, 40);
     pic_unmask(2);
 
@@ -129,6 +130,7 @@ void kmain() {
     PS2_Keyboard_init();
     kernel_self_test();
 
+    wait_s(10);
     shell_start();
 
     for (;;) {

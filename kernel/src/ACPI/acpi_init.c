@@ -36,7 +36,7 @@ static void *acpi_get_rsdp(void) {
     return rsdp_request.response->address;
 }
 
-static struct acpi_sdt *acpi_find_sdt(const char sig[4]) {
+struct acpi_sdt *acpi_find_sdt(const char sig[4]) {
     if (acpi_rsdp->revision >= 2 && acpi_rsdp->xsdt_address) {
         struct acpi_xsdt *xsdt = paddr_to_vaddr(acpi_rsdp->xsdt_address);
         if (!acpi_checksum(xsdt, xsdt->header.length))

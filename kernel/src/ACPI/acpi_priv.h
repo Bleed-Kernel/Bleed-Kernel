@@ -6,43 +6,10 @@
 #define PM1A_CNT    fadt->pm1a_cnt_blk
 #define PM1B_CNT    fadt->pm1b_cnt_blk
 
-#define ACPI_S5    0x5      //Soft Off
-// theres some others i dont use for now like s3 and s4
-
+#define ACPI_S5    0x5
 #define SLP_EN     (1 << 13)
 
 #define ACPI_PM1_SLEEP_CMD(slp_typ)  (((slp_typ) << 10) | SLP_EN)
-
-struct acpi_sdt {
-    char     signature[4];
-    uint32_t length;
-    uint8_t  revision;
-    uint8_t  checksum;
-    char     oem_id[6];
-    char     oem_table_id[8];
-    uint32_t oem_revision;
-    uint32_t creator_id;
-    uint32_t creator_revision;
-} __attribute__((packed));
-
-struct acpi_rsdp {
-    char     signature[8];
-    uint8_t  checksum;
-    char     oem_id[6];
-    uint8_t  revision;
-    uint32_t rsdt_address;
-
-    // acpi2
-    uint32_t length;
-    uint64_t xsdt_address;
-    uint8_t  extended_checksum;
-    uint8_t  reserved[3];
-} __attribute__((packed));
-
-struct acpi_xsdt {
-    struct acpi_sdt header;
-    uint64_t tables[];
-} __attribute__((packed));
 
 typedef struct
 {
