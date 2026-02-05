@@ -73,6 +73,30 @@ cpu_context_t *sched_tick(cpu_context_t *context) {
     return current_task->context;
 }
 
+void* sched_switch_context(void* old_context) {
+    if (current_task->state == TASK_RUNNING) {
+        current_task->state = TASK_READY;
+    }
+    
+    current_task->context = (cpu_context_t*)old_context;
+    AVX_Save(current_task->avx_state);
+
+    task_t *next_task = current_task->next;
+    while (next_task->state != TASK_READY && next_task != current_task) {
+        next_task = next_task->next;
+    }
+
+    current_task = next_task;
+    current_task->state = TASK_RUNNING;
+    current_task->quantum_remaining = QUANTUM;
+
+    tss.rsp0 = (uint64_t)current_task->kernel_stack + KERNEL_STACK_SIZE;
+    paging_switch_address_space(current_task->page_map);
+    AVX_Restore(current_task->avx_state);
+    
+    return (void*)current_task->context;
+}
+
 void sched_bootstrap(void *rsp) {
     task_t *kernel_task = kmalloc(sizeof(task_t));
     if (!kernel_task)

@@ -30,6 +30,8 @@ isr_\v:
     push r15
 
     mov rdi, rsp
+    call ke_exception_handler
+    mov rsp, rax
 
     pop r15
     pop r14
@@ -47,9 +49,7 @@ isr_\v:
     pop rbx
     pop rax
 
-    add rsp, 8
-    add rsp, 8
-
+    add rsp, 16
     iretq
 .size isr_\v, .-isr_\v
 .endm
@@ -78,6 +78,7 @@ isr_\v:
 
     mov rdi, rsp
     call ke_exception_handler
+    mov rsp, rax
 
     pop r15
     pop r14
@@ -95,8 +96,7 @@ isr_\v:
     pop rbx
     pop rax
 
-    add rsp, 8
-
+    add rsp, 16
     iretq
 .size isr_\v, .-isr_\v
 .endm
