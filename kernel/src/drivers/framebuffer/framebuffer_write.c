@@ -2,13 +2,12 @@
 #include <string.h>
 #include <vendor/limine_bootloader/limine.h>
 #include <drivers/framebuffer/framebuffer.h>
+#include <drivers/framebuffer/blit.h>
 #include <drivers/framebuffer/framebuffer_console.h>
 #include <mm/spinlock.h>
 #include <fonts/utf-8.h>
 #include <mm/kalloc.h>
 #include <panic.h>
-
-#include "blit.h"
 
 extern volatile struct limine_framebuffer_request framebuffer_request;
 
@@ -62,16 +61,24 @@ static void framebuffer_render_glyph_index(fb_console_t *fb, size_t row, size_t 
 
     size_t px = col * fb->font->width;
     size_t py = row * fb->font->height;
+    size_t glyph_w = fb->font->width;
+    size_t bytes_per_row = fb->font->bytes_per_row;
+
+    uint32_t expanded_row[64];
 
     for (uint32_t r = 0; r < fb->font->height; r++) {
-        uint32_t* dst = fb_buffer + (py + r) * fb->pitch + px;
-        for (unsigned int byte = 0; byte < fb->font->bytes_per_row; byte++) {
-            uint8_t bits = glyph[r * fb->font->bytes_per_row + byte];
-            for (int bit = 0; bit < 8 && (byte * 8 + bit) < fb->font->width; bit++) {
-                if (px + byte * 8 + bit < fb->width)
-                    dst[byte * 8 + bit] = (bits & (0x80 >> bit)) ? fg : bg;
+        uint32_t *dst = fb_buffer + (py + r) * fb->pitch + px;
+        size_t out_idx = 0;
+
+        for (unsigned int byte = 0; byte < bytes_per_row; byte++) {
+            uint8_t bits = glyph[r * bytes_per_row + byte];
+            for (int bit = 0; bit < 8 && out_idx < glyph_w; bit++) {
+                uint32_t mask = -((bits & (0x80 >> bit)) != 0);
+                expanded_row[out_idx++] = (mask & fg) | (~mask & bg);
             }
         }
+
+        memcpy(dst, expanded_row, out_idx * sizeof(uint32_t));
         framebuffer_mark_dirty(fb, py + r, 1);
     }
 }

@@ -1,8 +1,10 @@
 #include <devices/devices.h>
 #include <devices/type/tty_device.h>
 #include <drivers/framebuffer/framebuffer.h>
+#include <drivers/framebuffer/blit.h>
 #include <drivers/framebuffer/framebuffer_console.h>
 #include <drivers/ps2/PS2_keyboard.h>
+#include <drivers/serial/serial.h>
 #include <input/keyboard_input.h>
 #include <input/keyboard_dispatch.h>
 #include <devices/device_io.h>
@@ -15,9 +17,7 @@
 long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
     (void)offset;
     tty_t *tty = dev->internal_data;
-
-    const int mode_canonical = tty->flags & TTY_CANNONICAL;
-    //const int mode_echo = tty->flags & TTY_ECHO;  might need it one day
+    int mode_canonical = tty->flags & TTY_CANNONICAL;
 
     if (tty->in_head == tty->in_tail)
         return 0;
@@ -25,7 +25,6 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
     if (mode_canonical) {
         size_t i = tty->in_tail;
         int found = 0;
-
         while (i != tty->in_head) {
             if (tty->inbuffer[i] == '\n') {
                 found = 1;
@@ -33,60 +32,56 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
             }
             i = (i + 1) % TTY_BUFFER_SZ;
         }
-
-        if (!found)
-            return 0;
+        if (!found) return 0;
     }
 
     size_t count = 0;
     while (count < len && tty->in_tail != tty->in_head) {
-        char c = tty->inbuffer[tty->in_tail++ % TTY_BUFFER_SZ];
+        char c = tty->inbuffer[tty->in_tail];
+        tty->in_tail = (tty->in_tail + 1) % TTY_BUFFER_SZ;
         ((char *)buf)[count++] = c;
-        if ((mode_canonical) && c == '\n')
-            break;
+        
+        if (mode_canonical && c == '\n') break;
     }
 
     return count;
 }
 
-long tty_inode_write(INode_t* inode, const void* in_buffer, size_t size, size_t offset) {
-    (void) offset;
+long tty_inode_write(INode_t *inode, const void *in_buffer, size_t size, size_t offset) {
+    (void)offset;
     tty_t *tty = inode->internal_data;
     const uint8_t *c = in_buffer;
-
-    for (size_t i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++)
         tty->ops->putchar(tty, (char)c[i]);
-    }
-
     return size;
 }
 
-int tty_ioctl(INode_t *dev, unsigned long req, void *arg){
+int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
     tty_t *tty = dev->internal_data;
+    uint32_t *user_flags = arg;
+    if (!user_flags)
+        return -1;
 
     switch (req) {
-    case 0:
-        *(uint32_t *)arg = tty->flags;
-        return 0;
-
-    case 1:
-        tty->flags = *(uint32_t *)arg;
-        return 0;
+        case TTY_IOCTL_GET_FLAGS:
+            *user_flags = tty->flags;
+            return 0;
+        case TTY_IOCTL_SET_FLAGS:
+            tty->flags = *user_flags;
+            return 0;
+        default:
+            return -1;
     }
-
-    return -1;
 }
+
 
 static void tty_input_listener(const keyboard_event_t *ev) {
     if (ev->action != KEY_DOWN)
         return;
-
     char c = tty_key_to_ascii(ev);
     if (!c)
         return;
-
-    tty_t *tty =
-        (tty_t*)console_get_active_console()->internal_data;
+    tty_t *tty = (tty_t *)console_get_active_console()->internal_data;
     tty_process_input(tty, c);
 }
 
@@ -98,15 +93,10 @@ static void tty_fb_putchar(tty_t *tty, char c) {
         if (byte < 0x80) {
             framebuffer_ansi_char(&b->fb, &b->fb_lock, &b->ansi, (uint32_t)byte);
             return;
-        } else if ((byte & 0xE0) == 0xC0) {
-            b->utf8_expected = 2;
-        } else if ((byte & 0xF0) == 0xE0) {
-            b->utf8_expected = 3;
-        } else if ((byte & 0xF8) == 0xF0) {
-            b->utf8_expected = 4;
-        } else {
-            return;
-        }
+        } else if ((byte & 0xE0) == 0xC0) b->utf8_expected = 2;
+        else if ((byte & 0xF0) == 0xE0) b->utf8_expected = 3;
+        else if ((byte & 0xF8) == 0xF0) b->utf8_expected = 4;
+        else return;
         b->utf8_buf[b->utf8_len++] = byte;
     } else {
         b->utf8_buf[b->utf8_len++] = byte;
@@ -121,58 +111,55 @@ static void tty_fb_putchar(tty_t *tty, char c) {
 }
 
 struct tty_ops tty_ops = {
-    .putchar = tty_fb_putchar,
+    .putchar = tty_fb_putchar 
 };
 
 struct INodeOps tty_inode_ops = {
     .write = tty_inode_write,
     .read = tty_read,
+    .ioctl = tty_ioctl
 };
 
 void fb_clear(fb_console_t *fb) {
-    uint32_t* buffer = framebuffer_get_buffer();
-
+    uint32_t *buffer = framebuffer_get_buffer();
     for (uint64_t y = 0; y < fb->height; y++)
         for (uint64_t x = 0; x < fb->width; x++)
             buffer[y * fb->pitch + x] = fb->bg;
-
     fb->cursor_x = 0;
     fb->cursor_y = 0;
-
     framebuffer_blit(buffer, fb->pixels, fb->width, fb->height);
 }
 
 void tty_process_input(tty_t *tty, char c) {
-    if (c == '\b') {
+    if (c == '\r') c = '\n';
+
+    if (c == '\b' || c == 127) {
         if (tty->in_head != tty->in_tail) {
-            tty->in_head--;
-                if (tty->flags & TTY_ECHO) {
-                    tty->ops->putchar(tty, '\b');
-                    tty->ops->putchar(tty, ' ');
-                    tty->ops->putchar(tty, '\b');
-                }
+            tty->in_head = (tty->in_head + TTY_BUFFER_SZ - 1) % TTY_BUFFER_SZ;
+
+            if (tty->flags & TTY_ECHO) {
+                tty->ops->putchar(tty, '\b');
+                tty->ops->putchar(tty, ' ');
+                tty->ops->putchar(tty, '\b');
+            }
         }
         return;
     }
 
-    size_t head = tty->in_head;
-    tty->inbuffer[head] = c;
-    tty->in_head = (head + 1) % TTY_BUFFER_SZ;
+    tty->inbuffer[tty->in_head] = c;
+    tty->in_head = (tty->in_head + 1) % TTY_BUFFER_SZ;
 
-    if (tty->flags & TTY_ECHO)
+    if (tty->flags & TTY_ECHO && !(tty->flags & TTY_NONBLOCK))
         tty->ops->putchar(tty, c);
 }
 
-void tty_init(tty_t *tty, void *backend,
-              spinlock_t lock, uint32_t flags) {
+void tty_init(tty_t *tty, void *backend, spinlock_t lock, uint32_t flags) {
     memset(tty, 0, sizeof(*tty));
-
-    tty->flags   = flags;
+    tty->flags = flags;
     tty->backend = backend;
     tty->device.ops = &tty_inode_ops;
-    tty->ops        = &tty_ops;
-    tty->device.internal_data  = tty;
-
+    tty->ops = &tty_ops;
+    tty->device.internal_data = tty;
     spinlock_init(&lock);
     keyboard_register_listener(tty_input_listener);
 }
@@ -183,14 +170,12 @@ void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, fb_console_t *f
     backend->fb_lock = (spinlock_t){0};
     backend->utf8_len = 0;
     backend->utf8_expected = 0;
-
     tty_init(tty, backend, backend->fb_lock, flags);
 }
 
-void tty_device_init(INode_t* tty_inode){
-    file_t* f0 = kmalloc(sizeof(file_t));
+void tty_device_init(INode_t *tty_inode) {
+    file_t *f0 = kmalloc(sizeof(file_t));
     memset(f0, 0, sizeof(*f0));
-
     f0->inode = tty_inode;
     f0->flags = O_RDWR;
     f0->offset = 0;

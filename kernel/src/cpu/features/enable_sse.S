@@ -8,8 +8,8 @@ valB:
     .float 2.5
 
 .text
-.globl init_sse
-init_sse:
+.globl sse_enable
+sse_enable:
     mov %cr0, %rax
     and $~0x4, %rax
     or  $0x2, %rax

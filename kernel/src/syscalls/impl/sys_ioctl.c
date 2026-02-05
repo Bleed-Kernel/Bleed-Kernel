@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <mm/kalloc.h>
 #include <string.h>
+#include <drivers/serial/serial.h>
 #include <devices/type/fb_device.h>
 
 uint64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg) {
@@ -13,24 +14,9 @@ uint64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg) {
     if (!f || !f->inode || !f->inode->ops->ioctl)
         return -1;
 
-    void* karg = NULL;
-    size_t arg_size = 0;
+    int result = f->inode->ops->ioctl(f->inode, request, (void*)arg);
 
-    if (request == FB_IOC_GET_INFO) {
-        arg_size = sizeof(struct fb_info);
-        karg = kmalloc(arg_size);
-    }
+    serial_printf("Syscall: ioctl on fd %u, req %u, res %d\n", fd, request, result);
 
-    if (!karg) return -1;
-
-    int result = f->inode->ops->ioctl(f->inode, request, karg);
-
-    if (result == 0 && request == FB_IOC_GET_INFO) {
-        memcpy((void*)arg, karg, arg_size);
-    }
-
-    kprintf("Syscall: ioctl on fd %lld, request %llx\n", fd, request);
-
-    kfree(karg, arg_size);
-    return result;
+    return (uint64_t)result;
 }

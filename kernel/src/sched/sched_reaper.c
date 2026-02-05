@@ -93,9 +93,8 @@ void scheduler_reap(void) {
             if (task->id > 1 && task->id < MAX_PIDS)
                 pid_list[task->id] = 0;
         }
-        
+
         sched_yield();
     }
-
-    ke_panic("Kernel Scheduler Reaper is Dead");
+    __builtin_unreachable();
 }

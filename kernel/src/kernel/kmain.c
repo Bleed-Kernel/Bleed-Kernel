@@ -40,7 +40,8 @@
 extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
 
-extern void init_sse(void);
+extern void avx_enable(void);
+extern void sse_enable(void);
 
 tty_t tty0;
 
@@ -91,7 +92,8 @@ void shell_start(){
 
 void kmain() {
     asm volatile ("cli");
-    init_sse();
+    sse_enable();
+    avx_enable();
     serial_init();
     pmm_init();
     vfs_mount_root();

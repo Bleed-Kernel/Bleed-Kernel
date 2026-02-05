@@ -22,5 +22,6 @@ struct fb_info {
 };
 
 #define FB_IOC_GET_INFO 0x5001
+#define FB_IOC_FLIP     0x5002
 
 void fb_device_init();

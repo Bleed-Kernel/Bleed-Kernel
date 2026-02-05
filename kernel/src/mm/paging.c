@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <drivers/framebuffer/framebuffer.h>
 #include <mm/pmm.h>
 #include <mm/paging.h>
 #include <ansii.h>
@@ -14,21 +15,29 @@ paddr_t kernel_page_map = 0;
 
 extern volatile struct limine_memmap_request memmap_request;
 
+// replace this with a standard wrmsr and rmsrs later they got reverted
+static inline void write_msr(uint32_t msr, uint64_t val) {
+    asm volatile ("wrmsr" :: "c"(msr), "a"((uint32_t)val), "d"((uint32_t)(val >> 32)));
+}
+
+void pat_enable_wc(void) {
+    uint64_t pat_val = 0x0007040100070406ULL;
+    write_msr(0x277, pat_val);
+}
+
 /// @brief allocate an empty page frame and return the paddr
 /// @param vaddr out virtual address
 /// @return physical address
 uint64_t paging_alloc_empty_frame(void **vaddr) {
     paddr_t paddr = pmm_alloc_pages(1);
-    if(!paddr)
-        kprintf(LOG_ERROR "Page Allocation Failed, Out of Memory?\n");
+    if (!paddr)
+        kprintf(LOG_ERROR "Page Allocation Failed\n");
 
-    void* v = paddr_to_vaddr(paddr);
+    void *v = paddr_to_vaddr(paddr);
     if (v) memset(v, 0, PAGE_SIZE_4K);
-
     if (vaddr) *vaddr = v;
     return paddr;
 }
-
 /// @brief write a page table at a given index, if it already exsists, we return its paddr
 /// @param table Pointer to target table
 /// @param index Index of entry to modify
@@ -38,42 +47,45 @@ static uint64_t paging_write_table_entry(uint64_t* table, size_t index, uint64_t
     uint64_t entry = table[index];
     if (entry & PTE_PRESENT) return entry & PADDR_ENTRY_MASK;
 
-    void* new_entry_vaddr = NULL;
-    uint64_t new_entry_paddr = paging_alloc_empty_frame(&new_entry_vaddr);
-    if (!new_entry_vaddr) return 0;
+    void *v = NULL;
+    uint64_t p = paging_alloc_empty_frame(&v);
+    if (!v) return 0;
 
-    table[index] = (new_entry_paddr & PADDR_ENTRY_MASK) | (flags & ~PADDR_ENTRY_MASK);
-    return new_entry_paddr & PADDR_ENTRY_MASK;
+    table[index] = (p & PADDR_ENTRY_MASK) | (flags & ~PADDR_ENTRY_MASK);
+    return p & PADDR_ENTRY_MASK;
 }
 
 /// @brief walk page tables at PD level for a vaddr
 /// @param vaddr vaddr to resolve
 /// @param out_pd page directory pointer to resolved vaddr
 /// @param out_pd_index index of the output page directory for vaddr
-void paging_walk_page_tables(paddr_t cr3, uint64_t vaddr, uint64_t **out_pd, size_t *out_pd_index, uint64_t flags) {
-    uint64_t ncr3 = cr3 & PADDR_ENTRY_MASK;
-    uint64_t* pml4_vaddr = (uint64_t*)paddr_to_vaddr(ncr3);
+void paging_walk_page_tables(paddr_t cr3, uint64_t vaddr,
+                             uint64_t **out_pd, size_t *out_pd_index,
+                             uint64_t flags) {
+    uint64_t *pml4 = paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
 
-    size_t pml4_index = (vaddr >> 39) & 0x1FF;
-    size_t pdpt_index = (vaddr >> 30) & 0x1FF;
-    size_t pd_index   = (vaddr >> 21) & 0x1FF;
-    size_t pt_index   = (vaddr >> 12) & 0x1FF;
+    size_t pml4i = (vaddr >> 39) & 0x1FF;
+    size_t pdpti = (vaddr >> 30) & 0x1FF;
+    size_t pdi   = (vaddr >> 21) & 0x1FF;
+    size_t pti   = (vaddr >> 12) & 0x1FF;
 
-    uint64_t p_pdpt = paging_write_table_entry(pml4_vaddr, pml4_index, PTE_PRESENT | PTE_WRITABLE | flags);
-    uint64_t* pdpt = (uint64_t*)paddr_to_vaddr(p_pdpt);
+    uint64_t p_pdpt = paging_write_table_entry(
+        pml4, pml4i, PTE_PRESENT | PTE_WRITABLE | flags);
+    uint64_t *pdpt = paddr_to_vaddr(p_pdpt);
 
-    uint64_t p_pd = paging_write_table_entry(pdpt, pdpt_index, PTE_PRESENT | PTE_WRITABLE | flags);
-    uint64_t* pd = (uint64_t*)paddr_to_vaddr(p_pd);
+    uint64_t p_pd = paging_write_table_entry(
+        pdpt, pdpti, PTE_PRESENT | PTE_WRITABLE | flags);
+    uint64_t *pd = paddr_to_vaddr(p_pd);
 
     if (!(flags & PTE_PS)) {
-        uint64_t p_pt = paging_write_table_entry(pd, pd_index, PTE_PRESENT | PTE_WRITABLE | flags);
-        uint64_t* pt = (uint64_t*)paddr_to_vaddr(p_pt);
-
+        uint64_t p_pt = paging_write_table_entry(
+            pd, pdi, PTE_PRESENT | PTE_WRITABLE | flags);
+        uint64_t *pt = paddr_to_vaddr(p_pt);
         *out_pd = pt;
-        *out_pd_index = pt_index;
-    }else{
+        *out_pd_index = pti;
+    } else {
         *out_pd = pd;
-        *out_pd_index = pd_index;
+        *out_pd_index = pdi;
     }
 }
 
@@ -83,49 +95,69 @@ void paging_walk_page_tables(paddr_t cr3, uint64_t vaddr, uint64_t **out_pd, siz
 /// @param flags PTE Flags
 void paging_map_page(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags) {
     uint64_t *pd;
-    size_t pd_index;
+    size_t idx;
 
-    if (flags & PTE_PS){
-        paging_walk_page_tables(cr3, vaddr, &pd, &pd_index, flags & (PTE_USER | PTE_PS));
-    }else{
-        paging_walk_page_tables(cr3, vaddr, &pd, &pd_index, flags & PTE_USER);
-    }
+    paging_walk_page_tables(cr3, vaddr, &pd, &idx,
+        flags & (PTE_USER | PTE_PS));
+
     if (!pd) return;
 
-    pd[pd_index] = (paddr & PADDR_ENTRY_MASK) | (flags & ~PADDR_ENTRY_MASK) | PTE_PRESENT;
-    __asm__ volatile ("invlpg (%0)" :: "r"(vaddr) : "memory");
+    pd[idx] = (paddr & PADDR_ENTRY_MASK)
+            | (flags & ~PADDR_ENTRY_MASK)
+            | PTE_PRESENT;
+
+    asm volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
 }
 
 /// @brief create the kernels page map and save it, key part of multitasking
 void paging_init_kernel_map(void) {
     kernel_page_map = read_cr3() & PADDR_ENTRY_MASK;
-
-    void *pml4_vaddr = paddr_to_vaddr(kernel_page_map);
-    if (!pml4_vaddr) 
-        ke_panic("Kernel PML4 not mapped");
-    serial_printf("Kernel Page Map = %p\n", (void*)kernel_page_map);
+    if (!paddr_to_vaddr(kernel_page_map))
+        ke_panic("Kernel PML4 unmapped");
 }
 
 /// @brief reinitalise paging so we can access a full memory range, not just the
 /// default from limine
-void reinit_paging() {
-    struct limine_memmap_response* mmap = memmap_request.response;
+void reinit_paging(void) {
+    struct limine_memmap_response *mmap = memmap_request.response;
+
+    uintptr_t fb_base = (uintptr_t)framebuffer_get_addr(0);
+    size_t fb_size =
+        framebuffer_get_height(0) * framebuffer_get_pitch(0);
+    uintptr_t fb_end = fb_base + fb_size;
 
     for (size_t i = 0; i < mmap->entry_count; i++) {
-        struct limine_memmap_entry* entry = mmap->entries[i];
-        if (entry->type != LIMINE_MEMMAP_USABLE) continue;
+        struct limine_memmap_entry *e = mmap->entries[i];
+        if (e->type != LIMINE_MEMMAP_USABLE) continue;
 
-        uint64_t mapped = 0;
-        uint64_t base = entry->base & ~(PAGE_SIZE_2M - 1);
-        uint64_t end = entry->base + entry->length;
+        uint64_t base = e->base & ~(PAGE_SIZE_2M - 1);
+        uint64_t end  = e->base + e->length;
 
-        for (uint64_t paddr = base; paddr + PAGE_SIZE_2M <= end; paddr += PAGE_SIZE_2M) {
-            void* hv = paddr_to_vaddr(paddr);
+        for (uint64_t p = base; p + PAGE_SIZE_2M <= end; p += PAGE_SIZE_2M) {
+            if (p >= fb_base && p < fb_end)
+                continue;
+
+            void *hv = paddr_to_vaddr(p);
             if (!hv) continue;
 
-            paging_map_page(read_cr3(), paddr, (paddr_t)hv, PAGE_KERNEL_RW | PTE_PS);
-            mapped++;
+            paging_map_page(
+                read_cr3(), p, (uintptr_t)hv,
+                PAGE_KERNEL_RW | PTE_PS
+            );
         }
+    }
+
+    pat_enable_wc();
+
+    uintptr_t fb_p = fb_base & ~(PAGE_SIZE_2M - 1);
+    uintptr_t fb_p_end =
+        (fb_end + PAGE_SIZE_2M - 1) & ~(PAGE_SIZE_2M - 1);
+
+    for (uintptr_t p = fb_p; p < fb_p_end; p += PAGE_SIZE_2M) {
+        paging_map_page(
+            read_cr3(), p, (uintptr_t)paddr_to_vaddr(p),
+            PAGE_KERNEL_RW | PTE_PS | PTE_PWT | PTE_PS_PAT
+        );
     }
 
     paging_init_kernel_map();

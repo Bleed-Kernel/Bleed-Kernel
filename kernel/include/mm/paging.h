@@ -6,9 +6,10 @@
 #define PTE_PRESENT     (1ULL<<0)
 #define PTE_WRITABLE    (1ULL<<1)
 #define PTE_USER        (1ULL<<2)
-
+#define PTE_PWT         (1ULL << 3)
 #define PTE_PCD         (1ULL << 4)
-#define PTE_PS          (1ULL<<7)
+#define PTE_PS          (1ULL << 7)
+#define PTE_PS_PAT      (1ULL << 12)
 
 #define PAGE_KERNEL_RW      (PTE_WRITABLE | PTE_PS)
 #define PAGE_KERNEL_RO      (PTE_PS)
@@ -60,3 +61,5 @@ uint64_t paging_alloc_empty_frame(void **vaddr);
 uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create);
 
 void paging_unmap_page(paddr_t cr3, uint64_t vaddr);
+
+void pat_init(void);

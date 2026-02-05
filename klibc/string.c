@@ -2,37 +2,6 @@
 #include <stddef.h>
 #include <string.h>
 
-/// @brief copy memory from one loation to another
-/// @param dest destination
-/// @param src source
-/// @param n size
-/// @return void
-void *memcpy(void *restrict dest, const void *restrict src, uint64_t n) {
-    uint8_t *restrict pdest = (uint8_t *restrict)dest;
-    const uint8_t *restrict psrc = (const uint8_t *restrict)src;
-
-    for (uint64_t i = 0; i < n; i++) {
-        pdest[i] = psrc[i];
-    }
-
-    return dest;
-}
-
-/// @brief set memory to a location
-/// @param s memory 
-/// @param c address to set
-/// @param n size
-/// @return void
-void *memset(void *s, int c, uint64_t n) {
-    uint8_t *p = (uint8_t *)s;
-
-    for (uint64_t i = 0; i < n; i++) {
-        p[i] = (uint8_t)c;
-    }
-
-    return s;
-}
-
 /// @brief move memory from destination to source
 /// @param dest destination
 /// @param src source

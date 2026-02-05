@@ -23,38 +23,55 @@ int memcmp(const void *s1, const void *s2, uint64_t n);
 /// @return dest
 void *memmove(void *dest, const void *src, uint64_t n);
 
-/// @brief set memory to a value
+/// @brief set memory to a location
 /// @param s memory 
-/// @param c value to set
+/// @param c address to set
 /// @param n size
-/// @return s
-void *memset(void *s, int c, uint64_t n);
+/// @return void
+static inline void *memset(void *s, int c, uint64_t n) {
+    uint8_t *p = (uint8_t *)s;
+
+    for (uint64_t i = 0; i < n; i++) {
+        p[i] = (uint8_t)c;
+    }
+
+    return s;
+}
 
 /// @brief copy memory from one location to another
 /// @param dest destination
 /// @param src source
 /// @param n size
 /// @return dest
-void *memcpy(void *restrict dest, const void *restrict src, uint64_t n);
+static inline void *memcpy(void *dest, const void *src, uint64_t n) {
+    uint8_t *pdest = (uint8_t *)dest;
+    const uint8_t *psrc = (const uint8_t *)src;
+
+    for (uint64_t i = 0; i < n; i++) {
+        pdest[i] = psrc[i];
+    }
+
+    return dest;
+}
 
 /// @brief copy a string
 /// @param dest destination buffer
 /// @param src source string
 /// @return dest
-char *strcpy(char *restrict dest, const char *restrict src);
+char *strcpy(char *dest, const char *src);
 
 /// @brief copy at most n chars from src to dest
 /// @param dest destination
 /// @param src source
 /// @param n max chars
 /// @return dest
-char *strncpy(char *restrict dest, const char *restrict src, uint64_t n);
+char *strncpy(char *, const char *src, uint64_t n);
 
 /// @brief concatenate two strings
 /// @param dest destination buffer
 /// @param src string to append
 /// @return dest
-char *strcat(char *restrict dest, const char *restrict src);
+char *strcat(char *dest, const char *src);
 
 /// @brief compare two strings
 /// @param s1 string 1
@@ -79,13 +96,13 @@ char *strchr(const char *s, int c);
 /// @param s string or NULL to continue
 /// @param delim delimiter characters
 /// @return next token or NULL
-char *strtok(char *restrict s, const char *restrict delim);
+char *strtok(char * s, const char *delim);
 
 /// @brief reentrant tokenizer
 /// @param s string
 /// @param delim delimiters
 /// @param save state pointer
 /// @return next token
-char *strtok_r(char *restrict s, const char *restrict delim, char **restrict save);
+char *strtok_r(char *s, const char *delim, char **save);
 
 #endif

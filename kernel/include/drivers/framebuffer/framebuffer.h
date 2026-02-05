@@ -56,8 +56,6 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
 /// @param color bg colour to clear with
 void framebuffer_clear(uint32_t *pixels, uint64_t width, uint64_t height, uint64_t pitch, uint32_t colour);
 
-void framebuffer_blit(uint32_t* source, uint32_t* destination, uint32_t width, uint32_t height);
-
 uint32_t* framebuffer_get_buffer(void);
 
 /// @brief Draw a single line of text centered on the framebuffer

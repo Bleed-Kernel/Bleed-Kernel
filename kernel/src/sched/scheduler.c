@@ -1,9 +1,9 @@
-#include <sched/scheduler.h>
 #include <mm/kalloc.h>
 #include <panic.h>
 #include <mm/paging.h>
 #include <stdio.h>
 #include <drivers/serial/serial.h>
+#include <sched/scheduler.h>
 #include <ansii.h>
 #include <tss/tss.h>
 #include <string.h>
@@ -12,6 +12,8 @@
 #include "priv_scheduler.h"
 
 #define KERNEL_TASK_NAME    "bleed kernel"
+
+struct task_t;
 
 task_t *current_task   = NULL;
 task_t *task_queue     = NULL;
@@ -33,7 +35,10 @@ void init_scheduler(void) {
 cpu_context_t *sched_tick(cpu_context_t *context) {
     if (!current_task)
         return context;
+
     current_task->context = context;
+
+    AVX_Save(current_task->avx_state);
 
     if (current_task->quantum_remaining > 0)
         current_task->quantum_remaining--;
@@ -41,7 +46,6 @@ cpu_context_t *sched_tick(cpu_context_t *context) {
     if (current_task->quantum_remaining > 0)
         return context;
 
-    
     current_task->quantum_remaining = QUANTUM;
 
     if (current_task->state == TASK_RUNNING)
@@ -54,8 +58,11 @@ cpu_context_t *sched_tick(cpu_context_t *context) {
         if (task->state == TASK_READY) {
             current_task = task;
             current_task->state = TASK_RUNNING;
+
             tss.rsp0 = (uint64_t)current_task->kernel_stack + KERNEL_STACK_SIZE;
             paging_switch_address_space(current_task->page_map);
+
+            AVX_Restore(current_task->avx_state);
 
             return current_task->context;
         }
@@ -63,7 +70,6 @@ cpu_context_t *sched_tick(cpu_context_t *context) {
     } while (task != start);
 
     current_task->state = TASK_RUNNING;
-    
     return current_task->context;
 }
 
@@ -78,29 +84,24 @@ void sched_bootstrap(void *rsp) {
     kernel_task->context            = (cpu_context_t *)rsp;
     kernel_task->next               = kernel_task;
     kernel_task->task_privilege     = P_KERNEL;
-    
-    strncpy(kernel_task->name, KERNEL_TASK_NAME, 128-1);
+    kernel_task->avx_state[0]       = 0;
 
+    strncpy(kernel_task->name, KERNEL_TASK_NAME, 128-1);
     kernel_task->page_map = kernel_page_map;
 
     current_task   = kernel_task;
     task_queue     = kernel_task;
     task_list_head = kernel_task;
-    
 
     serial_printf(LOG_OK "Kernel Task Created, tid:0\n");
 }
 
 void sched_yield(void) {
     asm volatile ("cli");
-
-    if (current_task &&
-        current_task->state == TASK_RUNNING) {
-
+    if (current_task && current_task->state == TASK_RUNNING) {
         current_task->quantum_remaining = 0;
         current_task->state = TASK_READY;
     }
-
     asm volatile ("sti");
     asm volatile ("int $32");
 }
