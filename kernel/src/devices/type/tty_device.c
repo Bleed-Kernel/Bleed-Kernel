@@ -17,34 +17,39 @@
 long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
     (void)offset;
     tty_t *tty = dev->internal_data;
-    int mode_canonical = tty->flags & TTY_CANNONICAL;
+    char *user_buf = (char *)buf;
 
-    if (tty->in_head == tty->in_tail)
-        return 0;
+    if (tty->flags & TTY_NONBLOCK) {
+        if (tty->in_head == tty->in_tail) {
+            return -1;
+        }
+    }
 
-    if (mode_canonical) {
+    if (tty->flags & TTY_CANNONICAL) {
+        int has_line = 0;
         size_t i = tty->in_tail;
-        int found = 0;
         while (i != tty->in_head) {
             if (tty->inbuffer[i] == '\n') {
-                found = 1;
+                has_line = 1;
                 break;
             }
             i = (i + 1) % TTY_BUFFER_SZ;
         }
-        if (!found) return 0;
+        if (!has_line) return 0;
     }
 
-    size_t count = 0;
-    while (count < len && tty->in_tail != tty->in_head) {
+    size_t bytes_read = 0;
+    while (bytes_read < len && tty->in_tail != tty->in_head) {
         char c = tty->inbuffer[tty->in_tail];
         tty->in_tail = (tty->in_tail + 1) % TTY_BUFFER_SZ;
-        ((char *)buf)[count++] = c;
-        
-        if (mode_canonical && c == '\n') break;
+        user_buf[bytes_read++] = c;
+
+        if ((tty->flags & TTY_CANNONICAL) && c == '\n') {
+            break;
+        }
     }
 
-    return count;
+    return bytes_read;
 }
 
 long tty_inode_write(INode_t *inode, const void *in_buffer, size_t size, size_t offset) {
@@ -73,7 +78,6 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
             return -1;
     }
 }
-
 
 static void tty_input_listener(const keyboard_event_t *ev) {
     if (ev->action != KEY_DOWN)
@@ -133,8 +137,11 @@ void fb_clear(fb_console_t *fb) {
 void tty_process_input(tty_t *tty, char c) {
     if (c == '\r') c = '\n';
 
+    // Handle Backspace
     if (c == '\b' || c == 127) {
         if (tty->in_head != tty->in_tail) {
+            // Only allow backspace to delete if we aren't at the start of a line 
+            // (Standard behavior for canonical mode)
             tty->in_head = (tty->in_head + TTY_BUFFER_SZ - 1) % TTY_BUFFER_SZ;
 
             if (tty->flags & TTY_ECHO) {
@@ -146,11 +153,21 @@ void tty_process_input(tty_t *tty, char c) {
         return;
     }
 
-    tty->inbuffer[tty->in_head] = c;
-    tty->in_head = (tty->in_head + 1) % TTY_BUFFER_SZ;
+    // Buffer Overflow Protection
+    size_t next = (tty->in_head + 1) % TTY_BUFFER_SZ;
+    if (next == tty->in_tail) {
+        // Buffer full! In a real kernel, you might beep or drop it.
+        return; 
+    }
 
-    if (tty->flags & TTY_ECHO && !(tty->flags & TTY_NONBLOCK))
+    tty->inbuffer[tty->in_head] = c;
+    tty->in_head = next;
+
+    // ECHO: Only echo if the flag is set. 
+    // In "Stream" (Raw) mode, we usually disable ECHO.
+    if (tty->flags & TTY_ECHO) {
         tty->ops->putchar(tty, c);
+    }
 }
 
 void tty_init(tty_t *tty, void *backend, spinlock_t lock, uint32_t flags) {

@@ -7,6 +7,7 @@
 #include <console/console.h>
 #include <devices/type/tty_device.h>
 #include <panic.h>
+#include <mm/pmm.h>
 #include "../acpi_priv.h"
 
 void acpi_poweroff_fallback(){
@@ -16,7 +17,7 @@ void acpi_poweroff_fallback(){
     // inform the user they can do it manually.
     // its also a cute nod to history from the windows 9x era
     tty_t tty = console_get_active_tty();
-    kprintf("\x1b[Jm");
+    kprintf("\x1b[J");
 
     tty_fb_backend_t *b = tty.backend;
     fb_console_t *fb = &b->fb;
@@ -41,20 +42,54 @@ void acpi_poweroff_fallback(){
     kprintf_at(x2, y + 1, "%s", line2);
 }
 
+static uint16_t SLP_TYPa = 0;
+static uint16_t SLP_TYPb = 0;
+
+void acpi_parse_s5(void) {
+    if (!fadt || !fadt->dsdt) return;
+
+    char *dsdt = (char *)paddr_to_vaddr((uintptr_t)fadt->dsdt);
+
+    if (memcmp(dsdt, "DSDT", 4) != 0) return;
+
+    uint32_t dsdt_len = *(uint32_t*)(dsdt + 4);
+    char *ptr = dsdt + 36;
+    char *end = dsdt + dsdt_len;
+
+    while (ptr < end) {
+        if (memcmp(ptr, "_S5_", 4) == 0) {
+            ptr += 4;
+            if (*ptr == 0x12) {
+                ptr += 3;
+                
+                if (*ptr == 0x0A) ptr++; 
+                SLP_TYPa = (*(uint8_t*)ptr) << 10;
+                ptr++;
+
+                if (*ptr == 0x0A) ptr++;
+                SLP_TYPb = (*(uint8_t*)ptr) << 10;
+                
+                return;
+            }
+        }
+        ptr++;
+    }
+}
+
 __attribute__((noreturn))
 void acpi_shutdown(void) {
-    uint16_t cmd = ACPI_PM1_SLEEP_CMD(0x5);
-    outw(PM1A_CNT, cmd);
+    if (SLP_TYPa == 0) acpi_parse_s5();
+    if (SLP_TYPa == 0) SLP_TYPa = (5 << 10); 
 
-    if (fadt->pm1a_cnt_blk == 0) {
-        ke_panic("ACPI: Invalid PM1A control block");
+    outw((uint16_t)fadt->pm1a_cnt_blk, SLP_TYPa | SLP_EN);
+    
+    if (fadt->pm1b_cnt_blk != 0) {
+        outw((uint16_t)fadt->pm1b_cnt_blk, SLP_TYPb | SLP_EN);
     }
 
-    if (PM1B_CNT)
-        outw(PM1B_CNT, cmd);
-
+    acpi_poweroff_fallback();
     asm volatile("cli");
-    for(;;){}
+    for(;;) asm volatile("hlt");
 }
 
 __attribute__((noreturn))
