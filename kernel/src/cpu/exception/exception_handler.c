@@ -54,10 +54,12 @@ extern void* ke_exception_handler(void *frame){
     __asm__ volatile ("cli");
     struct isr_stackframe *f = (struct isr_stackframe *)frame;
     
+    /* its really buggy and only works sometimes so ill remove it for now
     if ((f->cs & 0x3) != 0) {
         sched_mark_task_dead(get_current_task());
         return sched_switch_context(f);
     }
+    */
 
     uint64_t vector = f->vector;
     uint64_t err    = f->error_code;

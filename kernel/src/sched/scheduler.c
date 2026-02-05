@@ -32,59 +32,14 @@ void init_scheduler(void) {
     asm volatile ("sti");
 }
 
-cpu_context_t *sched_tick(cpu_context_t *context) {
-    if (!current_task)
-        return context;
-
-    current_task->context = context;
-
+static void* sched_switch_task(task_t *next_task, void* old_context) {
+    current_task->context = (cpu_context_t*)old_context;
     AVX_Save(current_task->avx_state);
-
-    if (current_task->quantum_remaining > 0)
-        current_task->quantum_remaining--;
-
-    if (current_task->quantum_remaining > 0)
-        return context;
-
-    current_task->quantum_remaining = QUANTUM;
-
-    if (current_task->state == TASK_RUNNING)
-        current_task->state = TASK_READY;
-
-    task_t *task = current_task->next;
-    task_t *start = task;
-
-    do {
-        if (task->state == TASK_READY) {
-            current_task = task;
-            current_task->state = TASK_RUNNING;
-
-            tss.rsp0 = (uint64_t)current_task->kernel_stack + KERNEL_STACK_SIZE;
-            paging_switch_address_space(current_task->page_map);
-
-            AVX_Restore(current_task->avx_state);
-
-            return current_task->context;
-        }
-        task = task->next;
-    } while (task != start);
-
-    current_task->state = TASK_RUNNING;
-    return current_task->context;
-}
-
-void* sched_switch_context(void* old_context) {
+    
     if (current_task->state == TASK_RUNNING) {
         current_task->state = TASK_READY;
     }
-    
-    current_task->context = (cpu_context_t*)old_context;
-    AVX_Save(current_task->avx_state);
 
-    task_t *next_task = current_task->next;
-    while (next_task->state != TASK_READY && next_task != current_task) {
-        next_task = next_task->next;
-    }
 
     current_task = next_task;
     current_task->state = TASK_RUNNING;
@@ -93,8 +48,30 @@ void* sched_switch_context(void* old_context) {
     tss.rsp0 = (uint64_t)current_task->kernel_stack + KERNEL_STACK_SIZE;
     paging_switch_address_space(current_task->page_map);
     AVX_Restore(current_task->avx_state);
-    
+
     return (void*)current_task->context;
+}
+
+void* sched_next_context(void* old_context) {
+    task_t *next_task = current_task->next;
+    
+    while (next_task->state != TASK_READY && next_task != current_task) {
+        next_task = next_task->next;
+    }
+
+    return sched_switch_task(next_task, old_context);
+}
+
+cpu_context_t *sched_tick(cpu_context_t *context) {
+    if (!current_task) return context;
+
+    if (current_task->quantum_remaining > 0) {
+        current_task->quantum_remaining--;
+        return context;
+    }
+
+    current_task->quantum_remaining = QUANTUM;
+    return (cpu_context_t*)sched_next_context(context);
 }
 
 void sched_bootstrap(void *rsp) {
