@@ -38,6 +38,7 @@
 #include <devices/type/kbd_device.h>
 
 #include "kmain.h"
+#include "bootargs.h"
 
 extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
@@ -49,7 +50,7 @@ tty_t tty0;
 
 void initrd_load(){ 
     if (!module_request.response || module_request.response->module_count == 0){
-        serial_printf("No Modules Found by booloader\n");
+        kprintf("No Modules Found by booloader\n");
         return;
     }
 
@@ -67,28 +68,51 @@ void scheduler_start(void) {
     sched_bootstrap((void *)rsp);
 }
 
-void shell_start(){
-    // strictly speaking this doenst have to be a shell at all
-    // its just the program that runs at boot? this could be anything tbh
-    char shell_path[256] = {0};
-    kprintf(LOG_INFO "Opening initrd/etc/shell%s\n", shell_path);
-    int sfd = vfs_open("initrd/etc/shell", O_RDONLY);
-    kprintf(LOG_INFO "Reading Shell path %s\n", shell_path);
-    long r = vfs_read(sfd, shell_path, 256);
+void shell_start() {
+    const char* target_path = NULL;
+    char path_buffer[256];
 
-    if (r < 0)
-        kprintf(LOG_ERROR "The Shell Path file, expected at %sinitrd/etc/shell%s "\
-                "did not read, reboot and try again or use another OS to correct the file\n", RGB_FG(212, 44, 44), RESET);
+    if (bootargs_is("shell-path", "default")) {
+        kprintf(LOG_INFO "Loading default shell path from initrd/etc/shell...\n");
+        
+        int sfd = vfs_open("initrd/etc/shell", O_RDONLY);
+        if (sfd < 0) {
+            kprintf(LOG_ERROR "Could not open initrd/etc/shell. System halted.\n");
+            return; 
+        }
 
-    vfs_close(sfd);
-    kprintf(LOG_INFO "Starting Shell: %s\n", shell_path);
+        memset(path_buffer, 0, sizeof(path_buffer));
+        long bytes_read = vfs_read(sfd, path_buffer, sizeof(path_buffer) - 1);
+        vfs_close(sfd);
 
-    sfd = vfs_open(shell_path, O_RDONLY);
-    if (sfd > 4){
-        kprintf(LOG_ERROR "The Shell Path provided in %sinitrd/etc/shell%s was invalid, theres not much you can do from here\n", RGB_FG(212, 44, 44), RESET);
-    }else{
-        kprintf("\x1b[J");
-        elf_sched(elf_get_from_path(shell_path));
+        if (bytes_read <= 0) {
+            kprintf(LOG_ERROR "Shell path file is empty or unreadable.\n");
+            return;
+        }
+
+        for (int i = 0; i < bytes_read; i++) {
+            if (path_buffer[i] == '\n' || path_buffer[i] == '\r' || path_buffer[i] == ' ') {
+                path_buffer[i] = '\0';
+                break;
+            }
+        }
+        
+        target_path = path_buffer;
+    } else {
+        target_path = bootargs_get("shell-path");
+    }
+
+    if (target_path && target_path[0] != '\0') {
+        kprintf(LOG_INFO "Starting init process: %s\n", target_path);
+
+        void* elf = elf_get_from_path(target_path);
+        if (elf) {
+            elf_sched(elf);
+        } else {
+            kprintf(LOG_ERROR "Failed to load ELF: %s\n", target_path);
+        }
+    } else {
+        kprintf(LOG_ERROR "No valid shell path provided.\n");
     }
 }
 
@@ -111,7 +135,11 @@ void kmain() {
     idt_init();
     tss_init();
 
-    strcmp(cmdline_request.response->cmdline, "timer=hpet") == 0 ? acpi_init_hpet() : pit_init(1000);
+    bootargs_init(cmdline_request.response->cmdline);
+    if (bootargs_is("timer", "hpet"))
+        acpi_init_hpet();
+    else
+        pit_init(1000);
 
     pic_init(32, 40);
     pic_unmask(2);
@@ -129,7 +157,9 @@ void kmain() {
     asm volatile ("sti");
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
-    kernel_self_test();
+
+    if (bootargs_is("self-test", "yes")) kernel_self_test();
+
     shell_start();
 
     for (;;) {
