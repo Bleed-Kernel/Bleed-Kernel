@@ -305,6 +305,40 @@ int vfs_close(int fd){
     return 0;
 }
 
+long vfs_seek(int fd, long offset, int whence) {
+    if (!current_fd_table || fd < 0 || fd >= MAX_FDS)
+        return status_print_error(FILE_NOT_FOUND);
+
+    file_t *f = current_fd_table->fds[fd];
+    if (!f || !f->inode)
+        return status_print_error(FILE_NOT_FOUND);
+
+    long new_offset;
+
+    switch (whence) {
+        case SEEK_SET:
+            new_offset = offset;
+            break;
+
+        case SEEK_CUR:
+            new_offset = (long)f->offset + offset;
+            break;
+
+        case SEEK_END:
+            new_offset = (long)vfs_filesize(f->inode) + offset;
+            break;
+
+        default:
+            return -2;
+    }
+
+    if (new_offset < 0)
+        return -2;
+
+    f->offset = (size_t)new_offset;
+    return new_offset;
+}
+
 int inode_create(INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type){
     if (parent->ops->create == NULL) return status_print_error(UNIMPLEMENTED);
     return parent->ops->create(parent, name, namelen, result, node_type);

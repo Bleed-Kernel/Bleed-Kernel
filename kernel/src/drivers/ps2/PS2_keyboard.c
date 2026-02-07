@@ -1,6 +1,7 @@
 #include <drivers/ps2/PS2_keyboard.h>
 #include <drivers/pic/pic.h>
 #include <devices/type/tty_device.h>
+#include <drivers/serial/serial.h>
 #include <cpu/io.h>
 #include <stdio.h>
 #include <stddef.h>

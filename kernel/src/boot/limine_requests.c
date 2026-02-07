@@ -56,3 +56,9 @@ volatile uint64_t limine_requests_end_marker[] =
 __attribute__((used, section(".limine_requests")))
 volatile uint64_t limine_base_revision[] =
     LIMINE_BASE_REVISION(4);
+
+__attribute__((used, section(".limine_requests")))
+volatile struct limine_executable_cmdline_request cmdline_request = {
+    .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
+    .revision = 0
+};

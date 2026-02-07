@@ -9,19 +9,13 @@
 #include <drivers/serial/serial.h>
 #include <ansii.h>
 
-typedef struct {
-    INode_t device;
-    spinlock_t lock;
-    char buffer[KBD_BUFFER_SIZE];
-    size_t head;
-    size_t tail;
-} kbd_device_t;
-
-static kbd_device_t *kbd0 = NULL;
+static kbd_device_t *keyboard_device = NULL;
 
 static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     (void)offset;
     kbd_device_t *kbd = inode->internal_data;
+    if (!kbd) return -1;
+
     spinlock_acquire(&kbd->lock);
 
     if (kbd->head == kbd->tail) {
@@ -29,14 +23,17 @@ static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
         return 0;
     }
 
-    size_t count = 0;
-    while (count < len && kbd->tail != kbd->head) {
-        ((char *)buf)[count++] = kbd->buffer[kbd->tail % KBD_BUFFER_SIZE];
+    size_t bytes_read = 0;
+    while (bytes_read + sizeof(keyboard_event_t) <= len && kbd->tail != kbd->head) {
+        keyboard_event_t *event = &kbd->buffer[kbd->tail];
+        memcpy((uint8_t*)buf + bytes_read, event, sizeof(keyboard_event_t));
+        
         kbd->tail = (kbd->tail + 1) % KBD_BUFFER_SIZE;
+        bytes_read += sizeof(keyboard_event_t);
     }
 
     spinlock_release(&kbd->lock);
-    return count;
+    return bytes_read;
 }
 
 static struct INodeOps kbd_inode_ops = {
@@ -44,41 +41,42 @@ static struct INodeOps kbd_inode_ops = {
 };
 
 static void kbd_listener(const keyboard_event_t *ev) {
-    if (ev->action != KEY_DOWN)
-        return;
+    if (!keyboard_device) return;
 
-    char c = tty_key_to_ascii(ev);
-    if (!c) return;
+    spinlock_acquire(&keyboard_device->lock);
 
-    spinlock_acquire(&kbd0->lock);
-    size_t next_head = (kbd0->head + 1) % KBD_BUFFER_SIZE;
-    if (next_head != kbd0->tail) {
-        kbd0->buffer[kbd0->head] = c;
-        kbd0->head = next_head;
-    }else{
-        serial_printf("%sKBD: Buffer overflow, dropping key\n", LOG_WARN);
+    size_t head = keyboard_device->head;
+    size_t next = (head + 1) % KBD_BUFFER_SIZE;
+
+    if (next == keyboard_device->tail) {
+        keyboard_device->tail = (keyboard_device->tail + 1) % KBD_BUFFER_SIZE;
     }
 
-    spinlock_release(&kbd0->lock);
+    keyboard_device->buffer[head] = *ev;
+    keyboard_device->head = next;
+
+    spinlock_release(&keyboard_device->lock);
 }
 
-void kbd_device_init(INode_t* kbd_inode) {
-    kbd0 = kmalloc(sizeof(kbd_device_t));
-    memset(kbd0, 0, sizeof(*kbd0));
-    spinlock_init(&kbd0->lock);
-    if (kbd_inode) {
-        file_t* kbd_fd = kmalloc(sizeof(file_t));
-        kbd_fd->inode = kbd_inode;
-        kbd_fd->flags = O_RDONLY;
-        kbd_fd->offset = 0;
-        kbd_fd->shared = 1;
+void kbd_device_init(void) {
+    keyboard_device = kmalloc(sizeof(kbd_device_t));
+    memset(keyboard_device, 0, sizeof(kbd_device_t));
+    spinlock_init(&keyboard_device->lock);
 
-        device_register(&kbd0->device, "kbd0");
-        
-        kbd_inode->ops = &kbd_inode_ops;
-        kbd_inode->internal_data = kbd0;
+    keyboard_device->device.ops = &kbd_inode_ops;
+    keyboard_device->device.internal_data = keyboard_device;
+    keyboard_device->device.type = INODE_FILE;
 
-        current_fd_table->fds[3] = kbd_fd;
-        keyboard_register_listener(kbd_listener);
-    }
+    file_t *kbfd = kmalloc(sizeof(file_t));
+    kbfd->inode = &keyboard_device->device;
+    kbfd->inode->ops = &kbd_inode_ops;
+    kbfd->flags = O_RDWR;
+    kbfd->offset = 0;
+    kbfd->shared = 1;
+
+    keyboard_device->device.type = INODE_DEVICE;
+
+    current_fd_table->fds[20] = kbfd;
+    device_register(&keyboard_device->device, "kbd0");
+    keyboard_register_listener(kbd_listener);
 }

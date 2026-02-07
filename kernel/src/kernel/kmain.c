@@ -35,11 +35,13 @@
 #include <tss/tss.h>
 #include <panic.h>
 #include <ACPI/acpi_hpet.h>
+#include <devices/type/kbd_device.h>
 
 #include "kmain.h"
 
 extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
+extern volatile struct limine_executable_cmdline_request cmdline_request;
 
 extern void avx_enable(void);
 extern void sse_enable(void);
@@ -108,32 +110,29 @@ void kmain() {
     gdt_init();
     idt_init();
     tss_init();
-    acpi_init_hpet();
+
+    strcmp(cmdline_request.response->cmdline, "timer=hpet") == 0 ? acpi_init_hpet() : pit_init(1000);
+
     pic_init(32, 40);
     pic_unmask(2);
+    pic_unmask(1);
+
+    kbd_device_init();
+    PS2_Keyboard_init();
 
     scheduler_start();
-
     fb_device_init();
 
     INode_t* tty_inode = device_get_by_name("tty0");
     tty_device_init(tty_inode);
-    
-    INode_t* kbd_inode = device_get_by_name("kbd0");
-    kbd_device_init(kbd_inode);
 
     asm volatile ("sti");
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
-
-    PS2_Keyboard_init();
     kernel_self_test();
-
     shell_start();
 
     for (;;) {
         sched_yield();
     }
-
-    return;
 }

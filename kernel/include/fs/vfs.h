@@ -20,6 +20,10 @@
 #define O_TRUNC  0x8
 #define O_APPEND 0x10
 
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
 #define PATH_MAX    4096
 #define MAX_FDS     256
 
@@ -30,7 +34,8 @@ typedef struct INode INode_t;
 
 typedef enum {
     INODE_DIRECTORY,
-    INODE_FILE
+    INODE_FILE,
+    INODE_DEVICE
 } inode_type;
 
 typedef enum {
@@ -124,6 +129,7 @@ long vfs_read(int fd, void *buf, size_t count);
 long vfs_write(int fd, const void *buf, size_t count);
 int vfs_chdir(const char *path_str);
 int vfs_close(int fd);
+long vfs_seek(int fd, long offset, int whence);
 int vfs_ioctl(int fd, unsigned long request, void* arg);
 
 int inode_create(INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type);

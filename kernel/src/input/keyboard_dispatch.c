@@ -1,4 +1,5 @@
 #include <input/keyboard_dispatch.h>
+#include <stdio.h>
 
 static input_listener_t listeners[MAX_INPUT_LISTENERS];
 static int listener_count = 0;
