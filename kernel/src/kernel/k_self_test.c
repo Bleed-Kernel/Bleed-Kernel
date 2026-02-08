@@ -24,9 +24,9 @@ void kernel_self_test(){
 
     uint64_t y = (rows / 2) - 1;
     kprintf(CYAN_FG);
-    kprintf_at(x1, y,     "   %s", starting);
+    kprintf_pos(x1, y,     "   %s", starting);
     kprintf(RESET);
-    kprintf_at(x1, y + 1,     "%s", kernel_tests);
+    kprintf_pos(x1, y + 1,     "%s", kernel_tests);
 
     paging_test_self_test();
     pmm_test_self_test();

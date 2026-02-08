@@ -38,8 +38,8 @@ void acpi_poweroff_fallback(){
 
     kprintf(ORANGE_FG);
 
-    kprintf_at(x1, y,     "%s", line1);
-    kprintf_at(x2, y + 1, "%s", line2);
+    kprintf_pos(x1, y,     "%s", line1);
+    kprintf_pos(x2, y + 1, "%s", line2);
 }
 
 static uint16_t SLP_TYPa = 0;
