@@ -9,6 +9,6 @@
 /// @param vardic argument list
 void kprintf(const char *fmt, ...)__attribute__((format(printf,1,2)));
 
-void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...);
+void kprintf_pos(uint64_t x, uint64_t y, const char *fmt, ...);
 
 #endif

@@ -1,10 +1,10 @@
 #define NANOPRINTF_IMPLEMENTATION
-#define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS     0
-#define NANOPRINTF_USE_PRECISION_FORMAT_SPECIFIERS       0
+#define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS     1
+#define NANOPRINTF_USE_PRECISION_FORMAT_SPECIFIERS       1
 #define NANOPRINTF_USE_LARGE_FORMAT_SPECIFIERS           1
 #define NANOPRINTF_USE_SMALL_FORMAT_SPECIFIERS           1
-#define NANOPRINTF_USE_BINARY_FORMAT_SPECIFIERS          0
-#define NANOPRINTF_USE_WRITEBACK_FORMAT_SPECIFIERS       0
+#define NANOPRINTF_USE_BINARY_FORMAT_SPECIFIERS          1
+#define NANOPRINTF_USE_WRITEBACK_FORMAT_SPECIFIERS       1
 #define NANOPRINTF_USE_FLOAT_FORMAT_SPECIFIERS           0
 
 #include <drivers/framebuffer/framebuffer.h>
@@ -68,7 +68,7 @@ void kprintf(const char *fmt, ...) {
     kfree(buf, size);
 }
 
-void kprintf_at(uint64_t x, uint64_t y, const char *fmt, ...) {
+void kprintf_pos(uint64_t x, uint64_t y, const char *fmt, ...) {
     char *buf = NULL;
     size_t size = 256;
 

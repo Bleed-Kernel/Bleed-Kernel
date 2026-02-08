@@ -119,6 +119,18 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 run: $(IMAGE_NAME).iso
 	qemu-system-x86_64 --cdrom $(IMAGE_NAME).iso --enable-kvm -cpu host -boot d -m $(MEMSZ) -serial stdio
 
+.PHONY: run-uefi
+run-uefi: edk2-ovmf $(IMAGE_NAME).iso
+	qemu-system-x86_64 \
+		-m $(MEMSZ) \
+		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/OVMF-pure-efi.fd,readonly=on \
+		-cdrom $(IMAGE_NAME).iso \
+		-boot d \
+		-serial stdio \
+		--enable-kvm \
+		-cpu host \
+		$(QEMUFLAGS)
+
 .PHONY: clean
 clean:
 	rm -rf bin $(IMAGE_NAME).iso iso_root

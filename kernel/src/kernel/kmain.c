@@ -158,7 +158,7 @@ void kmain() {
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
 
-    if (bootargs_is("self-test", "yes")) kernel_self_test();
+    if (bootargs_is("self-test", "yes")) kernel_self_test(); 
 
     shell_start();
 

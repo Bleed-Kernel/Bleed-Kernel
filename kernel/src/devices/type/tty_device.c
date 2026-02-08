@@ -56,7 +56,7 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
 long tty_inode_write(INode_t *inode, const void *in_buffer, size_t size, size_t offset) {
     (void)offset;
     tty_t *tty = inode->internal_data;
-    if (!(tty->flags & TTY_ECHO)) return size;
+    //if (!(tty->flags & TTY_ECHO)) return size;
     const uint8_t *c = in_buffer;
     for (size_t i = 0; i < size; i++)
         tty->ops->putchar(tty, (char)c[i]);
@@ -66,16 +66,19 @@ long tty_inode_write(INode_t *inode, const void *in_buffer, size_t size, size_t 
 int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
     tty_t *tty = dev->internal_data;
     uint32_t *user_flags = arg;
-    if (!user_flags)
-        return -1;
+    if (!user_flags) return -1;
 
     switch (req) {
+        case TTY_IOCTL_SET_FLAGS:
+            if (tty->flags != *user_flags) {
+                tty->flags = *user_flags;
+            }
+            return 0;
+        
         case TTY_IOCTL_GET_FLAGS:
             *user_flags = tty->flags;
             return 0;
-        case TTY_IOCTL_SET_FLAGS:
-            tty->flags = *user_flags;
-            return 0;
+            
         default:
             return -1;
     }
@@ -84,10 +87,17 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
 static void tty_input_listener(const keyboard_event_t *ev) {
     if (ev->action != KEY_DOWN)
         return;
+
+    tty_t *tty = (tty_t *)console_get_active_console()->internal_data;
+    
+    if (!(tty->flags & TTY_ECHO)) {
+        return; 
+    }
+
     char c = tty_key_to_ascii(ev);
     if (!c)
         return;
-    tty_t *tty = (tty_t *)console_get_active_console()->internal_data;
+
     tty_process_input(tty, c);
 }
 
@@ -95,7 +105,7 @@ static void tty_fb_putchar(tty_t *tty, char c) {
     tty_fb_backend_t *b = tty->backend;
     uint8_t byte = (uint8_t)c;
 
-    if (!(tty->flags & TTY_ECHO)) return;
+    //if (!(tty->flags & TTY_ECHO)) return;
 
     if (b->utf8_len == 0) {
         if (byte < 0x80) {
@@ -144,7 +154,6 @@ void tty_process_input(tty_t *tty, char c) {
     if (c == '\b' || c == 127) {
         if (tty->in_head != tty->in_tail) {
             tty->in_head = (tty->in_head + TTY_BUFFER_SZ - 1) % TTY_BUFFER_SZ;
-
             if (tty->flags & TTY_ECHO) {
                 tty->ops->putchar(tty, '\b');
                 tty->ops->putchar(tty, ' ');
@@ -155,9 +164,7 @@ void tty_process_input(tty_t *tty, char c) {
     }
 
     size_t next = (tty->in_head + 1) % TTY_BUFFER_SZ;
-    if (next == tty->in_tail) {
-        return; 
-    }
+    if (next == tty->in_tail) return; 
 
     tty->inbuffer[tty->in_head] = c;
     tty->in_head = next;
@@ -165,7 +172,6 @@ void tty_process_input(tty_t *tty, char c) {
     if (tty->flags & TTY_ECHO) {
         tty->ops->putchar(tty, c);
     }
-    
 }
 
 void tty_init(tty_t *tty, void *backend, spinlock_t lock, uint32_t flags) {
