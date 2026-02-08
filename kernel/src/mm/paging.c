@@ -33,6 +33,10 @@ void pat_enable_wc(void) {
     pat |=  (0x01ULL << 32);
 
     write_msr(0x277, pat);
+
+    asm volatile("mov %%cr3, %%rax\n"
+                "mov %%rax, %%cr3\n"
+                ::: "rax", "memory");
 }
 
 /// @brief allocate an empty page frame and return the paddr
@@ -129,6 +133,7 @@ void paging_init_kernel_map(void) {
 /// @brief reinitalise paging so we can access a full memory range, not just the
 /// default from limine
 void reinit_paging(void) {
+    pat_enable_wc();
     struct limine_memmap_response *mmap = memmap_request.response;
 
     uintptr_t fb_base = (uintptr_t)framebuffer_get_addr(0);
@@ -140,34 +145,25 @@ void reinit_paging(void) {
         struct limine_memmap_entry *e = mmap->entries[i];
         if (e->type != LIMINE_MEMMAP_USABLE) continue;
 
-        uint64_t base = e->base & ~(PAGE_SIZE_2M - 1);
+        uint64_t base = e->base & ~(PAGE_SIZE_4K - 1);
         uint64_t end  = e->base + e->length;
 
-        for (uint64_t p = base; p + PAGE_SIZE_2M <= end; p += PAGE_SIZE_2M) {
+        for (uint64_t p = base; p + PAGE_SIZE_4K <= end; p += PAGE_SIZE_4K) {
             if (p >= fb_base && p < fb_end)
                 continue;
 
             void *hv = paddr_to_vaddr(p);
             if (!hv) continue;
 
-            paging_map_page(
-                read_cr3(), p, (uintptr_t)hv,
-                PAGE_KERNEL_RW | PTE_PS
-            );
+            for (uintptr_t p = fb_base; p < fb_end; p += PAGE_SIZE_4K) {
+                paging_map_page(
+                    read_cr3(),
+                    p,
+                    (uintptr_t)paddr_to_vaddr(p),
+                    PTE_PRESENT | PTE_WRITABLE | PTE_PAT
+                );
+            }
         }
-    }
-
-    pat_enable_wc();
-
-    uintptr_t fb_p = fb_base & ~(PAGE_SIZE_2M - 1);
-    uintptr_t fb_p_end =
-        (fb_end + PAGE_SIZE_2M - 1) & ~(PAGE_SIZE_2M - 1);
-
-    for (uintptr_t p = fb_p; p < fb_p_end; p += PAGE_SIZE_2M) {
-        paging_map_page(
-            read_cr3(), p, (uintptr_t)paddr_to_vaddr(p),
-            PAGE_KERNEL_RW | PTE_PS | PTE_PS_PAT
-        );
     }
 
     paging_init_kernel_map();

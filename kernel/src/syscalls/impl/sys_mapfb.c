@@ -36,7 +36,7 @@ void* sys_mapfb(size_t *out_pages) {
 
         uintptr_t clean_p = p & 0x000FFFFFFFFFF000ULL;
         
-        paging_map_page(task->page_map, clean_p, v, PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_USER);
+        paging_map_page(task->page_map, clean_p, v, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
         
         __asm__ volatile("invlpg (%0)" :: "r"(v) : "memory");
     }

@@ -3,18 +3,22 @@
 #include <stdint.h>
 #include <mm/pmm.h>
 
-#define PTE_PRESENT     (1ULL<<0)
-#define PTE_WRITABLE    (1ULL<<1)
-#define PTE_USER        (1ULL<<2)
-#define PTE_PWT         (1ULL << 3)
-#define PTE_PCD         (1ULL << 4)
-#define PTE_PS          (1ULL << 7)
-#define PTE_PS_PAT      (1ULL << 12)
+#define PTE_PRESENT   (1ULL << 0)
+#define PTE_WRITABLE  (1ULL << 1)
+#define PTE_USER      (1ULL << 2)
+#define PTE_PCD       (1ULL << 4)
+
+#define PTE_PS        (1ULL << 7)   
+
+#define PTE_PAT       (1ULL << 7)   //honestly not too sure whats going on
+#define PTE_PS_PAT    (1ULL << 12)
 
 #define PAGE_KERNEL_RW      (PTE_WRITABLE | PTE_PS)
 #define PAGE_KERNEL_RO      (PTE_PS)
 #define PAGE_USER_RW        (PTE_WRITABLE | PTE_USER)
 #define PAGE_USER_RO        (PTE_USER)
+
+#define PAGE_FB_WC          (PTE_WRITABLE | PTE_PCD | PTE_PS_PAT | PTE_PS)
 
 #define PAGE_SIZE_4K       4096
 #define PAGE_SIZE_2M       (512 * PAGE_SIZE_4K)
