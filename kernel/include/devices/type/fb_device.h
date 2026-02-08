@@ -12,6 +12,7 @@ typedef struct {
     size_t width;
     size_t height;
     size_t pitch;
+    size_t size;
 } fb_device_t;
 
 struct fb_info {

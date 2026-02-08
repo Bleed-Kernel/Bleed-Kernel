@@ -20,9 +20,19 @@ static inline void write_msr(uint32_t msr, uint64_t val) {
     asm volatile ("wrmsr" :: "c"(msr), "a"((uint32_t)val), "d"((uint32_t)(val >> 32)));
 }
 
+static inline uint64_t read_msr(uint32_t msr) {
+    uint32_t lo, hi;
+    asm volatile ("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((uint64_t)hi << 32) | lo;
+}
+
 void pat_enable_wc(void) {
-    uint64_t pat_val = 0x0007040100070406ULL;
-    write_msr(0x277, pat_val);
+    uint64_t pat = read_msr(0x277);
+
+    pat &= ~(0xFFULL << 32);
+    pat |=  (0x01ULL << 32);
+
+    write_msr(0x277, pat);
 }
 
 /// @brief allocate an empty page frame and return the paddr
@@ -156,7 +166,7 @@ void reinit_paging(void) {
     for (uintptr_t p = fb_p; p < fb_p_end; p += PAGE_SIZE_2M) {
         paging_map_page(
             read_cr3(), p, (uintptr_t)paddr_to_vaddr(p),
-            PAGE_KERNEL_RW | PTE_PS | PTE_PWT | PTE_PS_PAT
+            PAGE_KERNEL_RW | PTE_PS | PTE_PS_PAT
         );
     }
 
