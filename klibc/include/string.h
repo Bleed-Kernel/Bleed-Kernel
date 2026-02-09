@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <mm/smap.h>
 
 /// @brief gets the length of a string
 /// @param string string to evaluate
@@ -50,6 +51,19 @@ static inline void *memcpy(void *dest, const void *src, uint64_t n) {
     for (uint64_t i = 0; i < n; i++) {
         *pdest++ = *psrc++;
     }
+
+    return dest;
+}
+
+/// @brief copy memory from one location to another for userspace
+/// @param dest destination
+/// @param src source
+/// @param n size
+/// @return dest
+static inline void *umemcpy(void *dest, const void *src, uint64_t n) {
+    stac();
+    memcpy(dest, src, n);
+    clac();
 
     return dest;
 }

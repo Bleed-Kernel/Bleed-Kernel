@@ -5,6 +5,7 @@
 #include <mm/pmm.h>
 #include <mm/paging.h>
 #include <sched/scheduler.h>
+#include <mm/smap.h>
 #include <gdt/gdt.h>
 #include <stdio.h>
 #include <ansii.h>
@@ -128,9 +129,11 @@ task_t *elf_sched(INode_t *file){
     task_t *task = sched_create_task(cr3, entry, USER_CS, USER_SS, file->internal_data);
     if (!task) return NULL;
 
+    stac();
     uint64_t *user_stack = (uint64_t *)(USER_STACK_TOP - 16);
     user_stack[0] = 0;
     user_stack[1] = 0;
+    clac();
 
     task->context->rsp = (uint64_t)user_stack;
 

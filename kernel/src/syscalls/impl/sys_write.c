@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <mm/kalloc.h>
 #include <string.h>
+#include <mm/smap.h>
 
 uint64_t sys_write(uint64_t fd, uint64_t user_buf, uint64_t len) {
     if (fd >= MAX_FDS || !current_fd_table || !user_buf || len == 0)
@@ -19,7 +20,7 @@ uint64_t sys_write(uint64_t fd, uint64_t user_buf, uint64_t len) {
     if (!kbuf)
         return -1;
 
-    memcpy(kbuf, (void*)user_buf, len);
+    umemcpy(kbuf, (void*)user_buf, len);
     long written = inode_write(f->inode, kbuf, len, f->offset);
     if (written > 0)
         f->offset += written;

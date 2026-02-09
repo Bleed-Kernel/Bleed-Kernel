@@ -17,7 +17,7 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
     long total_read = vfs_read((int)fd, kbuf, batch_size);
     
     if (total_read > 0) {
-        memcpy((void *)user_buf, kbuf, total_read);
+        umemcpy((void *)user_buf, kbuf, total_read);
     }
 
     return (uint64_t)total_read;

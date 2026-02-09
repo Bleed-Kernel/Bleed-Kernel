@@ -10,6 +10,7 @@
 #include <devices/device_io.h>
 #include <mm/spinlock.h>
 #include <mm/kalloc.h>
+#include <mm/smap.h>
 #include <console/console.h>
 #include <fonts/utf-8.h>
 #include <stdio.h>
@@ -66,6 +67,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
     tty_t *tty = dev->internal_data;
     uint32_t *user_flags = arg;
 
+    stac();
     switch (req) {
         case TTY_IOCTL_SET_FLAGS:
             if (tty->flags != *user_flags) {
@@ -100,6 +102,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
         default:
             return -1;
     }
+    clac();
 }
 
 static void tty_input_listener(const keyboard_event_t *ev) {

@@ -49,7 +49,7 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
     paging_switch_address_space(current_task->page_map);
     AVX_Restore(current_task->avx_state);
 
-    return (void*)current_task->context;
+    return (void*)next_task->context;
 }
 
 void* sched_next_context(void* old_context) {

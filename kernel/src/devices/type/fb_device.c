@@ -19,7 +19,7 @@ static long fb_write(INode_t *inode, const void *buf, size_t len, size_t offset)
     if (offset + len > fb_size)
         len = fb_size - offset;
 
-    memcpy(fb_backbuffer + offset, buf, len);
+    umemcpy(fb_backbuffer + offset, buf, len);
     return len;
 }
 
@@ -31,7 +31,7 @@ static long fb_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     if (offset + len > fb_size)
         len = fb_size - offset;
 
-    memcpy(buf, fb_backbuffer + offset, len);
+    umemcpy(buf, fb_backbuffer + offset, len);
     return len;
 }
 
@@ -45,13 +45,13 @@ static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
             .pitch  = fb->pitch,
             .bpp    = 32
         };
-        memcpy(arg, &info, sizeof(info));
+        umemcpy(arg, &info, sizeof(info));
         return 0;
     }
 
     if (request == FB_IOC_FLIP) {
         size_t size = fb->height * fb->pitch;
-        memcpy((void*)fb->fb_phys, arg, size);
+        umemcpy((void*)fb->fb_phys, arg, size);
         return 0;
     }
 
