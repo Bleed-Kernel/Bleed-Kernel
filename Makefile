@@ -85,7 +85,11 @@ userprogs:
 install-userprogs: userprogs
 	@mkdir -p initrd/bin
 	@for p in $(USER_PROGS); do \
-		cp $(USER_BASE)/$$p/bin/$$p initrd/bin/$$p; \
+		if [ -f $(USER_BASE)/$$p/bin/$$p ]; then \
+			cp $(USER_BASE)/$$p/bin/$$p initrd/bin/$$p; \
+		else \
+			echo "Skipping user program $$p (not found)"; \
+		fi \
 	done
 
 .PHONY: initrd
