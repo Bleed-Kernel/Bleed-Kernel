@@ -94,8 +94,8 @@ install-userprogs: userprogs
 
 .PHONY: initrd
 initrd: $(KERNEL_SYM) install-userprogs
-	tar -cf initrd/initrd.tar \
-		initrd/fonts/* initrd/bin/* initrd/etc/* initrd/doom1.wad
+	@mkdir -p initrd
+	@tar -cf initrd/initrd.tar $(shell find initrd/fonts initrd/bin initrd/etc -type f 2>/dev/null) initrd/doom1.wad 2>/dev/null || true
 
 $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 	rm -rf iso_root
