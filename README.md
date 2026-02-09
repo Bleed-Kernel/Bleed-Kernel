@@ -1,4 +1,3 @@
-
 # Bleed Kernel
 A 64-bit Operating System in C using the Limine Bootloader for UEFI and BIOS systems
 
@@ -19,7 +18,7 @@ A 64-bit Operating System in C using the Limine Bootloader for UEFI and BIOS sys
 - [x]  ELF Loading
 - [x]  ACPI
 - [ ]  APIC
-- [ ]  HPET
+- [x]  HPET
 - [ ]  SMP
 
 ill plan more as i go along!
