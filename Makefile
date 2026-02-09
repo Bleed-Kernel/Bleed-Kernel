@@ -77,7 +77,7 @@ limine/limine:
 userprogs:
 	@for p in $(USER_PROGS); do \
 		dir=$(USER_BASE)/$$p; \
-		test -d $$dir; \
+		test -d $$dir || continue; \
 		$(MAKE) -C $$dir; \
 	done
 
