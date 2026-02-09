@@ -133,7 +133,7 @@ void itterate_each_task(task_itteration_fn fn, void *userdata);
 void* task_mmap(task_t* task, size_t pages);
 void task_munmap(task_t* task, void* addr);
 void sched_init_task_heap(task_t* task);
-void* sched_switch_context(void* old_context);
+void* sched_switch_task(task_t *next_task, void* old_context);
 
 extern task_t *task_list_head;
 #endif

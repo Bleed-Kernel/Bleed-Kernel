@@ -32,7 +32,7 @@ void init_scheduler(void) {
     asm volatile ("sti");
 }
 
-static void* sched_switch_task(task_t *next_task, void* old_context) {
+void* sched_switch_task(task_t *next_task, void* old_context) {
     current_task->context = (cpu_context_t*)old_context;
     AVX_Save(current_task->avx_state);
     

@@ -36,9 +36,8 @@
 #include <panic.h>
 #include <ACPI/acpi_hpet.h>
 #include <devices/type/kbd_device.h>
-
-#include "kmain.h"
-#include "bootargs.h"
+#include <kernel/kmain.h>
+#include <kernel/bootargs.h>
 
 extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;

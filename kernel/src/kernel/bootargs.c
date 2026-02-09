@@ -1,4 +1,4 @@
-#include "bootargs.h"
+#include <kernel/bootargs.h>
 #include <string.h>
 #include <stdio.h>
 #include <mm/kalloc.h>

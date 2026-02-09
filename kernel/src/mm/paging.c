@@ -145,17 +145,17 @@ void reinit_paging(void) {
         struct limine_memmap_entry *e = mmap->entries[i];
         if (e->type != LIMINE_MEMMAP_USABLE) continue;
 
-        uint64_t base = e->base & ~(PAGE_SIZE_4K - 1);
+        uint64_t base = e->base & ~(PAGE_SIZE_2M - 1);
         uint64_t end  = e->base + e->length;
 
-        for (uint64_t p = base; p + PAGE_SIZE_4K <= end; p += PAGE_SIZE_4K) {
+        for (uint64_t p = base; p + PAGE_SIZE_2M <= end; p += PAGE_SIZE_2M) {
             if (p >= fb_base && p < fb_end)
                 continue;
 
             void *hv = paddr_to_vaddr(p);
             if (!hv) continue;
 
-            for (uintptr_t p = fb_base; p < fb_end; p += PAGE_SIZE_4K) {
+            for (uintptr_t p = fb_base; p < fb_end; p += PAGE_SIZE_2M) {
                 paging_map_page(
                     read_cr3(),
                     p,
