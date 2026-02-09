@@ -56,7 +56,6 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
 long tty_inode_write(INode_t *inode, const void *in_buffer, size_t size, size_t offset) {
     (void)offset;
     tty_t *tty = inode->internal_data;
-    //if (!(tty->flags & TTY_ECHO)) return size;
     const uint8_t *c = in_buffer;
     for (size_t i = 0; i < size; i++)
         tty->ops->putchar(tty, (char)c[i]);
@@ -104,8 +103,6 @@ static void tty_input_listener(const keyboard_event_t *ev) {
 static void tty_fb_putchar(tty_t *tty, char c) {
     tty_fb_backend_t *b = tty->backend;
     uint8_t byte = (uint8_t)c;
-
-    //if (!(tty->flags & TTY_ECHO)) return;
 
     if (b->utf8_len == 0) {
         if (byte < 0x80) {
@@ -201,7 +198,6 @@ void tty_device_init(INode_t *tty_inode) {
     f0->flags = O_RDWR;
     f0->offset = 0;
     f0->shared = 1;
-    current_fd_table->fds[0] = f0;
     current_fd_table->fds[1] = f0;
     current_fd_table->fds[2] = f0;
 }

@@ -43,8 +43,6 @@ static struct INodeOps kbd_inode_ops = {
 static void kbd_listener(const keyboard_event_t *ev) {
     if (!keyboard_device) return;
 
-    spinlock_acquire(&keyboard_device->lock);
-
     size_t head = keyboard_device->head;
     size_t next = (head + 1) % KBD_BUFFER_SIZE;
 
@@ -55,7 +53,6 @@ static void kbd_listener(const keyboard_event_t *ev) {
     keyboard_device->buffer[head] = *ev;
     keyboard_device->head = next;
 
-    spinlock_release(&keyboard_device->lock);
 }
 
 void kbd_device_init(void) {
@@ -76,7 +73,7 @@ void kbd_device_init(void) {
 
     keyboard_device->device.type = INODE_DEVICE;
 
-    current_fd_table->fds[20] = kbfd;
+    current_fd_table->fds[0] = kbfd;
     device_register(&keyboard_device->device, "kbd0");
     keyboard_register_listener(kbd_listener);
 }
