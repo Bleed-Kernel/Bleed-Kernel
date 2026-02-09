@@ -65,7 +65,6 @@ long tty_inode_write(INode_t *inode, const void *in_buffer, size_t size, size_t 
 int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
     tty_t *tty = dev->internal_data;
     uint32_t *user_flags = arg;
-    if (!user_flags) return -1;
 
     switch (req) {
         case TTY_IOCTL_SET_FLAGS:
@@ -77,7 +76,27 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
         case TTY_IOCTL_GET_FLAGS:
             *user_flags = tty->flags;
             return 0;
-            
+
+        case TTY_IOCTL_GET_CURSOR: {
+            if (!arg) return -1;
+            tty_fb_backend_t *b = tty->backend;
+            tty_cursor_t *cursor = (tty_cursor_t *)arg;
+            cursor->x = b->fb.cursor_x;
+            cursor->y = b->fb.cursor_y;
+            return 0;
+        }
+
+        case TTY_IOCTL_SET_CURSOR: {
+            if (!arg) return -1;
+            tty_fb_backend_t *b = tty->backend;
+            tty_cursor_t *cursor = (tty_cursor_t *)arg;
+            if (cursor->x < b->fb.width && cursor->y < b->fb.height) {
+                b->fb.cursor_x = cursor->x;
+                b->fb.cursor_y = cursor->y;
+            }
+            return 0;
+        }
+
         default:
             return -1;
     }
