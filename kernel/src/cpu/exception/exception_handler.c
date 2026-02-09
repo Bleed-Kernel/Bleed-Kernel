@@ -159,6 +159,7 @@ extern void* ke_exception_handler(void *frame) {
     };
 
     generate_signature(&signature, sizeof(signature));
+    kprintf("  " RESET);
     
     for(;;) { __asm__ volatile ("hlt"); }
 }
