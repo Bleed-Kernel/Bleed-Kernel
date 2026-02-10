@@ -8,6 +8,7 @@
 #include <devices/type/tty_device.h>
 #include <panic.h>
 #include <mm/pmm.h>
+#include <cpu/control_registers.h>
 #include "../acpi_priv.h"
 
 void acpi_poweroff_fallback(){

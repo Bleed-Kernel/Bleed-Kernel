@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <mm/smap.h>
+#include <cpu/control_registers.h>
 
 #define PAGE_SIZE 4096
 #define USER_MIN 0x0000000000001000ULL

@@ -13,7 +13,7 @@ int vmm_map_pages(vmm_cr3_t cr3, void* virt, size_t page_count, uint64_t flags) 
         paddr_t phys = pmm_alloc_pages(1);
         if (!phys) return -1;
 
-        paging_map_page(cr3, phys, va + i * PAGE_SIZE, flags);
+        paging_map_page(cr3, phys, va + i * PAGE_SIZE, flags | PTE_NX);
     }
     return 0;
 }
@@ -21,7 +21,7 @@ int vmm_map_pages(vmm_cr3_t cr3, void* virt, size_t page_count, uint64_t flags) 
 void vmm_unmap_pages(vmm_cr3_t cr3, void* virt, size_t page_count) {
     uintptr_t va = (uintptr_t)virt;
     for (size_t i = 0; i < page_count; i++) {
-        paging_map_page(cr3, 0, va + i * PAGE_SIZE, 0);
+        paging_map_page(cr3, 0, va + i * PAGE_SIZE, PTE_NX);
     }
 }
 

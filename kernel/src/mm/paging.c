@@ -5,34 +5,26 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <mm/pmm.h>
 #include <mm/paging.h>
+#include <cpu/io.h>
 #include <ansii.h>
 #include <vendor/limine_bootloader/limine.h>
 #include <drivers/serial/serial.h>
 #include <panic.h>
 #include <sched/scheduler.h>
+#include <cpu/feature_bits.h>
+#include <cpu/msrs.h>
 
 paddr_t kernel_page_map = 0;
 
 extern volatile struct limine_memmap_request memmap_request;
 
-// replace this with a standard wrmsr and rmsrs later they got reverted
-static inline void write_msr(uint32_t msr, uint64_t val) {
-    asm volatile ("wrmsr" :: "c"(msr), "a"((uint32_t)val), "d"((uint32_t)(val >> 32)));
-}
-
-static inline uint64_t read_msr(uint32_t msr) {
-    uint32_t lo, hi;
-    asm volatile ("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
-    return ((uint64_t)hi << 32) | lo;
-}
-
 void pat_enable_wc(void) {
-    uint64_t pat = read_msr(0x277);
+    uint64_t pat = rdmsr(0x277);
 
     pat &= ~(0xFFULL << 32);
     pat |=  (0x01ULL << 32);
 
-    write_msr(0x277, pat);
+    wrmsr(0x277, pat);
 
     asm volatile("mov %%cr3, %%rax\n"
                 "mov %%rax, %%cr3\n"
@@ -65,7 +57,7 @@ static uint64_t paging_write_table_entry(uint64_t* table, size_t index, uint64_t
     uint64_t p = paging_alloc_empty_frame(&v);
     if (!v) return 0;
 
-    table[index] = (p & PADDR_ENTRY_MASK) | (flags & ~PADDR_ENTRY_MASK);
+    table[index] = (p & PADDR_ENTRY_MASK) | flags | PTE_PRESENT;
     return p & PADDR_ENTRY_MASK;
 }
 
@@ -84,16 +76,16 @@ void paging_walk_page_tables(paddr_t cr3, uint64_t vaddr,
     size_t pti   = (vaddr >> 12) & 0x1FF;
 
     uint64_t p_pdpt = paging_write_table_entry(
-        pml4, pml4i, PTE_PRESENT | PTE_WRITABLE | flags);
+        pml4, pml4i, PTE_PRESENT | PTE_WRITABLE | (flags & PTE_USER));
     uint64_t *pdpt = paddr_to_vaddr(p_pdpt);
 
     uint64_t p_pd = paging_write_table_entry(
-        pdpt, pdpti, PTE_PRESENT | PTE_WRITABLE | flags);
+        pdpt, pdpti, PTE_PRESENT | PTE_WRITABLE | (flags & PTE_USER));
     uint64_t *pd = paddr_to_vaddr(p_pd);
 
-    if (!(flags & PTE_PS)) {
+    if (!(flags & PTE_PAGESIZE)) {
         uint64_t p_pt = paging_write_table_entry(
-            pd, pdi, PTE_PRESENT | PTE_WRITABLE | flags);
+            pd, pdi, PTE_PRESENT | PTE_WRITABLE | (flags & PTE_USER));
         uint64_t *pt = paddr_to_vaddr(p_pt);
         *out_pd = pt;
         *out_pd_index = pti;
@@ -112,12 +104,12 @@ void paging_map_page(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags
     size_t idx;
 
     paging_walk_page_tables(cr3, vaddr, &pd, &idx,
-        flags & (PTE_USER | PTE_PS));
+        flags & (PTE_USER | PTE_PAGESIZE));
 
     if (!pd) return;
 
     pd[idx] = (paddr & PADDR_ENTRY_MASK)
-            | (flags & ~PADDR_ENTRY_MASK)
+            | flags
             | PTE_PRESENT;
 
     asm volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
@@ -133,7 +125,9 @@ void paging_init_kernel_map(void) {
 /// @brief reinitalise paging so we can access a full memory range, not just the
 /// default from limine
 void reinit_paging(void) {
+    nx_init();
     pat_enable_wc();
+    
     struct limine_memmap_response *mmap = memmap_request.response;
 
     uintptr_t fb_base = (uintptr_t)framebuffer_get_addr(0);
@@ -160,7 +154,7 @@ void reinit_paging(void) {
                     read_cr3(),
                     p,
                     (uintptr_t)paddr_to_vaddr(p),
-                    PTE_PRESENT | PTE_WRITABLE | PTE_PAT
+                    PTE_PRESENT | PTE_WRITABLE | PTE_PAT | PTE_NX
                 );
             }
         }

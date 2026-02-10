@@ -39,6 +39,7 @@
 #include <devices/type/kbd_device.h>
 #include <kernel/kmain.h>
 #include <kernel/bootargs.h>
+#include <cpu/feature_bits.h>
 
 extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
@@ -116,6 +117,8 @@ void shell_start() {
     }
 }
 
+typedef void (*fn_t)(void);
+
 void kmain() {
     asm volatile ("cli");
     sse_enable();
@@ -159,8 +162,8 @@ void kmain() {
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
 
     supervisor_memory_protection_init();
-
-    if (bootargs_is("self-test", "yes")) kernel_self_test(); 
+    if (bootargs_is("self-test", "yes")) kernel_self_test();
+    UMIP_init();
     shell_start();
 
     for (;;) {
