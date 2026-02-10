@@ -22,9 +22,7 @@ void* sys_mapfb(size_t *out_pages) {
     size_t fb_size = framebuffer_get_width(0) * framebuffer_get_height(0) * (framebuffer_get_bpp(0) / 8);
     size_t pages = (offset + fb_size + 4095) / 4096;
 
-    stac();
-    *out_pages = pages;
-    clac();
+    SMAP_ALLOW{ *out_pages = pages; }
 
     uintptr_t base = 0x0000004000000000ULL;
     user_alloc_t* last = NULL;

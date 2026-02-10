@@ -3,6 +3,7 @@
 #include <ansii.h>
 #include <drivers/serial/serial.h>
 #include <mm/kalloc.h>
+#include <mm/smap.h>
 #include <fs/vfs.h>
 
 struct ksym{
@@ -68,23 +69,25 @@ void stack_trace_print(uint64_t *rbp) {
     for (int i = 0; i < 16 && rbp; i++) {
         if ((uint64_t)rbp < 0x1000 || ((uint64_t)rbp & 0xF)) break;
 
-        uint64_t rip = rbp[1];
-        if (!rip) break;
-        uint64_t sym_addr = 0;
-        const char *name = stack_trace_symbol_lookup(rip, &sym_addr);
+        SMAP_ALLOW{
+            uint64_t rip = rbp[1];
+            if (!rip) break;
+            uint64_t sym_addr = 0;
+            const char *name = stack_trace_symbol_lookup(rip, &sym_addr);
 
-        if (name) {
-            kprintf("  %s0x%s%p %s<%s+0x%llu>%s\n",
-                GRAY_FG, RESET, (void *)rip,
-                ORANGE_FG, name,
-                rip - sym_addr,
-                RESET);
-        } else {
-            kprintf("  %s0x%s%p %s<??:?>%s\n",
-                GRAY_FG, RESET, (void *)rip,
-                ORANGE_FG, RESET);
+            if (name) {
+                kprintf("  %s0x%s%p %s<%s+0x%llu>%s\n",
+                    GRAY_FG, RESET, (void *)rip,
+                    ORANGE_FG, name,
+                    rip - sym_addr,
+                    RESET);
+            } else {
+                kprintf("  %s0x%s%p %s<??:?>%s\n",
+                    GRAY_FG, RESET, (void *)rip,
+                    ORANGE_FG, RESET);
+            }
+            
+            rbp = (uint64_t *)rbp[0];
         }
-
-        rbp = (uint64_t *)rbp[0];
     }
 }

@@ -9,14 +9,14 @@ long sys_getcwd(char *buf, long size) {
     INode_t *inode = task->current_directory;
 
     // special case: root
-    stac();
-    if (inode == vfs_get_root()) {
-        if (size < 2) return -1;
-        buf[0] = '/';
-        buf[1] = '\0';
-        return 0;
+    SMAP_ALLOW{
+        if (inode == vfs_get_root()) {
+            if (size < 2) return -1;
+            buf[0] = '/';
+            buf[1] = '\0';
+            return 0;
+        }
     }
-    clac();
 
     // Walk up to root to count total length
     size_t total_len = 0;
@@ -30,20 +30,20 @@ long sys_getcwd(char *buf, long size) {
     if (total_len + 1 > (size_t)size) return -1; // not enough space
 
     // Build path backwards
-    stac();
-    buf[total_len] = '\0';
-    cur = inode;
-    size_t pos = total_len;
-    while (cur && cur != vfs_get_root()) {
-        const char *name = cur->internal_data;
-        size_t len = strlen(name);
-        pos -= len;
-        memcpy(buf + pos, name, len);
-        pos--; // for '/'
-        buf[pos] = '/';
-        cur = cur->parent;
+    SMAP_ALLOW{
+        buf[total_len] = '\0';
+        cur = inode;
+        size_t pos = total_len;
+        while (cur && cur != vfs_get_root()) {
+            const char *name = cur->internal_data;
+            size_t len = strlen(name);
+            pos -= len;
+            memcpy(buf + pos, name, len);
+            pos--; // for '/'
+            buf[pos] = '/';
+            cur = cur->parent;
+        }
     }
-    clac();
 
     // root case already handled, so buf should start with '/'
     return 0;

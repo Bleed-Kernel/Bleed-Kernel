@@ -157,7 +157,7 @@ void kmain() {
     asm volatile ("sti");
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
-    
+
     supervisor_memory_protection_init();
 
     if (bootargs_is("self-test", "yes")) kernel_self_test(); 

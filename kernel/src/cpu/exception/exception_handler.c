@@ -6,8 +6,6 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <sched/scheduler.h>
 
-static int faulted = 0;
-
 struct isr_stackframe {
     uint64_t rax; uint64_t rbx; uint64_t rcx; uint64_t rdx;
     uint64_t rsi; uint64_t rdi; uint64_t rbp;
@@ -101,32 +99,7 @@ static void generate_signature(void* data, uint64_t len) {
 
 extern void* ke_exception_handler(void *frame) {
     struct isr_stackframe *f = (struct isr_stackframe *)frame;
-    
-    if (f->cs == 0x1b){
-        task_t *t = get_current_task();
 
-        kprintf(
-            RED_FG "\n[task %llu:%s] %s\n" RESET,
-            t->id,
-            t->name,
-            exception_name(f->vector)
-        );
-
-        if (f->vector == 14) {
-            uint64_t cr2;
-            asm volatile ("mov %%cr2, %0" : "=r"(cr2));
-            kprintf("  page fault at %p\n", (void*)cr2);
-        }
-
-        return sched_switch_task(t->next, t);
-        __builtin_unreachable();
-    }
-
-    if (faulted){
-        serial_write("A fault happend in the panic handler, its probably propogated through whatever caused it in the first place but we wont spam the screen\n");
-        for(;;) { __asm__ volatile ("cli; hlt"); }
-    }
-    faulted = 1;
     kprintf("fault!"); // at the moment clearing the screen while the screen is empty causes ANOTHER panic
     kprintf("\x1b[J");
 

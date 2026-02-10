@@ -35,15 +35,15 @@ int copy_to_user(task_t *user_task, void *udst, const void *src, size_t len) {
     uint8_t *dst = (uint8_t *)udst;
     const uint8_t *s = (const uint8_t *)src;
 
-    stac();
-    for (size_t i = 0; i < len; i++) {
-        if (!user_range_mapped(user_task, (uintptr_t)(dst + i), 1)) {
-            paging_switch_address_space(old_cr3);
-            return -1;
+    SMAP_ALLOW{
+        for (size_t i = 0; i < len; i++) {
+            if (!user_range_mapped(user_task, (uintptr_t)(dst + i), 1)) {
+                paging_switch_address_space(old_cr3);
+                return -1;
+            }
+            dst[i] = s[i];
         }
-        dst[i] = s[i];
     }
-    clac();
 
     paging_switch_address_space(old_cr3);
     return 0;
@@ -58,10 +58,10 @@ int copy_from_user(task_t *user_task, void *kernel_dst, const void *user_src, si
     char *dst = (char *)kernel_dst;
     const char *src = (const char *)user_src;
 
-    stac();
-    for (size_t i = 0; i < len; i++)
-        dst[i] = ((volatile char *)src)[i];
-    clac();
+    SMAP_ALLOW{
+        for (size_t i = 0; i < len; i++)
+            dst[i] = ((volatile char *)src)[i];
+    }
 
     return 0;
 }

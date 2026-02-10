@@ -61,10 +61,7 @@ static inline void *memcpy(void *dest, const void *src, uint64_t n) {
 /// @param n size
 /// @return dest
 static inline void *umemcpy(void *dest, const void *src, uint64_t n) {
-    stac();
-    memcpy(dest, src, n);
-    clac();
-
+    SMAP_ALLOW{memcpy(dest, src, n);}
     return dest;
 }
 

@@ -18,20 +18,20 @@ long sys_readdir(int fd, size_t index, dirent_t *user_ent) {
     if (!dir || dir->type != INODE_DIRECTORY)
         return status_print_error(FILE_NOT_FOUND);
 
-    stac();
-    INode_t *child = NULL;
-    int r = vfs_readdir(dir, index, &child);
-    if (r < 0)
-        return r;
+    SMAP_ALLOW{
+        INode_t *child = NULL;
+        int r = vfs_readdir(dir, index, &child);
+        if (r < 0)
+            return r;
 
-    if (!child || !child->internal_data)
-        return status_print_error(FILE_NOT_FOUND);
+        if (!child || !child->internal_data)
+            return status_print_error(FILE_NOT_FOUND);
 
 
-    memset(user_ent, 0, sizeof(*user_ent));
-    strncpy(user_ent->name, child->internal_data, sizeof(user_ent->name) - 1);
-    user_ent->type = child->type;
-    clac();
+        memset(user_ent, 0, sizeof(*user_ent));
+        strncpy(user_ent->name, child->internal_data, sizeof(user_ent->name) - 1);
+        user_ent->type = child->type;
+    }
 
     return 0;
 }
