@@ -1,6 +1,8 @@
 #pragma once
 #include <cpu/control_registers.h>
 #include <cpu/msrs.h>
+#include <cpu/cpuid.h>
+#include <stdbool.h>
 
 // User Mode Instruction Protection
 #define CR4_UMIP (1ULL << 11)
@@ -33,3 +35,20 @@ static inline void wp_enable(void){
     cr0 |= CR0_WP;
     write_cr0(cr0);
 }
+
+static inline bool cpu_has_avx512(void) {
+    uint32_t eax, ebx, ecx, edx;
+
+    if (!cpuid(1, &eax, &ebx, &ecx, &edx))
+        return false;
+
+    if (!(ecx & (1 << 27)) || !(ecx & (1 << 28)))
+        return false;
+
+    if (!cpuid_count(7, 0, &eax, &ebx, &ecx, &edx))
+        return false;
+
+    return (ebx & (1 << 16)) != 0;
+}
+
+void avx_enable(void);

@@ -11,7 +11,7 @@
 #include <drivers/serial/serial.h>
 #include <panic.h>
 #include <sched/scheduler.h>
-#include <cpu/feature_bits.h>
+#include <cpu/features/features.h>
 #include <cpu/msrs.h>
 
 paddr_t kernel_page_map = 0;
