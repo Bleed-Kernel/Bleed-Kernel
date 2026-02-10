@@ -117,8 +117,6 @@ void shell_start() {
     }
 }
 
-typedef void (*fn_t)(void);
-
 void kmain() {
     asm volatile ("cli");
     sse_enable();

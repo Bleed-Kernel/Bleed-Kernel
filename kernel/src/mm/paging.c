@@ -161,6 +161,7 @@ void reinit_paging(void) {
     }
 
     paging_init_kernel_map();
+    wp_enable();
 }
 
 /// @brief reinitalise paging so we can access a full memory range, not just the
