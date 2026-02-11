@@ -18,6 +18,18 @@
 #include <devices/type/tty_device.h>
 #include <mm/spinlock.h>
 
+int vsnprintf(char *buf, size_t size, const char *fmt, va_list ap) {
+    return npf_vsnprintf(buf, size, fmt, ap);
+}
+
+int snprintf(char *buf, size_t size, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int ret = vsnprintf(buf, size, fmt, ap);
+    va_end(ap);
+    return ret;
+}
+
 /// @brief formatted print to tty
 /// @param s string
 void kprintf(const char *fmt, ...) {

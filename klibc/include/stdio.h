@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdint.h>
 
+int snprintf(char *buf, size_t size, const char *fmt, ...);
+
 /// @brief kernel tty print formatted string
 /// @param fmt string
 /// @param vardic argument list
