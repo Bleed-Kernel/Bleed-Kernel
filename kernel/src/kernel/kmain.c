@@ -40,6 +40,7 @@
 #include <kernel/kmain.h>
 #include <kernel/bootargs.h>
 #include <cpu/features/features.h>
+#include <devices/type/serial_device.h>
 
 extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
@@ -148,6 +149,7 @@ void kmain() {
 
     kbd_device_init();
     PS2_Keyboard_init();
+    serial_device_register();
 
     scheduler_start();
     fb_device_init();

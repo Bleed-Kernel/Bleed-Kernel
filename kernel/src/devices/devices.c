@@ -2,6 +2,7 @@
 #include <status.h>
 #include <string.h>
 #include <fs/vfs.h>
+#include <stdio.h>
 #include <mm/spinlock.h>
 
 #define device_from_inode(inode) ((device_t*)inode->internal_data)
@@ -29,6 +30,17 @@ long device_register(INode_t *device, char *name){
             return -DEV_EXISTS;
         }
     }
+
+    INode_t *devdir = NULL;
+    path_t devpath = vfs_path_from_abs("/dev");
+    vfs_lookup(&devpath, &devdir);
+
+    INode_t *devicenode = device;
+    char dev_path_buffer[4096] = {0};
+    snprintf(dev_path_buffer, sizeof(dev_path_buffer), "/dev/%s", name);
+    path_t device_file = vfs_path_from_abs(dev_path_buffer);
+
+    vfs_create(&device_file, &devicenode, INODE_DEVICE);
 
     device_list[devidx].inode = device;
     device_list[devidx].name = name;

@@ -29,6 +29,10 @@ int vfs_mount_root(){
     }
     serial_printf("%sVFS Root Mounted\n", LOG_OK);
 
+    path_t devpath = vfs_path_from_abs("/dev");
+    INode_t *devinode = NULL;
+    vfs_create(&devpath, &devinode, INODE_DIRECTORY);
+
     if (!current_fd_table) {
         current_fd_table = kmalloc(sizeof(fd_table_t));
         if (current_fd_table)

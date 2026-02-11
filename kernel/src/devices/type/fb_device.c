@@ -75,18 +75,22 @@ void fb_device_init(void) {
 
     fb0->device.ops = &fb_inode_ops;
     fb0->device.internal_data = fb0;
-    fb0->device.type = INODE_FILE;
+    fb0->device.type = INODE_DEVICE;
 
     size_t size = fb0->height * fb0->pitch;
     fb_backbuffer = kmalloc(size);
     memset(fb_backbuffer, 0, size);
 
-    file_t *fb_fd = kmalloc(sizeof(file_t));
-    fb_fd->inode = &fb0->device;
-    fb_fd->flags = O_RDWR;
-    fb_fd->offset = 0;
-    fb_fd->shared = 1;
+    INode_t* dev_inode = NULL;
+    path_t dev_path = vfs_path_from_abs("/dev/fb0");
+    int err = vfs_create(&dev_path, &dev_inode, INODE_DEVICE);
+    if (err != 0 || !dev_inode) {
+        return;
+    }
 
-    current_fd_table->fds[4] = fb_fd;
-    device_register(&fb0->device, "fb0");
+    dev_inode->ops = &fb_inode_ops;
+    dev_inode->internal_data = fb0;
+    dev_inode->shared = 1;
+
+    device_register(dev_inode, "fb0");
 }

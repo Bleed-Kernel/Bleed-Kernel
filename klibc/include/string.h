@@ -116,4 +116,6 @@ char *strtok(char * s, const char *delim);
 /// @return next token
 char *strtok_r(char *s, const char *delim, char **save);
 
+char *strdup(const char *s);
+
 #endif

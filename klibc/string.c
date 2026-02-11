@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <mm/kalloc.h>
 
 /// @brief move memory from destination to source
 /// @param dest destination
@@ -224,3 +225,12 @@ char *strtok_r(char *restrict s, const char *restrict delim, char **restrict sav
     return token_start;
 }
 
+char *strdup(const char *s){
+    if (!s) return NULL;
+    size_t len = strlen(s);
+    char *copy = kmalloc(len + 1);
+    if (!copy) return NULL;
+    memcpy(copy, s, len);
+    copy[len] = '\0';
+    return copy;
+}
