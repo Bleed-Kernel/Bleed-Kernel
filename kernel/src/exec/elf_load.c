@@ -1,4 +1,5 @@
 #include <exec/elf.h>
+#include <exec/elf_load.h>
 #include <stdint.h>
 #include <fs/vfs.h>
 #include <mm/kalloc.h>
@@ -11,8 +12,57 @@
 #include <ansii.h>
 #include <string.h>
 #include <status.h>
+#include <user/user_copy.h>
 
 #define ELF_MAGIC "\x7F""ELF"
+
+static int setup_user_args(task_t *task, int argc, const char *const argv[]) {
+    if (!task || argc < 0 || argc > EXEC_MAX_ARGS) return -1;
+    if (argc > 0 && !argv) return -1;
+
+    uint64_t argv_user[EXEC_MAX_ARGS + 1];
+    uintptr_t sp = USER_STACK_TOP;
+    uintptr_t stack_floor = USER_STACK_TOP - USER_STACK_SIZE;
+
+    for (int i = argc - 1; i >= 0; i--) {
+        if (!argv[i]) return -1;
+
+        size_t len = strlen(argv[i]);
+        if (len == EXEC_MAX_ARG_LEN) return -1;
+        len += 1;
+
+        if (sp < len) return -1;
+        sp -= len;
+        sp &= ~0x7ULL;
+
+        if (sp < stack_floor) return -1;
+        if (copy_to_user(task, (void *)sp, argv[i], len) != 0) return -1;
+
+        argv_user[i] = (uint64_t)sp;
+    }
+
+    argv_user[argc] = 0;
+
+    size_t argv_bytes = (size_t)(argc + 1) * sizeof(uint64_t);
+    if (sp < argv_bytes) return -1;
+    sp -= argv_bytes;
+    sp &= ~0xFULL;
+
+    if (sp < stack_floor) return -1;
+    if (copy_to_user(task, (void *)sp, argv_user, argv_bytes) != 0) return -1;
+    uintptr_t user_argv = sp;
+
+    if (sp < sizeof(uint64_t)) return -1;
+    sp -= sizeof(uint64_t);
+    uint64_t ret_addr = 0;
+    if (copy_to_user(task, (void *)sp, &ret_addr, sizeof(ret_addr)) != 0) return -1;
+
+    task->context->rsp = (uint64_t)sp;
+    task->context->rdi = (uint64_t)argc;
+    task->context->rsi = (uint64_t)user_argv;
+
+    return 0;
+}
 
 int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
     if (!elf_file || !entry) return -INVALID_MAGIC;
@@ -117,8 +167,14 @@ INode_t *elf_get_from_path(const char *path){
     return file;
 }
 
-task_t *elf_sched(INode_t *file){
+task_t *elf_sched(INode_t *file, int argc, const char *const argv[]){
     if (!file) return NULL;
+    const char *argv_default[1] = { (file->internal_data) ? file->internal_data : "program" };
+
+    if (argc <= 0 || !argv) {
+        argc = 1;
+        argv = argv_default;
+    }
 
     paddr_t cr3 = paging_create_address_space();
     if (!cr3) return NULL;
@@ -128,14 +184,10 @@ task_t *elf_sched(INode_t *file){
 
     task_t *task = sched_create_task(cr3, entry, USER_CS, USER_SS, file->internal_data);
     if (!task) return NULL;
-
-    uint64_t *user_stack = (uint64_t *)(USER_STACK_TOP - 16);
-    SMAP_ALLOW{ user_stack[0] = 0; user_stack[1] = 0; }
-
-    task->context->rsp = (uint64_t)user_stack;
-
-    task->current_directory = vfs_get_root();
-    task->current_directory->shared++;
+    if (setup_user_args(task, argc, argv) != 0) {
+        sched_mark_task_dead(task);
+        return NULL;
+    }
 
     return task;
 }

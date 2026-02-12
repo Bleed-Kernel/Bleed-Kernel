@@ -7,10 +7,10 @@
 #define RESET       RGB_FG(255, 255, 255)
 #define RESET_BG    RGB_BG(0,0,0)
 
-#define LOG_INFO    "\x1b[38;2;0;200;255m[INFO]" RESET "  "
-#define LOG_OK      "\x1b[38;2;0;255;0m[OK  ]" RESET "    "
-#define LOG_WARN    "\x1b[38;2;255;180;0m[WARN]" RESET "  "
-#define LOG_ERROR   "\x1b[38;2;255;50;50m[ERROR]" RESET " "
+#define LOG_INFO    "\x1b[38;2;0;200;255m[INFO]"    RESET "  "
+#define LOG_OK      "\x1b[38;2;0;255;0m[OK  ]"      RESET "  "
+#define LOG_WARN    "\x1b[38;2;255;180;0m[WARN]"    RESET "  "
+#define LOG_ERROR   "\x1b[38;2;255;50;50m[ERROR]"   RESET "  "
 
 #define RED_FG          "\x1b[38;2;255;0;0m"
 #define GREEN_FG        "\x1b[38;2;0;255;0m"

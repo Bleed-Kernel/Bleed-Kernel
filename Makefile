@@ -1,3 +1,5 @@
+export MAKEFLAGS=-j8
+
 IMAGE_NAME := bleed-kernel
 OBJDIR := bin/obj
 KERNEL_BIN := bin/bleed-kernel

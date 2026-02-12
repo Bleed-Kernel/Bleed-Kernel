@@ -109,7 +109,7 @@ void shell_start() {
 
         void* elf = elf_get_from_path(target_path);
         if (elf) {
-            elf_sched(elf);
+            elf_sched(elf, 0, NULL);
         } else {
             kprintf(LOG_ERROR "Failed to load ELF: %s\n", target_path);
         }
