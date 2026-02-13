@@ -52,11 +52,6 @@ static int setup_user_args(task_t *task, int argc, const char *const argv[]) {
     if (copy_to_user(task, (void *)sp, argv_user, argv_bytes) != 0) return -1;
     uintptr_t user_argv = sp;
 
-    if (sp < sizeof(uint64_t)) return -1;
-    sp -= sizeof(uint64_t);
-    uint64_t ret_addr = 0;
-    if (copy_to_user(task, (void *)sp, &ret_addr, sizeof(ret_addr)) != 0) return -1;
-
     task->context->rsp = (uint64_t)sp;
     task->context->rdi = (uint64_t)argc;
     task->context->rsi = (uint64_t)user_argv;
