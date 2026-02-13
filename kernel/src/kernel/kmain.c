@@ -11,8 +11,6 @@
 #include <mm/paging.h>
 #include <mm/smap.h>
 #include <drivers/serial/serial.h>
-#include <drivers/pic/pic.h>
-#include <drivers/pit/pit.h>
 #include <fs/vfs.h>
 #include <status.h>
 #include <fs/archive/tar.h>
@@ -63,7 +61,6 @@ void initrd_load(){
 
 // we give the kernel a task here
 void scheduler_start(void) {
-    pic_unmask(0);
     uint64_t rsp;
     asm volatile("mov %%rsp, %0" : "=r"(rsp));
 
@@ -138,14 +135,7 @@ void kmain() {
     tss_init();
 
     bootargs_init(cmdline_request.response->cmdline);
-    if (bootargs_is("timer", "hpet"))
-        acpi_init_hpet();
-    else
-        pit_init(1000);
-
-    pic_init(32, 40);
-    pic_unmask(2);
-    pic_unmask(1);
+    acpi_init_hpet();
 
     kbd_device_init();
     PS2_Keyboard_init();

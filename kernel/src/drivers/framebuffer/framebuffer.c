@@ -1,6 +1,5 @@
 #include <vendor/limine_bootloader/limine.h>
 #include <drivers/framebuffer/framebuffer.h>
-#include <drivers/pit/pit.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>

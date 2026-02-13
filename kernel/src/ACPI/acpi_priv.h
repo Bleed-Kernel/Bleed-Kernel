@@ -80,5 +80,56 @@ typedef struct acpi_fadt
     uint64_t hypervison_vendor_identity;
 } __attribute__((packed)) fadt_t;
 
+struct acpi_madt {
+    struct acpi_sdt header;
+    uint32_t lapic_addr;
+    uint32_t flags;
+    uint8_t  entries[];
+} __attribute__((packed));
+
+struct madt_entry_header {
+    uint8_t type;
+    uint8_t length;
+} __attribute__((packed));
+
+struct madt_lapic {
+    uint8_t  type;
+    uint8_t  length;
+    uint8_t  acpi_cpu_id;
+    uint8_t  apic_id;
+    uint32_t flags;
+} __attribute__((packed));
+
+struct madt_ioapic {
+    uint8_t  type;
+    uint8_t  length;
+    uint8_t  ioapic_id;
+    uint8_t  reserved;
+    uint32_t ioapic_addr;
+    uint32_t gsi_base;
+} __attribute__((packed));
+
+struct madt_iso {
+    uint8_t  type;
+    uint8_t  length;
+    uint8_t  bus;
+    uint8_t  source;
+    uint32_t gsi;
+    uint16_t flags;
+} __attribute__((packed));
+
+struct madt_lapic_addr_override {
+    uint8_t  type;
+    uint8_t  length;
+    uint16_t reserved;
+    uint64_t lapic_addr;
+} __attribute__((packed));
+
+uint64_t acpi_lapic_base(void);
+uint64_t acpi_ioapic_base(void);
+uint32_t acpi_ioapic_gsi_base(void);
+uint32_t acpi_irq_to_gsi(uint32_t irq);
+uint16_t acpi_irq_flags(uint32_t irq);
+
 extern struct acpi_rsdp *acpi_rsdp;
 extern struct acpi_fadt *fadt;

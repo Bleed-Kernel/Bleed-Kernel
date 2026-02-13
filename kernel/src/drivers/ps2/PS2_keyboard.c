@@ -1,5 +1,4 @@
 #include <drivers/ps2/PS2_keyboard.h>
-#include <drivers/pic/pic.h>
 #include <devices/type/tty_device.h>
 #include <drivers/serial/serial.h>
 #include <cpu/io.h>
@@ -10,6 +9,7 @@
 #include <console/console.h>
 #include <input/keyboard_dispatch.h>
 #include <input/keyboard_input.h>
+#include <ACPI/acpi.h>
 
 #define KBD_PORT 0x60
 
@@ -47,6 +47,7 @@ char tty_key_to_ascii(const keyboard_event_t *ev) {
 /// @brief Handle PS2 Keyboard Interrupt from the PIC
 /// @param irq value
 void PS2_Keyboard_Interrupt(uint8_t irq) {
+    (void)irq;
     uint8_t sc = inb(0x60);
     uint8_t released = sc & 0x80;
     sc &= 0x7F;
@@ -71,7 +72,6 @@ void PS2_Keyboard_Interrupt(uint8_t irq) {
     };
 
     keyboard_input_dispatch(&ev);
-    PIC_EOI(irq);
 }
 
 /// @brief set the PS2 Keyboard Handler
@@ -86,7 +86,6 @@ void PS2_Keyboard_callback(char c){
 
 /// @brief flush the PS2 keyboard and prepare for execution
 void PS2_Keyboard_init(){
-    pic_unmask(1);
     PS2_Flush();
     PS2_Keyboard_set_callback(PS2_Keyboard_callback);
 }

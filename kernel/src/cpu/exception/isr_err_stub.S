@@ -5,6 +5,7 @@
 .extern timer_handle
 .extern sched_tick
 .extern syscall_dispatch
+.extern apic_eoi
 
 .macro ISR_NO_ERR v
 .globl isr_\v
@@ -194,8 +195,7 @@ irq0:
     call timer_handle
     mov rsp, rax
 
-    mov al, 0x20
-    out 0x20, al
+    call apic_eoi
 
     pop r15
     pop r14
@@ -244,6 +244,7 @@ irq\irq:
     mov rdi, \irq
     lea rsi, [rsp]
     call irq_handler
+    call apic_eoi
 
     pop r15
     pop r14
