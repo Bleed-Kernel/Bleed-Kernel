@@ -3,6 +3,7 @@
 #include <cpu/msrs.h>
 #include <cpu/cpuid.h>
 #include <stdbool.h>
+#include <drivers/serial/serial.h>
 
 // User Mode Instruction Protection
 #define CR4_UMIP (1ULL << 11)
@@ -15,9 +16,17 @@
 #define CR0_WP (1ULL << 16)
 
 static inline void UMIP_init(void){
-    uint64_t cr4 = read_cr4();
-    cr4 |= CR4_UMIP;
-    write_cr4(cr4);
+    uint32_t eax, ebx, ecx, edx;
+
+    if (!cpuid_count(7, 0, &eax, &ebx, &ecx, &edx))
+        return;
+
+    if ((ecx & (1 << 2)) != 0){
+        uint64_t cr4 = read_cr4();
+        cr4 |= CR4_UMIP;
+        write_cr4(cr4);
+        serial_printf(LOG_OK "UMIP enabled\n"); // post-2017 should be fine
+    }
 }
 
 static inline void nx_init(void){
