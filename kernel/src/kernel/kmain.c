@@ -133,6 +133,7 @@ void kmain() {
     gdt_init();
     idt_init();
     tss_init();
+    fb_device_init();
 
     bootargs_init(cmdline_request.response->cmdline);
     acpi_init_hpet();
@@ -142,7 +143,6 @@ void kmain() {
     serial_device_register();
 
     scheduler_start();
-    fb_device_init();
 
     INode_t* tty_inode = device_get_by_name("tty0");
     tty_device_init(tty_inode);

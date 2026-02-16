@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <mm/paging.h>
 #include <cpu/msrs.h>
+#include <cpu/cpuid.h>
 #include <panic.h>
 #include <stdio.h>
 #include <cpu/io.h>
@@ -80,10 +81,24 @@ static uint64_t ioapic_entry_for_irq(uint8_t vector, uint32_t lapic_id, uint32_t
     return entry;
 }
 
+static int cpu_has_apic(void) {
+    uint32_t eax, ebx, ecx, edx;
+    if (!cpuid(1, &eax, &ebx, &ecx, &edx))
+        return 0;
+    return (edx & (1 << 9)) != 0;
+}
+
 int apic_init(void) {
+    if (!cpu_has_apic())
+        ke_panic("Bleed Requires APIC support");
+
     uint64_t lapic_phys = acpi_lapic_base();
     if (!lapic_phys)
-        ke_panic("APIC: no LAPIC base");
+        ke_panic("LAPIC timer base not found");
+        
+    uint64_t ioapic_phys = acpi_ioapic_base();
+    if (!ioapic_phys)
+        ke_panic("IOAPIC base not found");
 
     uint64_t lapic_phys_page = lapic_phys & PADDR_ENTRY_MASK;
     uintptr_t lapic_off = (uintptr_t)(lapic_phys & ~PADDR_ENTRY_MASK);
@@ -92,6 +107,9 @@ int apic_init(void) {
     lapic = (volatile uint32_t *)(LAPIC_VIRT + lapic_off);
 
     uint64_t apic_msr = rdmsr(IA32_APIC_BASE_MSR);
+    if (!(apic_msr & IA32_APIC_BASE_ENABLE))
+        ke_panic("APIC: LAPIC disabled");
+
     apic_msr &= 0xFFFULL;
     apic_msr |= lapic_phys_page;
     apic_msr |= IA32_APIC_BASE_ENABLE;
@@ -115,10 +133,6 @@ int apic_init(void) {
     outb(0x21, 0xFF);
     outb(0xA1, 0xFF);
 
-    uint64_t ioapic_phys = acpi_ioapic_base();
-    if (!ioapic_phys)
-        ke_panic("APIC: no IOAPIC base");
-
     uint64_t ioapic_phys_page = ioapic_phys & PADDR_ENTRY_MASK;
     uintptr_t ioapic_off = (uintptr_t)(ioapic_phys & ~PADDR_ENTRY_MASK);
     paging_map_page(kernel_page_map, ioapic_phys_page, IOAPIC_VIRT,
@@ -127,6 +141,9 @@ int apic_init(void) {
 
     uint32_t ver = ioapic_read(IOAPIC_REG_VER);
     uint32_t max_redir = (ver >> 16) & 0xFF;
+    if (max_redir == 0)
+        ke_panic("APIC: IOAPIC not supported");
+
     uint32_t ioapic_gsi_base = acpi_ioapic_gsi_base();
 
     uint32_t bsp_id = lapic_id;
@@ -140,16 +157,12 @@ int apic_init(void) {
 
     for (size_t i = 0; i < sizeof(irqs)/sizeof(irqs[0]); i++) {
         uint32_t gsi = acpi_irq_to_gsi(irqs[i].irq);
-        if (gsi < ioapic_gsi_base) {
-            kprintf("[APIC] IRQ %u -> GSI %u below IOAPIC base %u\n", irqs[i].irq, gsi, ioapic_gsi_base);
+        if (gsi < ioapic_gsi_base)
             continue;
-        }
 
         uint32_t pin = gsi - ioapic_gsi_base;
-        if (pin > max_redir) {
-            kprintf("[APIC] IRQ %u -> GSI %u out of IOAPIC range\n", irqs[i].irq, gsi);
+        if (pin > max_redir)
             continue;
-        }
 
         uint32_t reg_low  = IOAPIC_REG_TABLE_BASE + pin * 2;
         uint32_t reg_high = reg_low + 1;
@@ -158,11 +171,8 @@ int apic_init(void) {
 
         ioapic_write(reg_low, entry & 0xFFFFFFFF);
         ioapic_write(reg_high, entry >> 32);
-        kprintf("[APIC] Routed IRQ %u (GSI %u, pin %u) -> vector 0x%x\n",
-                irqs[i].irq, gsi, pin, irqs[i].vector);
     }
 
-    kprintf("[APIC] IRQs routed to BSP LAPIC ID %u\n", bsp_id);
     apic_enabled = 1;
     return 0;
 }
