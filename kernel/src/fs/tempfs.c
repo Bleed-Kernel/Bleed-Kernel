@@ -231,7 +231,7 @@ int tempfs_create(INode_t* parent, const char* name, size_t namelen, INode_t** r
 /// @return always 0
 int tempfs_readdir(INode_t* dir, size_t index, INode_t** result){
     tempfs_INode_t* data = dir->internal_data;
-    if (index >= data->capacity) return status_print_error(FILE_NOT_FOUND);
+    if (index >= data->capacity) return -FILE_NOT_FOUND;
 
     tempfs_data_t* chunk = data->data;
     size_t idx = index;
