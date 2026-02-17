@@ -5,6 +5,7 @@
 #include <cpu/stack_trace.h>
 #include <drivers/framebuffer/framebuffer.h>
 #include <sched/scheduler.h>
+#include <threads/exit.h>
 
 struct isr_stackframe {
     uint64_t rax; uint64_t rbx; uint64_t rcx; uint64_t rdx;
@@ -99,6 +100,23 @@ static void generate_signature(void* data, uint64_t len) {
 
 extern void* ke_exception_handler(void *frame) {
     struct isr_stackframe *f = (struct isr_stackframe *)frame;
+    task_t *current = get_current_task();
+    int user_exception = ((f->cs & 0x3) == 0x3);
+
+    if (user_exception && current && current->task_privilege == P_USER) {
+        uint64_t cr2 = 0;
+        __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
+
+        serial_printf("\nA User Program Crashed\n %u (%s) at %p (%s - %u)\n", f->vector, exception_name(f->vector), f->rip, get_current_task()->name, get_current_task()->id);
+        
+        if (f->vector == 14) {
+            serial_printf("Page Fault info: error code: %p, cr2: %p\n", f->error_code, cr2);
+        }
+
+        kprintf("%s%s (%llu) has crashed: %s%s%s, task was killed!\n", LOG_ERROR, get_current_task()->name, get_current_task()->id, RGB_FG(207, 45, 45), exception_name(f->vector), RESET);
+        exit();
+        __builtin_unreachable();
+    }
 
     kprintf("fault!"); // at the moment clearing the screen while the screen is empty causes ANOTHER panic
     kprintf("\x1b[J");
@@ -111,7 +129,11 @@ extern void* ke_exception_handler(void *frame) {
             exception_name(f->vector), (uint8_t)f->vector);
 
     print_separator("PROCESS CONTEXT");
-    kprintf("  Current Task: " GREEN_FG "%s" RESET " (PID: %llu)\n", get_current_task()->name, get_current_task()->id);
+    if (current) {
+        kprintf("  Current Task: " GREEN_FG "%s" RESET " (PID: %llu)\n", current->name, current->id);
+    } else {
+        kprintf("  Current Task: " ORANGE_FG "<none>" RESET "\n");
+    }
 
     uint64_t sym_addr;
     const char *name = stack_trace_symbol_lookup(f->rip, &sym_addr);
