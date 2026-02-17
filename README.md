@@ -1,5 +1,5 @@
-- The Bleed Kernel by Mellurboo
-  -
+# The Bleed Kernel by Mellurboo
+
 the bleed kernel is an Operating System Kernel written in C and targets the x86_64 platform exclusively.
 
 ![Doom running under the bleed kernel](https://cdn.discordapp.com/attachments/1250900206543700138/1473111046397886625/image.png?ex=69950512&is=6993b392&hm=4b7d92854b79d97b8291549d0f2987d8ab7060de777d313befd55dfcc954ec59&)
