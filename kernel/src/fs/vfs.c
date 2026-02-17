@@ -133,7 +133,14 @@ path_t vfs_path_from_abs(const char* path){
 }
 
 size_t vfs_filesize(INode_t* inode) {
-    if (!inode || !inode->ops->read) return 0;
+    if (!inode)
+        return 0;
+
+    if (inode->ops && inode->ops->size)
+        return inode->ops->size(inode);
+
+    if (!inode->ops || !inode->ops->read)
+        return 0;
 
     size_t total = 0;
     size_t offset = 0;

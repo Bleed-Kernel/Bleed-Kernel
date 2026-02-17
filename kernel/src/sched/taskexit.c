@@ -2,7 +2,6 @@
 #include <panic.h>
 #include <stdio.h>
 #include <drivers/serial/serial.h>
-#include <mm/pmm.h>
 #include <mm/vmm.h>
 #include <mm/kalloc.h>
 #include <ansii.h>
@@ -19,8 +18,7 @@ void exit(void) {
         alloc_count++;
         user_alloc_t *next = alloc->next;
 
-        vmm_unmap_pages(current_task->page_map, alloc->vaddr, alloc->pages);
-        pmm_free_pages(vaddr_to_paddr(alloc->vaddr), alloc->pages);
+        (void)vmm_unmap_free_pages(current_task->page_map, alloc->vaddr, alloc->pages);
 
         kfree(alloc, sizeof(user_alloc_t));
         alloc = next;

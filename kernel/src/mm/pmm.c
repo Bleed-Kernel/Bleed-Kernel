@@ -85,6 +85,7 @@ uint8_t pmm_init() {
 
         bmentry->capacity = total_pages - bitmap_pages;
         bmentry->available_pages = bmentry->capacity;
+        bmentry->search_cursor = 0;
 
         memset(bmentry->bitmap, FRAME_FREE, (bmentry->capacity + 7) / 8);
 
@@ -98,11 +99,11 @@ uint8_t pmm_init() {
     return 0;
 }
 
-static int64_t paging_bitmap_find_free(bitmap_entry_t* entry, size_t count) {
+static int64_t paging_bitmap_find_free_in_range(bitmap_entry_t* entry, size_t count, size_t begin, size_t end) {
     size_t free_ext = 0;
     size_t start = 0;
 
-    for (size_t i = 0; i < entry->capacity; i++) {
+    for (size_t i = begin; i < end; i++) {
         size_t byte = entry->bitmap[i / 8];
         if (!(byte & (1 << (i % 8)))) {
             if (free_ext == 0) start = i;
@@ -113,6 +114,28 @@ static int64_t paging_bitmap_find_free(bitmap_entry_t* entry, size_t count) {
         }
     }
     return -1;
+}
+
+static int64_t paging_bitmap_find_free(bitmap_entry_t* entry, size_t count) {
+    if (!entry || !count || count > entry->capacity)
+        return -1;
+
+    size_t cursor = entry->search_cursor;
+    if (cursor >= entry->capacity)
+        cursor = 0;
+
+    int64_t start = paging_bitmap_find_free_in_range(entry, count, cursor, entry->capacity);
+    if (start < 0 && cursor != 0) {
+        start = paging_bitmap_find_free_in_range(entry, count, 0, cursor);
+    }
+
+    if (start >= 0) {
+        entry->search_cursor = (size_t)start + count;
+        if (entry->search_cursor >= entry->capacity)
+            entry->search_cursor = 0;
+    }
+
+    return start;
 }
 
 paddr_t pmm_alloc_pages(size_t page_count) {
@@ -144,6 +167,8 @@ void pmm_free_pages(paddr_t paddr, size_t page_count) {
         if (paddr >= entry_start && paddr < entry_end) {
             size_t start = (paddr - entry_start) / PAGE_SIZE;
             paging_mark_entry_available(entry, start, page_count);
+            if (start < entry->search_cursor)
+                entry->search_cursor = start;
             return;
         }
     }

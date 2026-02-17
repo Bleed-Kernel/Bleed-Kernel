@@ -37,9 +37,7 @@ void* sys_mapfb(size_t *out_pages) {
 
         uintptr_t clean_p = p & 0x000FFFFFFFFFF000ULL;
         
-        paging_map_page(task->page_map, clean_p, v, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
-        
-        __asm__ volatile("invlpg (%0)" :: "r"(v) : "memory");
+        paging_map_page_invl(task->page_map, clean_p, v, PTE_PRESENT | PTE_WRITABLE | PTE_USER, 0);
     }
 
     user_alloc_t* alloc = kmalloc(sizeof(user_alloc_t));

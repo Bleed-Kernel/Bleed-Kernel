@@ -250,6 +250,14 @@ int tempfs_readdir(INode_t* dir, size_t index, INode_t** result){
     return 0;
 }
 
+static size_t tempfs_size(INode_t* inode){
+    if (!inode || !inode->internal_data)
+        return 0;
+
+    tempfs_INode_t* data = inode->internal_data;
+    return data->capacity;
+}
+
 
 /// @brief mount the root directory of the fs
 /// @param root root node
@@ -268,7 +276,8 @@ const INodeOps_t dir_ops = {
 const INodeOps_t file_ops = {
     .read   = tempfs_read,
     .write  = tempfs_write,
-    .drop   = tempfs_drop
+    .drop   = tempfs_drop,
+    .size   = tempfs_size
 };
 
 const filesystem tempfs = {

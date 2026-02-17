@@ -11,14 +11,29 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
     if (!f)
         return -2;
 
-    char kbuf[512]; 
-    size_t batch_size = (len > sizeof(kbuf)) ? sizeof(kbuf) : len;
+    if (len == 0)
+        return 0;
 
-    long total_read = vfs_read((int)fd, kbuf, batch_size);
-    
-    if (total_read > 0) {
-        umemcpy((void *)user_buf, kbuf, total_read);
+    char kbuf[2048];
+    uint64_t copied = 0;
+
+    while (copied < len) {
+        size_t batch_size = len - copied;
+        if (batch_size > sizeof(kbuf))
+            batch_size = sizeof(kbuf);
+
+        long r = vfs_read((int)fd, kbuf, batch_size);
+        if (r < 0)
+            return copied ? copied : (uint64_t)r;
+        if (r == 0)
+            break;
+
+        umemcpy((void *)(user_buf + copied), kbuf, (size_t)r);
+        copied += (uint64_t)r;
+
+        if ((size_t)r < batch_size)
+            break;
     }
 
-    return (uint64_t)total_read;
+    return copied;
 }

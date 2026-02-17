@@ -40,6 +40,7 @@ void reinit_paging();
 /// @param vaddr virtual address to map the page at
 /// @param flags PTE Flags
 void paging_map_page(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags);
+void paging_map_page_invl(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags, int invalidate_tlb);
 
 /// @brief reinitalise paging so we can access a full memory range, not just the
 /// default from limine

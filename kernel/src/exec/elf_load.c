@@ -125,7 +125,7 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
             paddr_t phys = pmm_alloc_pages(1);
             if (!phys) { r = -OUT_OF_MEMORY; goto out_buf; }
 
-            paging_map_page(cr3, phys, seg_start + off, pflags);
+            paging_map_page_invl(cr3, phys, seg_start + off, pflags, 0);
 
             size_t copy_size = PAGE_SIZE;
             if (off + copy_size > segment_bytes)

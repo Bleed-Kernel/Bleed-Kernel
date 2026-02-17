@@ -15,6 +15,7 @@ typedef struct BitmapEntry {
     struct BitmapEntry* next_entry;
     size_t available_pages;
     size_t capacity;
+    size_t search_cursor;
     uint64_t bitmap[];
 } bitmap_entry_t;
 

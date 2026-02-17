@@ -1,6 +1,7 @@
 #include <sched/scheduler.h>
 #include <string.h>
 #include <mm/kalloc.h>
+#include <mm/vmm.h>
 
 void* task_mmap(task_t* task, size_t pages) {
     if (!task || !pages) return NULL;
@@ -24,7 +25,7 @@ void* task_mmap(task_t* task, size_t pages) {
         paddr_t phys = pmm_alloc_pages(1);
         if (!phys) return NULL;
 
-        paging_map_page(task->page_map, phys, base + i * 4096, 0x7);
+        paging_map_page_invl(task->page_map, phys, base + i * 4096, 0x7, 0);
     }
 
     user_alloc_t* alloc = kmalloc(sizeof(user_alloc_t));
@@ -46,10 +47,7 @@ void task_munmap(task_t* task, void* addr) {
 
     while (a) {
         if (a->vaddr == addr) {
-            for (size_t i = 0; i < a->pages; i++)
-                paging_map_page(task->page_map, 0, (uintptr_t)addr + i * 4096, 0);
-
-            pmm_free_pages(vaddr_to_paddr(addr), a->pages);
+            (void)vmm_unmap_free_pages(task->page_map, addr, a->pages);
 
             if (prev) prev->next = a->next;
             else task->alloc_list = a->next;

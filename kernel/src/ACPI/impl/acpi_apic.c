@@ -7,6 +7,7 @@
 #include <cpu/cpuid.h>
 #include <panic.h>
 #include <stdio.h>
+#include <ansii.h>
 #include <cpu/io.h>
 #include "../acpi_priv.h"
 
@@ -116,7 +117,7 @@ int apic_init(void) {
     wrmsr(IA32_APIC_BASE_MSR, apic_msr);
 
     uint32_t lapic_id = lapic[LAPIC_REG_ID / 4] >> 24;
-    kprintf("[APIC] LAPIC ID: %u\n", lapic_id);
+    kprintf(LOG_INFO "LAPIC ID: %u\n", lapic_id);
 
     lapic_write(LAPIC_REG_TPR, 0);
     lapic_write(LAPIC_REG_DFR, 0xFFFFFFFF);
