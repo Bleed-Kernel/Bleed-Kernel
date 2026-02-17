@@ -6,6 +6,7 @@
 #include <ACPI/acpi_time.h>
 #include <user/user_task.h>
 #include <fs/vfs.h>
+#include <user/signal.h>
 
 int sys_open(char *path_str, int flags);
 uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len);
@@ -24,7 +25,11 @@ long sys_waitpid(uint64_t pid);
 void sys_shutdown(void);
 void sys_reboot(void);
 
-void sys_tkill(long pid);
+long sys_tkill(long pid, signal_number_t signal);
+long sys_sigaction(int sig, const sigaction_t *user_act, sigaction_t *user_old);
+long sys_sigprocmask(int how, const sigset_t *user_set, sigset_t *user_old);
+long sys_sigreturn(void);
+long sys_getpid(void);
 
 system_memory_info_t *sys_meminfo();
 int sys_time(struct rtc_time* user_buf);

@@ -1,13 +1,11 @@
 // note to self. these files are getting really, really messy i gotta clean this up
-
-#ifndef SCHEDULER_H
-#define SCHEDULER_H
-
+#pragma once
 #include <stdint.h>
 #include <stddef.h>
 #include <mm/paging.h>
 #include <mm/userspace/mmap.h>
 #include <fs/vfs.h>
+#include <user/signal.h>
 
 #define KERNEL_STACK_SIZE   8196
 
@@ -113,6 +111,17 @@ typedef struct task {
 
     struct task     *next;
     struct task     *dead_next;
+
+    sigset_t        sig_pending;
+    sigset_t        sig_blocked;
+    uintptr_t       sig_handlers[NSIG];
+    sigset_t        sig_masks[NSIG];
+    uint64_t        sig_flags[NSIG];
+    uintptr_t       sig_restorers[NSIG];
+    uintptr_t       sig_active_frame;
+
+    int             exit_signal;
+    int             exit_code;
 } task_t;
 
 typedef void (*task_itteration_fn)(task_t *task, void *userdata);
@@ -139,4 +148,3 @@ void* sched_next_context(void* old_context);
 cpu_context_t *sched_kill_and_switch(task_t *victim);
 
 extern task_t *task_list_head;
-#endif

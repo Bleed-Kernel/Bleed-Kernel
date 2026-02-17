@@ -8,20 +8,28 @@
 #include <gdt/gdt.h>
 #include <mm/paging.h>
 #include <ansii.h>
+#include <user/errno.h>
 
 uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc) {
-    if (!user_path_ptr) return -1;
-    if (!user_ptr_valid(user_path_ptr)) return -2;
+    if (!user_path_ptr)
+        return (uint64_t)-EFAULT;
+    if (!user_ptr_valid(user_path_ptr))
+        return (uint64_t)-EFAULT;
 
     char kpath[EXEC_MAX_ARG_LEN];
     for (size_t i = 0; i < sizeof(kpath); i++) kpath[i] = 0;
 
     task_t *caller = get_current_task();
+    if (!caller)
+        return (uint64_t)-ESRCH;
+
+    uint64_t err = (uint64_t)-EIO;
     if (copy_user_string(caller, (const char *)user_path_ptr, kpath, sizeof(kpath)) != 0)
-        return -3;
+        return (uint64_t)-EFAULT;
 
     INode_t *file = elf_get_from_path(kpath);
-    if (!file) return -4;
+    if (!file)
+        return (uint64_t)-ENOENT;
     task_t *child = NULL;
 
     const char *argv_kernel[EXEC_MAX_ARGS];
@@ -45,18 +53,26 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
                                &user_arg_ptr,
                                (const void *)(user_argv_ptr + i * sizeof(uint64_t)),
                                sizeof(user_arg_ptr)) != 0) {
+                err = (uint64_t)-EFAULT;
                 goto cleanup;
             }
 
-            if (!user_ptr_valid(user_arg_ptr)) goto cleanup;
+            if (!user_ptr_valid(user_arg_ptr)) {
+                err = (uint64_t)-EFAULT;
+                goto cleanup;
+            }
 
             argv_owned[i] = kmalloc(EXEC_MAX_ARG_LEN);
-            if (!argv_owned[i]) goto cleanup;
+            if (!argv_owned[i]) {
+                err = (uint64_t)-ENOMEM;
+                goto cleanup;
+            }
 
             if (copy_user_string(caller,
                                  (const char *)user_arg_ptr,
                                  argv_owned[i],
                                  EXEC_MAX_ARG_LEN) != 0) {
+                err = (uint64_t)-EFAULT;
                 goto cleanup;
             }
 
@@ -67,7 +83,10 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
     }
 
     child = elf_sched(file, argc, argv_kernel);
-    if (!child) goto cleanup;
+    if (!child) {
+        err = (uint64_t)-EIO;
+        goto cleanup;
+    }
 
     child->wait_queue = NULL;
     child->state = TASK_READY;
@@ -79,5 +98,5 @@ cleanup:
         if (argv_owned[i])
             kfree(argv_owned[i], EXEC_MAX_ARG_LEN);
     }
-    return child ? child->id : (uint64_t)-5;
+    return child ? child->id : err;
 }

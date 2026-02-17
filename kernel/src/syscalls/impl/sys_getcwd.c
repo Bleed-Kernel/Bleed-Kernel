@@ -1,50 +1,59 @@
 #include <sched/scheduler.h>
 #include <fs/vfs.h>
 #include <string.h>
+#include <user/user_copy.h>
+#include <user/errno.h>
 
 long sys_getcwd(char *buf, long size) {
+    if (!buf || size <= 0)
+        return -EFAULT;
+
     task_t *task = get_current_task();
-    if (!task || !task->current_directory) return -1;
+    if (!task)
+        return -ESRCH;
+    if (!task->current_directory)
+        return -ENOENT;
 
     INode_t *inode = task->current_directory;
+    char kpath[PATH_MAX];
 
-    // special case: root
-    SMAP_ALLOW{
-        if (inode == vfs_get_root()) {
-            if (size < 2) return -1;
-            buf[0] = '/';
-            buf[1] = '\0';
-            return 0;
-        }
+    if (inode == vfs_get_root()) {
+        if (size < 2)
+            return -ERANGE;
+        kpath[0] = '/';
+        kpath[1] = '\0';
+        if (copy_to_user(task, buf, kpath, 2) != 0)
+            return -EFAULT;
+        return 0;
     }
 
-    // Walk up to root to count total length
     size_t total_len = 0;
     INode_t *cur = inode;
     while (cur && cur != vfs_get_root()) {
-        if (!cur->internal_data) return -1; // sanity check
-        total_len += strlen(cur->internal_data) + 1; // +1 for '/'
+        if (!cur->internal_data)
+            return -EIO;
+        total_len += strlen(cur->internal_data) + 1;
         cur = cur->parent;
     }
 
-    if (total_len + 1 > (size_t)size) return -1; // not enough space
+    if (total_len + 1 > (size_t)size || total_len + 1 > sizeof(kpath))
+        return -ERANGE;
 
-    // Build path backwards
-    SMAP_ALLOW{
-        buf[total_len] = '\0';
-        cur = inode;
-        size_t pos = total_len;
-        while (cur && cur != vfs_get_root()) {
-            const char *name = cur->internal_data;
-            size_t len = strlen(name);
-            pos -= len;
-            memcpy(buf + pos, name, len);
-            pos--; // for '/'
-            buf[pos] = '/';
-            cur = cur->parent;
-        }
+    kpath[total_len] = '\0';
+    cur = inode;
+    size_t pos = total_len;
+    while (cur && cur != vfs_get_root()) {
+        const char *name = cur->internal_data;
+        size_t len = strlen(name);
+        pos -= len;
+        memcpy(kpath + pos, name, len);
+        pos--;
+        kpath[pos] = '/';
+        cur = cur->parent;
     }
 
-    // root case already handled, so buf should start with '/'
+    if (copy_to_user(task, buf, kpath, total_len + 1) != 0)
+        return -EFAULT;
+
     return 0;
 }

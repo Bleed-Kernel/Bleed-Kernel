@@ -3,28 +3,44 @@
 #include <mm/kalloc.h>
 #include <string.h>
 #include <mm/smap.h>
+#include <sched/scheduler.h>
+#include <user/user_copy.h>
+#include <user/errno.h>
 
 uint64_t sys_write(uint64_t fd, uint64_t user_buf, uint64_t len) {
-    if (fd >= MAX_FDS || !current_fd_table || !user_buf || len == 0)
-        return -1;
+    if (fd >= MAX_FDS || !current_fd_table)
+        return (uint64_t)-EBADF;
+    if (len == 0)
+        return 0;
+    if (!user_buf)
+        return (uint64_t)-EFAULT;
+
+    task_t *caller = get_current_task();
+    if (!caller)
+        return (uint64_t)-ESRCH;
 
     file_t* f = current_fd_table->fds[fd];
     if (!f)
-        return -1;
+        return (uint64_t)-EBADF;
 
     int mode = f->flags & O_MODE;
     if (mode != O_WRONLY && mode != O_RDWR)
-        return -1;
+        return (uint64_t)-EBADF;
 
     char* kbuf = kmalloc(len);
     if (!kbuf)
-        return -1;
+        return (uint64_t)-ENOMEM;
 
-    umemcpy(kbuf, (void*)user_buf, len);
+    if (copy_from_user(caller, kbuf, (const void *)user_buf, len) != 0) {
+        kfree(kbuf, len);
+        return (uint64_t)-EFAULT;
+    }
     long written = inode_write(f->inode, kbuf, len, f->offset);
     if (written > 0)
         f->offset += written;
 
     kfree(kbuf, len);
+    if (written < 0)
+        return (uint64_t)-EIO;
     return written;
 }

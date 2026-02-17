@@ -4,6 +4,8 @@
 #include <ansii.h>
 #include <threads/exit.h>
 #include <syscalls/syscall.h>
+#include <sched/signal.h>
+#include <user/errno.h>
 
 #define SYSCALL(idx, func) [idx] = (SyscallHandler)func
 
@@ -34,7 +36,12 @@ enum {
     SYS_TASKINFO,
     SYS_MAPFB,
     SYS_SEEK,
-    SYS_FEMTOSECONDS
+    SYS_FEMTOSECONDS,
+    SYS_KILL,
+    SYS_SIGACTION,
+    SYS_SIGPROCMASK,
+    SYS_SIGRETURN,
+    SYS_GETPID
 };
 
 #pragma GCC diagnostic push
@@ -64,17 +71,42 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_TASKCOUNT, sys_taskcount),
     SYSCALL(SYS_MAPFB, sys_mapfb),
     SYSCALL(SYS_SEEK, sys_seek),
-    SYSCALL(SYS_FEMTOSECONDS, sys_femtoseconds)
+    SYSCALL(SYS_FEMTOSECONDS, sys_femtoseconds),
+    SYSCALL(SYS_SIGACTION, sys_sigaction),
+    SYSCALL(SYS_SIGPROCMASK, sys_sigprocmask),
+    SYSCALL(SYS_SIGRETURN, sys_sigreturn),
+    SYSCALL(SYS_GETPID, sys_getpid)
 };
 #pragma GCC diagnostic pop
 
 uint64_t syscall_dispatch(cpu_context_t *cpu_ctx){
-    return syscall_handlers[cpu_ctx->rax](
-        cpu_ctx->rdi,
-        cpu_ctx->rsi,
-        cpu_ctx->rdx,
-        cpu_ctx->r10,
-        cpu_ctx->r8,
-        cpu_ctx->r9
-    );
+    uint64_t sysno = cpu_ctx->rax;
+    uint64_t ret = (uint64_t)-ENOSYS;
+
+    if (sysno < (sizeof(syscall_handlers) / sizeof(syscall_handlers[0])) &&
+        syscall_handlers[sysno]) {
+        ret = syscall_handlers[sysno](
+            cpu_ctx->rdi,
+            cpu_ctx->rsi,
+            cpu_ctx->rdx,
+            cpu_ctx->r10,
+            cpu_ctx->r8,
+            cpu_ctx->r9
+        );
+    }
+
+    cpu_ctx->rax = ret;
+
+    task_t *current = get_current_task();
+    if (current && (cpu_ctx->cs & 0x3) == 0x3) {
+        if (sysno == SYS_SIGRETURN) {
+            long sigreturn_rc = signal_handle_sigreturn(current, cpu_ctx);
+            if (sigreturn_rc < 0)
+                cpu_ctx->rax = (uint64_t)sigreturn_rc;
+        } else {
+            signal_deliver_pending(current, cpu_ctx);
+        }
+    }
+
+    return cpu_ctx->rax;
 }

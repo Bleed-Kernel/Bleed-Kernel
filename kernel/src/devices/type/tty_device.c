@@ -14,6 +14,9 @@
 #include <console/console.h>
 #include <fonts/utf-8.h>
 #include <stdio.h>
+#include <sched/scheduler.h>
+#include <sched/signal.h>
+#include <user/signal.h>
 
 long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
     (void)offset;
@@ -106,19 +109,47 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
     return -1;
 }
 
+static void tty_pick_sigint_target(task_t *candidate, void *userdata) {
+    if (!candidate || !userdata)
+        return;
+    if (candidate->task_privilege != PRIVILEGE_USER)
+        return;
+    if (candidate->state == TASK_DEAD || candidate->state == TASK_FREE)
+        return;
+
+    task_t *ctx = (task_t *)userdata;
+    if (!ctx)
+        ctx = candidate;
+}
+
 static void tty_input_listener(const keyboard_event_t *ev) {
     if (ev->action != KEY_DOWN)
         return;
 
     tty_t *tty = (tty_t *)console_get_active_console()->internal_data;
-    
-    if (!(tty->flags & TTY_ECHO)) {
-        return; 
-    }
 
     char c = tty_key_to_ascii(ev);
     if (!c)
         return;
+
+    if ((ev->keymod & KEYMOD_CTRL) && (c == 'c' || c == 'C')) {
+        task_t *task = get_current_task();
+        if (!task || task->task_privilege != PRIVILEGE_USER) {
+            cpu_context_t ctx = {0};
+            itterate_each_task(tty_pick_sigint_target, &ctx);
+            task->context = &ctx;
+        }
+
+        if (task)
+            (void)signal_send(task, SIGINT);
+
+        if (tty->flags & TTY_ECHO) {
+            tty->ops->putchar(tty, '^');
+            tty->ops->putchar(tty, 'C');
+            tty->ops->putchar(tty, '\n');
+        }
+        return;
+    }
 
     tty_process_input(tty, c);
 }

@@ -4,12 +4,15 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <mm/paging.h>
 #include <mm/kalloc.h>
+#include <user/errno.h>
 
 void* sys_mapfb(size_t *out_pages) {
-    if (!out_pages) return NULL;
+    if (!out_pages)
+        return (void *)(uintptr_t)-EFAULT;
 
     task_t *task = get_current_task();
-    if (!task) return NULL;
+    if (!task)
+        return (void *)(uintptr_t)-ESRCH;
 
     uintptr_t fb_phys = (uintptr_t)framebuffer_get_addr(0);
     
