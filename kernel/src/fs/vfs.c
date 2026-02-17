@@ -78,14 +78,35 @@ int vfs_lookup(const path_t* path, INode_t** out_inode){
 }
 
 int vfs_create(const path_t* path, INode_t** out_result, inode_type node_type){
-    INode_t* parent_inode = NULL;
-    path_t parent = vfs_parent_path(path);
+    if (!path || !path->data || path->data_length == 0 || !out_result)
+        return status_print_error(FILE_NOT_FOUND);
 
+    const char* path_begin = path->data;
+    const char* path_end = path->data + path->data_length;
+
+    while (path_end > path_begin && *(path_end - 1) == '/')
+        path_end--;
+    if (path_end == path_begin)
+        return status_print_error(FILE_NOT_FOUND);
+
+    const char* name = path_end;
+    while (name > path_begin && *(name - 1) != '/')
+        name--;
+
+    size_t namelen = (size_t)(path_end - name);
+    if (namelen == 0)
+        return status_print_error(FILE_NOT_FOUND);
+
+    path_t parent = (path_t){
+        .root = path->root,
+        .start = path->start,
+        .data = path->data,
+        .data_length = (size_t)(name - path_begin),
+    };
+
+    INode_t* parent_inode = NULL;
     int e = vfs_lookup(&parent, &parent_inode);
     if (e < 0) return e;
-
-    const char* name = parent.data + parent.data_length;
-    size_t namelen = path->data_length - parent.data_length;
 
     e = inode_create(parent_inode, name, namelen, out_result, node_type);
     if (e == 0 && *out_result) {
