@@ -1,17 +1,10 @@
-export MAKEFLAGS=-j8
+IMAGE_NAME := bleed-kernel
+OBJDIR := bin/obj
+KERNEL_BIN := bin/bleed-kernel
+MEMSZ := 256M
 
-IMAGE_NAME 	:= bleed-kernel
-OBJDIR 		:= bin/obj
-KERNEL_BIN 	:= bin/bleed-kernel
-
-CC 		:= cc
-LD 		:= ld
-OBJCOPY := objcopy
-
-SYM_TOOL 	:= tools/mksymtab
-KERNEL_SYM 	:= initrd/etc/kernel.sym
-
-MEMSZ = 256M
+CC := cc
+LD := ld
 
 CFLAGS := -g -O2 -Wall -Werror -Wextra -std=gnu11 \
           -nostdinc -ffreestanding -fno-stack-protector \
@@ -24,28 +17,24 @@ CFLAGS := -g -O2 -Wall -Werror -Wextra -std=gnu11 \
 LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 --gc-sections \
            -T kernel.lds
 
-KERNEL_C := $(shell find kernel -name '*.c')
-KERNEL_S := $(shell find kernel -name '*.S')
+KERNEL_OBJ := $(patsubst %.c, $(OBJDIR)/%.o, $(shell find kernel -name '*.c')) \
+              $(patsubst %.S, $(OBJDIR)/%.o, $(shell find kernel -name '*.S'))
 
-KLIBC_C := $(shell find klibc -name '*.c')
-KLIBC_S := $(shell find klibc -name '*.S')
-
-KERNEL_OBJ := $(patsubst %.c,$(OBJDIR)/%.o,$(KERNEL_C)) \
-              $(patsubst %.S,$(OBJDIR)/%.o,$(KERNEL_S))
-KLIBC_OBJ := $(patsubst %.c,$(OBJDIR)/%.o,$(KLIBC_C)) \
-             $(patsubst %.S,$(OBJDIR)/%.o,$(KLIBC_S))
+KLIBC_OBJ := $(patsubst %.c, $(OBJDIR)/%.o, $(shell find klibc -name '*.c')) \
+             $(patsubst %.S, $(OBJDIR)/%.o, $(shell find klibc -name '*.S'))
 
 OBJ := $(KERNEL_OBJ) $(KLIBC_OBJ)
-
 DEPS := $(OBJ:.o=.d)
 -include $(DEPS)
 
-# if you are compiling for the bleed kernel and want to make it easy to place in initrd
-# make sure the user program binary compiles to USER_BASE/{your_program_root}/bin/{binary_name}
-# the binary name and root directory name must match the USER_PROGS entry
+USER_REPOS := \
+    "https://codeberg.org/Bleed-Kernel/Verdict-Shell verdict" \
+	"https://codeberg.org/Bleed-Kernel/Bleed-Doom doom" \
+	"https://codeberg.org/Bleed-Kernel/Bleed-Taskman taskman" \
+	"https://codeberg.org/Bleed-Kernel/Bleed-Kilo kilo" \
 
-USER_PROGS := verdict meminfo specseek taskman
-USER_BASE := ../bleed-user
+USER_BIN_DIR := external
+INITRD_BIN := initrd/bin
 
 .PHONY: all
 all: $(IMAGE_NAME).iso
@@ -62,14 +51,6 @@ $(KERNEL_BIN): $(OBJ)
 	@mkdir -p $(dir $@)
 	$(LD) $(LDFLAGS) $(OBJ) -o $@
 
-$(SYM_TOOL): tools/mksymtab.c
-	$(CC) -O2 $< -o $@
-
-$(KERNEL_SYM): $(KERNEL_BIN) $(SYM_TOOL)
-	@mkdir -p $(dir $@)
-	nm -n --defined-only $(KERNEL_BIN) > bin/kernel.sym
-	$(SYM_TOOL) bin/kernel.sym $@
-
 limine/limine:
 	rm -rf limine
 	git clone https://codeberg.org/Limine/Limine.git limine --branch=v10.x-binary --depth=1
@@ -77,26 +58,32 @@ limine/limine:
 
 .PHONY: userprogs
 userprogs:
-	@for p in $(USER_PROGS); do \
-		dir=$(USER_BASE)/$$p; \
-		test -d $$dir || continue; \
-		$(MAKE) -C $$dir; \
-	done
-
-.PHONY: install-userprogs
-install-userprogs: userprogs
-	@mkdir -p initrd/bin
-	@for p in $(USER_PROGS); do \
-		if [ -f $(USER_BASE)/$$p/bin/$$p ]; then \
-			cp $(USER_BASE)/$$p/bin/$$p initrd/bin/$$p; \
+	@mkdir -p $(USER_BIN_DIR)
+	@mkdir -p $(INITRD_BIN)
+	@for entry in $(USER_REPOS); do \
+		repo=$${entry%% *}; \
+		name=$${entry##* }; \
+		dir=$(USER_BIN_DIR)/$$name; \
+		if [ ! -d "$$dir" ]; then \
+			echo "[USER] Cloning $$name from $$repo"; \
+			git clone "$$repo" "$$dir"; \
 		else \
-			echo "Skipping user program $$p (not found)"; \
-		fi \
+			echo "[USER] Pulling latest for $$name"; \
+			(cd "$$dir" && git pull --rebase); \
+		fi; \
+		echo "[USER] Building $$name"; \
+		$(MAKE) -C "$$dir"; \
+		if [ -f "$$dir/bin/$$name" ]; then \
+			cp "$$dir/bin/$$name" $(INITRD_BIN)/$$name; \
+		else \
+			echo "ERROR: $$name binary not found"; \
+			exit 1; \
+		fi; \
 	done
 
-.PHONY: initrd 
-initrd: $(KERNEL_SYM) install-userprogs 
-	@mkdir -p initrd 
+.PHONY: initrd
+initrd: $(KERNEL_BIN) userprogs
+	@mkdir -p initrd
 	tar -cf initrd/initrd.tar initrd/*/* initrd/*.*
 
 $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
@@ -125,26 +112,17 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 run: $(IMAGE_NAME).iso
 	qemu-system-x86_64 --cdrom $(IMAGE_NAME).iso --enable-kvm -cpu host -boot d -m $(MEMSZ) -serial stdio
 
-.PHONY: run-uefi
-run-uefi: edk2-ovmf $(IMAGE_NAME).iso
-	qemu-system-x86_64 \
-		-m $(MEMSZ) \
-		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/OVMF-pure-efi.fd,readonly=on \
-		-cdrom $(IMAGE_NAME).iso \
-		-boot d \
-		-serial stdio \
-		--enable-kvm \
-		-cpu host \
-		$(QEMUFLAGS)
-
 .PHONY: clean
 clean:
 	rm -rf bin $(IMAGE_NAME).iso iso_root
-	rm -f initrd/etc/kernel.sym
-	rm -f tools/mksymtab
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete
 	find initrd -name '*.tar' -delete
-	@for p in $(USER_PROGS); do \
-		$(MAKE) -C $(USER_BASE)/$$p clean || true; \
-	done
+
+distclean:
+	rm -rf bin $(IMAGE_NAME).iso iso_root
+	find kernel klibc -name '*.o' -delete
+	find kernel klibc -name '*.d' -delete
+	rm -rf $(USER_BIN_DIR)
+	rm -rf initrd/bin/*
+	find initrd -name '*.tar' -delete

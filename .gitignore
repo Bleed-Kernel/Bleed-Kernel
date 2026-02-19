@@ -11,5 +11,8 @@ limine/
 *.tar
 qemu.log
 
+external/
+initrd/bin/*
+
 tools/mksymtab
 initrd/etc/kernel.sym
