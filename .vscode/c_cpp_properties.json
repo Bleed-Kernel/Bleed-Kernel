@@ -4,6 +4,9 @@
             "name": "Linux",
             "compileCommands": [
                 "${workspaceFolder}/.vscode/compile_commands.json"
+            ],
+            "includePath": [
+                "${workspaceFolder}/**"
             ]
         }
     ],

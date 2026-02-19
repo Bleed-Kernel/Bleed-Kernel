@@ -32,7 +32,6 @@ static int user_range_mapped(task_t *task, uintptr_t addr, size_t len) {
 }
 
 int copy_to_user(task_t *user_task, void *udst, const void *src, size_t len) {
-    // happy now, victor?
     if (!user_task || !udst || !src || len == 0) return -1;
     if (!user_range_mapped(user_task, (uintptr_t)udst, len))
         return -1;

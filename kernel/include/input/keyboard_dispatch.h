@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <input/keyboard_input.h>
 
-#define MAX_INPUT_LISTENERS     16
+#define MAX_INPUT_LISTENERS     64
 
 typedef void (*input_listener_t)(const keyboard_event_t *);
 

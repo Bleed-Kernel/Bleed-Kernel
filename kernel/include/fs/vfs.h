@@ -6,12 +6,6 @@
 #include <devices/devices.h>
 #include <user/user_file.h>
 
-/*
-    functions prefixed inode_ are operations where 
-    as functions prefixed VFS are part of the filesystem
-    itself
-*/
-
 #define O_RDONLY 0x0
 #define O_WRONLY 0x1
 #define O_RDWR   0x2

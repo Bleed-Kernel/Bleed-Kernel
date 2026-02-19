@@ -42,6 +42,7 @@ __attribute__((noreturn)) void acpi_shutdown(void);
 __attribute__((noreturn)) void acpi_reboot(void);
 
 void apic_setup_irqs(void);
+int apic_is_enabled(void);
+
 int apic_init(void);
 void apic_eoi(void);
-int apic_is_enabled(void);

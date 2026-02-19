@@ -20,11 +20,11 @@ extern volatile void* address;
 
 struct acpi_hpet{
     struct acpi_sdt header;
-    uint8_t hardware_revision_id;
-    uint8_t comparator_count    : 5;
-    uint8_t counter_size        : 1;
-    uint8_t reserved            : 1;
-    uint8_t legacy_replacement  : 1;
+    uint8_t     hardware_revision_id;
+    uint8_t     comparator_count    : 5;
+    uint8_t     counter_size        : 1;
+    uint8_t     reserved            : 1;
+    uint8_t     legacy_replacement  : 1;
     uint16_t    pci_vendor_id;
 
     struct{

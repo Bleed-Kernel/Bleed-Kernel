@@ -1,15 +1,15 @@
 export MAKEFLAGS=-j8
 
-IMAGE_NAME := bleed-kernel
-OBJDIR := bin/obj
-KERNEL_BIN := bin/bleed-kernel
+IMAGE_NAME 	:= bleed-kernel
+OBJDIR 		:= bin/obj
+KERNEL_BIN 	:= bin/bleed-kernel
 
-CC := cc
-LD := ld
+CC 		:= cc
+LD 		:= ld
 OBJCOPY := objcopy
 
-SYM_TOOL := tools/mksymtab
-KERNEL_SYM := initrd/etc/kernel.sym
+SYM_TOOL 	:= tools/mksymtab
+KERNEL_SYM 	:= initrd/etc/kernel.sym
 
 MEMSZ = 256M
 
@@ -94,11 +94,10 @@ install-userprogs: userprogs
 		fi \
 	done
 
-.PHONY: initrd
-initrd: $(KERNEL_SYM) install-userprogs
-	@mkdir -p initrd
-	tar -cf initrd/initrd.tar \
-		initrd/fonts/* initrd/bin/* initrd/etc/* initrd/doom1.wad
+.PHONY: initrd 
+initrd: $(KERNEL_SYM) install-userprogs 
+	@mkdir -p initrd 
+	tar -cf initrd/initrd.tar initrd/*/* initrd/*.*
 
 $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 	rm -rf iso_root

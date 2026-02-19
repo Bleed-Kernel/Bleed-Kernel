@@ -1,3 +1,7 @@
+/*
+    Shitty implementation mark rewrite?
+*/
+
 #include <sched/signal.h>
 #include <sched/scheduler.h>
 #include <threads/exit.h>
