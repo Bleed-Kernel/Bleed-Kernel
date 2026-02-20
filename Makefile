@@ -1,6 +1,7 @@
 IMAGE_NAME := bleed-kernel
 OBJDIR := bin/obj
 KERNEL_BIN := bin/bleed-kernel
+OVMF_FW := edk2-ovmf/OVMF-pure-efi.fd
 MEMSZ := 256M
 
 CC := cc
@@ -32,8 +33,10 @@ USER_REPOS := \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Doom doom" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Taskman taskman" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Kilo kilo" \
+	"https://codeberg.org/Bleed-Kernel/Bleed-Coreutils cat" \
+	"https://codeberg.org/Bleed-Kernel/Bleed-Coreutils echo" \
 
-USER_BIN_DIR := external
+USER_BIN_DIR := external/
 INITRD_BIN := initrd/bin
 
 .PHONY: all
@@ -53,8 +56,8 @@ $(KERNEL_BIN): $(OBJ)
 
 limine/limine:
 	rm -rf limine
-	git clone https://codeberg.org/Limine/Limine.git limine --branch=v10.x-binary --depth=1
-	$(MAKE) -C limine
+	git clone https://codeberg.org/Limine/Limine.git limine --branch v10.5.0-binary --depth 1
+	cd limine && git checkout $(LIMINE_10_5_0)
 
 .PHONY: userprogs
 userprogs:
@@ -105,12 +108,28 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 		-efi-boot-part --efi-boot-image \
 		--protective-msdos-label \
 		iso_root -o $(IMAGE_NAME).iso
-	./limine/limine bios-install $(IMAGE_NAME).iso
 	rm -rf iso_root
 
 .PHONY: run
 run: $(IMAGE_NAME).iso
-	qemu-system-x86_64 --cdrom $(IMAGE_NAME).iso --enable-kvm -cpu host -boot d -m $(MEMSZ) -serial stdio
+	qemu-system-x86_64 \
+		--cdrom $(IMAGE_NAME).iso \
+		--enable-kvm \
+		-cpu host \
+		-boot d \
+		-m $(MEMSZ) \
+		-serial stdio
+
+.PHONY: run-uefi
+run-uefi: $(IMAGE_NAME).iso
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
+		--cdrom $(IMAGE_NAME).iso \
+		--enable-kvm \
+		-cpu host \
+		-boot d \
+		-m $(MEMSZ) \
+		-serial stdio
 
 .PHONY: clean
 clean:
@@ -118,6 +137,7 @@ clean:
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete
 	find initrd -name '*.tar' -delete
+	rm -rf limine
 
 distclean:
 	rm -rf bin $(IMAGE_NAME).iso iso_root
