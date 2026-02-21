@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <drivers/ps2/PS2_keyboard.h>
+#include <drivers/ps2/PS2_mouse.h>
 #include <sched/scheduler.h>
 
 volatile uint64_t timer_ticks = 0;
@@ -16,6 +17,9 @@ void irq_handler(uint8_t irq) {
             break;
         case 1:
             PS2_Keyboard_Interrupt(irq);
+            break;
+        case 12:
+            PS2_Mouse_Interrupt(irq);
             break;
         default:
             break;

@@ -154,6 +154,7 @@ int apic_init(void) {
     } irqs[] = {
         {0, 0x20},
         {1, 0x21},
+        {12, 0x2C},
     };
 
     for (size_t i = 0; i < sizeof(irqs)/sizeof(irqs[0]); i++) {

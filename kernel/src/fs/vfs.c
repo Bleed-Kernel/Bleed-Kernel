@@ -10,6 +10,7 @@
 #include <sched/scheduler.h>
 #include <user/user_file.h>
 #include <mm/spinlock.h>
+#include <devices/devices.h>
 
 extern const filesystem tempfs;
 
@@ -244,6 +245,34 @@ int vfs_chdir(const char *path_str) {
 
 int vfs_open(const char *path_str, int flags){
     if (!current_fd_table) return status_print_error(OUT_OF_BOUNDS);
+
+    if (strncmp(path_str, "/dev/", 5) == 0) {
+        const char *dev_name = path_str + 5;
+        if (*dev_name != '\0') {
+            INode_t *dev_inode = device_get_by_name(dev_name);
+            if (dev_inode) {
+                file_t *f = kmalloc(sizeof(*f));
+                if (!f)
+                    return status_print_error(OUT_OF_MEMORY);
+
+                f->type = FD_TYPE_DEV;
+                f->inode = dev_inode;
+                f->offset = 0;
+                f->flags = flags & (O_MODE | O_APPEND | O_TRUNC);
+                f->shared = 1;
+
+                for (int fd = 0; fd < MAX_FDS; fd++) {
+                    if (!current_fd_table->fds[fd]) {
+                        current_fd_table->fds[fd] = f;
+                        return fd;
+                    }
+                }
+
+                kfree(f, sizeof(*f));
+                return status_print_error(OUT_OF_BOUNDS);
+            }
+        }
+    }
 
     path_t path = vfs_path_from_abs(path_str);
     INode_t *inode = NULL;

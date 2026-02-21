@@ -118,7 +118,8 @@ run: $(IMAGE_NAME).iso
 		-cpu host \
 		-boot d \
 		-m $(MEMSZ) \
-		-serial stdio
+		-serial stdio \
+		-display sdl
 
 .PHONY: run-uefi
 run-uefi: $(IMAGE_NAME).iso
@@ -129,7 +130,8 @@ run-uefi: $(IMAGE_NAME).iso
 		-cpu host \
 		-boot d \
 		-m $(MEMSZ) \
-		-serial stdio
+		-serial stdio \
+		-display sdl
 
 .PHONY: clean
 clean:

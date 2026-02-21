@@ -3,6 +3,7 @@
 #include <ansii.h>
 #include <vendor/limine_bootloader/limine.h>
 #include <drivers/ps2/PS2_keyboard.h>
+#include <drivers/ps2/PS2_mouse.h>
 #include <gdt/gdt.h>
 #include <idt/idt.h>
 #include <string.h>
@@ -30,6 +31,7 @@
 #include <exec/elf_load.h>
 #include <devices/type/fb_device.h>
 #include <devices/type/kbd_device.h>
+#include <devices/type/mouse_device.h>
 #include <ACPI/acpi.h>
 #include <tss/tss.h>
 #include <panic.h>
@@ -139,7 +141,9 @@ void kmain() {
     acpi_init_hpet();
 
     kbd_device_init();
+    mouse_device_init();
     PS2_Keyboard_init();
+    PS2_Mouse_init();
     serial_device_register();
 
     scheduler_start();
