@@ -275,7 +275,9 @@ int vfs_open(const char *path_str, int flags){
         }
     }
 
-    path_t path = vfs_path_from_abs(path_str);
+    task_t *task = get_current_task();
+    INode_t *cwd = task ? task->current_directory : NULL;
+    path_t path = vfs_path_from_relative(path_str, cwd);
     INode_t *inode = NULL;
 
     int l = vfs_lookup(&path, &inode);

@@ -156,7 +156,9 @@ INode_t *elf_get_from_path(const char *path){
     if (!path) return NULL;
 
     INode_t *file = NULL;
-    path_t filepath = vfs_path_from_abs(path);
+    task_t *task = get_current_task();
+    INode_t *cwd = task ? task->current_directory : NULL;
+    path_t filepath = vfs_path_from_relative(path, cwd);
 
     vfs_lookup(&filepath, &file);
     return file;

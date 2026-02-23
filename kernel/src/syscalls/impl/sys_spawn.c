@@ -91,6 +91,13 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
     child->wait_queue = NULL;
     child->state = TASK_READY;
 
+    INode_t *parent_cwd = caller->current_directory ? caller->current_directory : vfs_get_root();
+    if (child->current_directory)
+        vfs_drop(child->current_directory);
+    child->current_directory = parent_cwd;
+    if (child->current_directory)
+        child->current_directory->shared++;
+
     serial_printf("%sNew Task Created: PID %d\n", LOG_INFO, child->id);
 
 cleanup:

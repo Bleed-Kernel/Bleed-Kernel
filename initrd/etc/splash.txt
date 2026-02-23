@@ -1,9 +1,8 @@
-
-        /:\
-       /:::\        Bleed by Myles Wilson [myles@bleedkernel.com]
-      /:::::\
-     /:::::::\          The Bleed Kernel will always be Open Source
-    |:::::::::|         and Licenced under GPLv3, run 'cat /initrd/etc/LICENCE' to view
-    |:::::::::|         the full licence file.
-     \:::::::/
-      '-----'
+[38;2;255;0;0m        /:\
+[38;2;255;0;0m       /:::\        [38;2;255;255;255mBleed by Myles Wilson [myles@bleedkernel.com]
+[38;2;255;0;0m      /:::::\
+[38;2;255;0;0m     /:::::::\          [38;2;255;255;255mThe Bleed Kernel will always be Open Source
+[38;2;255;0;0m    |:::::::::|         [38;2;255;255;255mand Licenced under GPLv3, run 'cat /initrd/etc/LICENCE' to view
+[38;2;255;0;0m    |:::::::::|         [38;2;255;255;255mthe full licence file.
+[38;2;255;0;0m     \:::::::/
+[38;2;255;0;0m      '-----'
