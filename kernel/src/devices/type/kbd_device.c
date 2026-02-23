@@ -62,10 +62,6 @@ static int kbd_ioctl(INode_t *inode, unsigned long request, void *arg) {
     return -1;
 }
 
-static struct INodeOps kbd_inode_ops = {
-    .read = kbd_read,
-    .ioctl = kbd_ioctl,
-};
 
 static void kbd_listener(const keyboard_event_t *ev) {
     if (!keyboard_device) return;
