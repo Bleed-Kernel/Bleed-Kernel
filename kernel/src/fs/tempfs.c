@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <status.h>
+#include <stdint.h>
 
 #define TEMPFS_MAX_NAME_LEN         128
 #define TEMPFS_DATA_CHUNK_SIZE      4096
@@ -109,14 +110,25 @@ int tempfs_lookup(INode_t* dir, const char* name, size_t namelen, INode_t** resu
 /// @param offset read offset
 /// @return read size (negitive indicates failure) 
 long tempfs_read(INode_t* inode, void* out_buffer, size_t count, size_t offset){
+    if (!inode || !inode->internal_data || !out_buffer)
+        return status_print_error(FILE_NOT_FOUND);
+    if (count == 0)
+        return 0;
+
     tempfs_INode_t* tempfs_inode = inode->internal_data;
     tempfs_data_t* data = tempfs_inode->data;
-    if (offset >= tempfs_inode->capacity) return -OUT_OF_BOUNDS; // out of offset bounds
-    if (offset + count > tempfs_inode->capacity) count = tempfs_inode->capacity - offset;
+    if (offset >= tempfs_inode->capacity) return 0; // EOF
+    if (count > tempfs_inode->capacity - offset) count = tempfs_inode->capacity - offset;
 
-    while(offset >= MAX_FILE_DATA_PER_CHUNK) {
-        data = data->next_chunk;
-        offset -= MAX_FILE_DATA_PER_CHUNK;
+    {
+        size_t max_hops = (tempfs_inode->capacity + MAX_FILE_DATA_PER_CHUNK - 1) / MAX_FILE_DATA_PER_CHUNK;
+        size_t hops = 0;
+        while(offset >= MAX_FILE_DATA_PER_CHUNK && data) {
+            data = data->next_chunk;
+            offset -= MAX_FILE_DATA_PER_CHUNK;
+            if (++hops > max_hops)
+                return 0;
+        }
     }
 
     size_t read_total = 0;
@@ -134,6 +146,9 @@ long tempfs_read(INode_t* inode, void* out_buffer, size_t count, size_t offset){
         data = data->next_chunk;
         chunk_offset = 0;
     }
+
+    if (count > 0)
+        return (long)read_total;
     
     return read_total;
 }
@@ -145,14 +160,24 @@ long tempfs_read(INode_t* inode, void* out_buffer, size_t count, size_t offset){
 /// @param offset write offset in inode
 /// @return write size (negitive indicates failure) 
 long tempfs_write(INode_t* inode, const void* in_buffer, size_t count, size_t offset){
+    if (!inode || !inode->internal_data || (!in_buffer && count > 0))
+        return status_print_error(FILE_NOT_FOUND);
+    if (count == 0)
+        return 0;
+
     tempfs_INode_t* tempfs_inode = inode->internal_data;
+    size_t start_offset = offset;
     tempfs_data_t** previous_next = &tempfs_inode->data;
     tempfs_data_t* data = tempfs_inode->data;
 
     if (offset > tempfs_inode->capacity) return status_print_error(OUT_OF_BOUNDS);
 
     // Skip chunks until we reach the right offset
-    while (data && offset >= MAX_FILE_DATA_PER_CHUNK){
+    while (offset >= MAX_FILE_DATA_PER_CHUNK){
+        if (!data){
+            data = *previous_next = tempfs_new_data_chunk();
+            if (!data) return status_print_error(OUT_OF_MEMORY);
+        }
         offset -= MAX_FILE_DATA_PER_CHUNK;
         previous_next = &data->next_chunk;
         data = data->next_chunk;
@@ -178,8 +203,8 @@ long tempfs_write(INode_t* inode, const void* in_buffer, size_t count, size_t of
     }
 
     // Update inode capacity correctly
-    if (tempfs_inode->capacity < offset + written_total)
-        tempfs_inode->capacity = offset + written_total;
+    if (tempfs_inode->capacity < start_offset + written_total)
+        tempfs_inode->capacity = start_offset + written_total;
 
     return (long)written_total;
 }

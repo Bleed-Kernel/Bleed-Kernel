@@ -163,5 +163,5 @@ void psf_init(const char *font_path_abs) {
     INode_t *inode;
     if (vfs_lookup(&path, &inode) < 0) return;
     current_font = psf_load_font(inode);
-    inode_drop(inode);
+    vfs_drop(inode);
 }

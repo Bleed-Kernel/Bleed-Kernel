@@ -7,6 +7,9 @@
 #include <string.h>
 
 #define TAR_BLOCK_SIZE  512
+#ifndef SIZE_MAX
+    #define SIZE_MAX ((size_t)-1)
+#endif
 
 /// @brief turns the octal value into the size of the tar file
 /// @param str octal value
@@ -143,7 +146,15 @@ int tar_extract(const void* tar_data, size_t tar_size){
 
         // Write file contents
         if (!is_dir && file_size > 0){
+            if (offset > tar_size - TAR_BLOCK_SIZE) {
+                kprintf(LOG_ERROR "Tar: invalid header offset for %s\n", full_path);
+                return status_print_error(TAR_EXTRACT_FAILURE);
+            }
             size_t content_offset = offset + TAR_BLOCK_SIZE;
+            if (file_size > tar_size - content_offset) {
+                kprintf(LOG_ERROR "Tar: truncated entry %s (size=%lu)\n", full_path, file_size);
+                return status_print_error(TAR_EXTRACT_FAILURE);
+            }
             if (inode_write(inode,
                             (uint8_t*)tar_data + content_offset,
                             file_size,
@@ -155,7 +166,16 @@ int tar_extract(const void* tar_data, size_t tar_size){
 
         // Advance
         size_t blocks = (file_size + TAR_BLOCK_SIZE - 1) / TAR_BLOCK_SIZE;
-        offset += TAR_BLOCK_SIZE + blocks * TAR_BLOCK_SIZE;
+        if (blocks > (SIZE_MAX - TAR_BLOCK_SIZE - offset) / TAR_BLOCK_SIZE) {
+            kprintf(LOG_ERROR "Tar: block overflow while parsing %s\n", full_path);
+            return status_print_error(TAR_EXTRACT_FAILURE);
+        }
+        size_t next_offset = offset + TAR_BLOCK_SIZE + blocks * TAR_BLOCK_SIZE;
+        if (next_offset > tar_size) {
+            kprintf(LOG_ERROR "Tar: entry beyond archive bounds %s\n", full_path);
+            return status_print_error(TAR_EXTRACT_FAILURE);
+        }
+        offset = next_offset;
     }
 
     return 0;
