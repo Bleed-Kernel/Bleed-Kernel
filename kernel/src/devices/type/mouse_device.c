@@ -3,6 +3,7 @@
 #include <input/mouse_dispatch.h>
 #include <mm/kalloc.h>
 #include <string.h>
+#include <user/errno.h>
 
 static mouse_device_t *mouse_device = NULL;
 
@@ -16,7 +17,7 @@ static long mouse_read(INode_t *inode, void *buf, size_t len, size_t offset) {
 
     if (mouse->head == mouse->tail) {
         spinlock_release(&mouse->lock);
-        return 0;
+        return -EAGAIN;
     }
 
     size_t bytes_read = 0;

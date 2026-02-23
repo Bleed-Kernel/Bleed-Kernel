@@ -5,6 +5,7 @@
 typedef struct {
     INode_t device;
     spinlock_t lock;
+    uint32_t flags;
     keyboard_event_t buffer[KBD_BUFFER_SIZE];
     size_t head;
     size_t tail;

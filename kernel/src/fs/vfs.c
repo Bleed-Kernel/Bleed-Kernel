@@ -9,6 +9,7 @@
 #include <drivers/serial/serial.h>
 #include <sched/scheduler.h>
 #include <user/user_file.h>
+#include <user/errno.h>
 #include <mm/spinlock.h>
 #include <devices/devices.h>
 
@@ -291,6 +292,7 @@ int vfs_open(const char *path_str, int flags){
     }
 
     f->inode = inode;
+    f->type = FD_TYPE_FS;
     f->offset = flags & O_TRUNC ? 0 : ((flags & O_APPEND) ? vfs_filesize(inode) : 0);
     f->flags = flags & (O_MODE | O_APPEND | O_TRUNC);
     f->shared = 1;
@@ -319,8 +321,18 @@ long vfs_read(int fd, void *buf, size_t count) {
     if (mode != O_RDONLY && mode != O_RDWR)
         return -3;
 
-    if (f->inode->type == INODE_FILE) {
-        uint64_t filesize = vfs_filesize(f->inode);
+    bool is_size_finite = false;
+    uint64_t filesize = 0;
+
+    if (f->inode->ops && f->inode->ops->size) {
+        is_size_finite = true;
+        filesize = f->inode->ops->size(f->inode);
+    } else if (f->type == FD_TYPE_FS && f->inode->type == INODE_FILE) {
+        is_size_finite = true;
+        filesize = vfs_filesize(f->inode);
+    }
+
+    if (is_size_finite) {
         if (f->offset >= filesize)
             return 0;
 
@@ -328,13 +340,27 @@ long vfs_read(int fd, void *buf, size_t count) {
             count = filesize - f->offset;
     }
 
-    long r = inode_read(f->inode, buf, count, f->offset);
+    for (;;) {
+        long r = inode_read(f->inode, buf, count, f->offset);
 
-    if (r > 0 && f->inode->type == INODE_FILE) {
-        f->offset += r;
+        if (r > 0) {
+            if (is_size_finite)
+                f->offset += r;
+            return r;
+        }
+
+        if (r < 0)
+            return r;
+
+        if (is_size_finite)
+            return 0;
+
+        task_t *current = get_current_task();
+        if (current && (current->sig_pending & ~current->sig_blocked))
+            return -EINTR;
+
+        sched_yield();
     }
-
-    return r;
 }
 
 long vfs_write(int fd, const void *buf, size_t count){

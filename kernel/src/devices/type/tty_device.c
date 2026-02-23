@@ -17,6 +17,7 @@
 #include <sched/scheduler.h>
 #include <sched/signal.h>
 #include <user/signal.h>
+#include <user/errno.h>
 
 long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
     (void)offset;
@@ -25,7 +26,7 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
 
     if (tty->flags & TTY_NONBLOCK) {
         if (tty->in_head == tty->in_tail) {
-            return -1;
+            return -EAGAIN;
         }
         return len;
     }
