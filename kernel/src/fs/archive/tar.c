@@ -122,7 +122,18 @@ int tar_extract(const void* tar_data, size_t tar_size){
         path_t final_path = vfs_path_from_abs(full_path);
 
         INode_t* inode = NULL;
-        int res = vfs_create(&final_path, &inode, (is_dir ? INODE_DIRECTORY : INODE_FILE));
+        int res = vfs_lookup(&final_path, &inode);
+        if (res < 0) {
+            res = vfs_create(&final_path, &inode, (is_dir ? INODE_DIRECTORY : INODE_FILE));
+        } else if (is_dir) {
+            // Directory may already exist from parent-path creation.
+            // Reusing it prevents duplicate directory entries.
+            res = 0;
+        } else {
+            kprintf(LOG_ERROR "Tar extract failure: duplicate file %s (offset %lu)\n",
+                    header->name, offset);
+            return status_print_error(TAR_EXTRACT_FAILURE);
+        }
 
         if (res < 0){
             kprintf(LOG_ERROR "Tar extract failure: %s (offset %lu)\n",

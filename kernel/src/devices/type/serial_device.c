@@ -3,17 +3,13 @@
 #include <status.h>
 #include <string.h>
 #include <mm/kalloc.h>
-#include <stdint.h>
 #include <drivers/serial/serial.h>
 
 static long serial_device_write(INode_t* inode, const void* buf, size_t count, size_t offset) {
     (void)inode; (void)offset;
     if (!buf || count == 0) return 0;
 
-    const char* str = (const char*)buf;
-    for (size_t i = 0; i < count; i++) {
-        serial_printf("%c", str[i]);
-    }
+    serial_write_n((const char *)buf, count);
     return count;
 }
 
