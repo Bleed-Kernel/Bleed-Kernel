@@ -38,6 +38,13 @@ static long fb_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     return len;
 }
 
+static size_t fb_size(INode_t *inode) {
+    fb_device_t *fb = inode->internal_data;
+    if (!fb)
+        return 0;
+    return fb->height * fb->pitch;
+}
+
 static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
     (void)inode;// oh yeah its big brain time
     fb_device_t *fb = fb0;
@@ -64,6 +71,7 @@ static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
 static struct INodeOps fb_inode_ops = {
     .write = fb_write,
     .read  = fb_read,
+    .size  = fb_size,
     .ioctl = fb_ioctl,
 };
 
