@@ -13,6 +13,7 @@
 #include <mm/smap.h>
 
 static kbd_device_t *keyboard_device = NULL;
+static int kbd_ioctl(INode_t *inode, unsigned long request, void *arg);
 
 static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     (void)offset;
@@ -66,6 +67,27 @@ static struct INodeOps kbd_inode_ops = {
     .read = kbd_read,
     .ioctl = kbd_ioctl,
 };
+
+static int kbd_ioctl(INode_t *inode, unsigned long request, void *arg) {
+    kbd_device_t *kbd = inode->internal_data;
+    if (!kbd || !arg)
+        return -1;
+
+    uint32_t *user_flags = (uint32_t *)arg;
+    SMAP_ALLOW{
+        switch (request) {
+            case TTY_IOCTL_SET_FLAGS:
+                kbd->flags = *user_flags;
+                return 0;
+            case TTY_IOCTL_GET_FLAGS:
+                *user_flags = kbd->flags;
+                return 0;
+            default:
+                return -1;
+        }
+    }
+    return -1;
+}
 
 static void kbd_listener(const keyboard_event_t *ev) {
     if (!keyboard_device) return;
