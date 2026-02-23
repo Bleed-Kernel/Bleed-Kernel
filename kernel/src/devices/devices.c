@@ -16,36 +16,52 @@ static spinlock_t device_list_lock = {0};
 /// @param device device structure
 /// @return df
 long device_register(INode_t *device, char *name){
-    if (!device)
+    if (!device || !name)
         return -DEV_EXISTS;
-    if (device_list_count >= MAX_DEVICES)
-        return -MAX_DEVICES_REACHED;
 
     spinlock_acquire(&device_list_lock);
-    int devidx = device_list_count;
+    if (device_list_count >= MAX_DEVICES) {
+        spinlock_release(&device_list_lock);
+        return -MAX_DEVICES_REACHED;
+    }
+
+    size_t devidx = device_list_count;
 
     for (size_t i = 0; i < device_list_count; i++){
         if (device_list[i].name == name || 
             strcmp(device_list[i].name, name) == 0){
+            spinlock_release(&device_list_lock);
             return -DEV_EXISTS;
         }
     }
 
     INode_t *devdir = NULL;
     path_t devpath = vfs_path_from_abs("/dev");
-    vfs_lookup(&devpath, &devdir);
+    int lr = vfs_lookup(&devpath, &devdir);
+    if (lr < 0 || !devdir) {
+        spinlock_release(&device_list_lock);
+        return lr < 0 ? lr : -FILE_NOT_FOUND;
+    }
 
     INode_t *devicenode = NULL;
     char dev_path_buffer[4096] = {0};
     snprintf(dev_path_buffer, sizeof(dev_path_buffer), "/dev/%s", name);
     path_t device_file = vfs_path_from_abs(dev_path_buffer);
 
-    vfs_create(&device_file, &devicenode, INODE_FILE);
+    int cr = vfs_create(&device_file, &devicenode, INODE_FILE);
+    if (cr < 0 || !devicenode) {
+        vfs_drop(devdir);
+        spinlock_release(&device_list_lock);
+        return cr < 0 ? cr : -OUT_OF_MEMORY;
+    }
+
     devicenode->ops = device->ops;
+    devicenode->type = INODE_DEVICE;
 
     device_list[devidx].inode = device;
     device_list[devidx].name = name;
     device_list_count++;
+    vfs_drop(devdir);
     spinlock_release(&device_list_lock);
     return 0;
 }
