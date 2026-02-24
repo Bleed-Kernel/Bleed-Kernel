@@ -8,6 +8,7 @@
 
 #define PS2_STATUS_OUT_FULL 0x01
 #define PS2_STATUS_IN_FULL  0x02
+#define PS2_STATUS_AUX_DATA 0x20
 
 #define PS2_CMD_ENABLE_AUX_PORT 0xA8
 #define PS2_CMD_READ_CFG        0x20
@@ -18,8 +19,20 @@
 #define PS2_MOUSE_CMD_ENABLE_REPORT   0xF4
 #define PS2_MOUSE_ACK                 0xFA
 
+#define PS2_MOUSE_SENS_NUM 1
+#define PS2_MOUSE_SENS_DEN 2
+
 static uint8_t packet[3];
 static uint8_t packet_index = 0;
+static int32_t rem_dx = 0;
+static int32_t rem_dy = 0;
+
+static inline int16_t ps2_scale_delta(int16_t delta, int32_t *rem) {
+    int32_t accum = ((int32_t)delta * PS2_MOUSE_SENS_NUM) + *rem;
+    int32_t scaled = accum / PS2_MOUSE_SENS_DEN;
+    *rem = accum % PS2_MOUSE_SENS_DEN;
+    return (int16_t)scaled;
+}
 
 static inline void ps2_wait_input_ready(void) {
     while (inb(PS2_STATUS_PORT) & PS2_STATUS_IN_FULL) {
@@ -91,6 +104,12 @@ void PS2_Mouse_init(void) {
 void PS2_Mouse_Interrupt(uint8_t irq) {
     (void)irq;
 
+    uint8_t status = inb(PS2_STATUS_PORT);
+    if (!(status & PS2_STATUS_OUT_FULL))
+        return;
+    if (!(status & PS2_STATUS_AUX_DATA))
+        return;
+
     uint8_t data = inb(PS2_DATA_PORT);
 
     // Byte 0 must have the always-1 sync bit set. If not, stay unsynced.
@@ -126,6 +145,9 @@ void PS2_Mouse_Interrupt(uint8_t irq) {
         dx = (packet[0] & (1 << 4)) ? -255 : 255;
     if (packet[0] & (1 << 7))
         dy = (packet[0] & (1 << 5)) ? -255 : 255;
+
+    dx = ps2_scale_delta(dx, &rem_dx);
+    dy = ps2_scale_delta(dy, &rem_dy);
 
     mouse_event_t ev = {
         .dx = dx,

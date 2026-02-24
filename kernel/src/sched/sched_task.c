@@ -112,6 +112,7 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     
     task->task_privilege = (cs & 0x3) ? P_USER : P_KERNEL;
     task->context = ctx;
+    FP_Init(task->fx_state);
 
     sched_init_task_heap(task);
 

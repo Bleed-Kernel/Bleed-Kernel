@@ -2,7 +2,7 @@ IMAGE_NAME := bleed-kernel
 OBJDIR := bin/obj
 KERNEL_BIN := bin/bleed-kernel
 OVMF_FW := edk2-ovmf/OVMF-pure-efi.fd
-MEMSZ := 256M
+MEMSZ := 2G
 
 CC := cc
 LD := ld

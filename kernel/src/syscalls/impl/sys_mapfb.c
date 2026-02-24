@@ -22,7 +22,7 @@ void* sys_mapfb(size_t *out_pages) {
 
     uintptr_t fb_phys_aligned = fb_phys & ~0xFFFULL;
     size_t offset = fb_phys & 0xFFF;
-    size_t fb_size = framebuffer_get_width(0) * framebuffer_get_height(0) * (framebuffer_get_bpp(0) / 8);
+    size_t fb_size = framebuffer_get_width(0) * framebuffer_get_pitch(0);
     size_t pages = (offset + fb_size + 4095) / 4096;
 
     SMAP_ALLOW{ *out_pages = pages; }

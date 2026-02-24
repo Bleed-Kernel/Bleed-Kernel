@@ -12,6 +12,9 @@
 #include <ACPI/acpi.h>
 
 #define KBD_PORT 0x60
+#define PS2_STATUS_PORT 0x64
+#define PS2_STATUS_OUT_FULL 0x01
+#define PS2_STATUS_AUX_DATA 0x20
 
 static bool shift = false;
 static bool ctrl = false;
@@ -48,7 +51,13 @@ char tty_key_to_ascii(const keyboard_event_t *ev) {
 /// @param irq value
 void PS2_Keyboard_Interrupt(uint8_t irq) {
     (void)irq;
-    uint8_t sc = inb(0x60);
+    uint8_t status = inb(PS2_STATUS_PORT);
+    if (!(status & PS2_STATUS_OUT_FULL))
+        return;
+    if (status & PS2_STATUS_AUX_DATA)
+        return;
+
+    uint8_t sc = inb(KBD_PORT);
     uint8_t released = sc & 0x80;
     sc &= 0x7F;
 

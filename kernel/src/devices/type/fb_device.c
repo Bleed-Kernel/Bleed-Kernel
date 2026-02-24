@@ -53,7 +53,7 @@ static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
             .width  = fb->width,
             .height = fb->height,
             .pitch  = fb->pitch,
-            .bpp    = 32
+            .bpp    = fb->bpp,
         };
         umemcpy(arg, &info, sizeof(info));
         return 0;
@@ -79,10 +79,11 @@ void fb_device_init(void) {
     fb0 = kmalloc(sizeof(fb_device_t));
     spinlock_init(&fb0->lock);
 
-    fb0->fb_phys = (uintptr_t)framebuffer_get_addr(0);
-    fb0->width   = framebuffer_get_width(0);
-    fb0->height  = framebuffer_get_height(0);
-    fb0->pitch   = framebuffer_get_pitch(0);
+    fb0->fb_phys    = (uintptr_t)framebuffer_get_addr(0);
+    fb0->width      = framebuffer_get_width(0);
+    fb0->height     = framebuffer_get_height(0);
+    fb0->pitch      = framebuffer_get_pitch(0);
+    fb0->bpp        = framebuffer_get_bpp(0);
 
     size_t size = fb0->height * fb0->pitch;
     fb_backbuffer = kmalloc(size);

@@ -34,8 +34,8 @@ void init_scheduler(void) {
 
 void* sched_switch_task(task_t *next_task, void* old_context) {
     current_task->context = (cpu_context_t*)old_context;
-    AVX_Save(current_task->avx_state);
-    
+    FP_Save(current_task->fx_state);
+
     if (current_task->state == TASK_RUNNING) {
         current_task->state = TASK_READY;
     }
@@ -47,14 +47,14 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
 
     tss.rsp0 = (uint64_t)current_task->kernel_stack + KERNEL_STACK_SIZE;
     paging_switch_address_space(current_task->page_map);
-    AVX_Restore(current_task->avx_state);
+    FP_Restore(current_task->fx_state);
 
     return (void*)next_task->context;
 }
 
 void* sched_next_context(void* old_context) {
     task_t *next_task = current_task->next;
-    
+
     while (next_task->state != TASK_READY && next_task != current_task) {
         next_task = next_task->next;
     }
@@ -79,13 +79,15 @@ void sched_bootstrap(void *rsp) {
     if (!kernel_task)
         ke_panic("Failed to allocate kernel task");
 
+    memset(kernel_task, 0, sizeof(task_t));
+
     kernel_task->id                 = 0;
     kernel_task->state              = TASK_RUNNING;
     kernel_task->quantum_remaining  = QUANTUM;
     kernel_task->context            = (cpu_context_t *)rsp;
     kernel_task->next               = kernel_task;
     kernel_task->task_privilege     = P_KERNEL;
-    kernel_task->avx_state[0]       = 0;
+    FP_Init(kernel_task->fx_state);
 
     strncpy(kernel_task->name, KERNEL_TASK_NAME, 128-1);
     kernel_task->page_map = kernel_page_map;

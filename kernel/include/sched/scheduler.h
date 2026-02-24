@@ -10,50 +10,27 @@
 #define KERNEL_STACK_SIZE   8196
 
 #define USER_STACK_TOP      0x00007ffffffff000ULL
-#define USER_STACK_SIZE     16384
+#define USER_STACK_SIZE     (8 * 1024 * 1024)
 
 #define MAX_TASKS           64
 #define QUANTUM             10
 
-#define AVX_Save(buf) \
+#define FP_Save(buf) \
     __asm__ volatile ( \
-        "vmovdqu %%ymm0,  0(%0)\n\t" \
-        "vmovdqu %%ymm1, 32(%0)\n\t" \
-        "vmovdqu %%ymm2, 64(%0)\n\t" \
-        "vmovdqu %%ymm3, 96(%0)\n\t" \
-        "vmovdqu %%ymm4, 128(%0)\n\t" \
-        "vmovdqu %%ymm5, 160(%0)\n\t" \
-        "vmovdqu %%ymm6, 192(%0)\n\t" \
-        "vmovdqu %%ymm7, 224(%0)\n\t" \
-        "vmovdqu %%ymm8, 256(%0)\n\t" \
-        "vmovdqu %%ymm9, 288(%0)\n\t" \
-        "vmovdqu %%ymm10, 320(%0)\n\t" \
-        "vmovdqu %%ymm11, 352(%0)\n\t" \
-        "vmovdqu %%ymm12, 384(%0)\n\t" \
-        "vmovdqu %%ymm13, 416(%0)\n\t" \
-        "vmovdqu %%ymm14, 448(%0)\n\t" \
-        "vmovdqu %%ymm15, 480(%0)" \
+        "fxsave64 (%0)" \
         : : "r"(buf) : "memory" \
     )
 
-#define AVX_Restore(buf) \
+#define FP_Restore(buf) \
     __asm__ volatile ( \
-        "vmovdqu  0(%0), %%ymm0\n\t" \
-        "vmovdqu 32(%0), %%ymm1\n\t" \
-        "vmovdqu 64(%0), %%ymm2\n\t" \
-        "vmovdqu 96(%0), %%ymm3\n\t" \
-        "vmovdqu 128(%0), %%ymm4\n\t" \
-        "vmovdqu 160(%0), %%ymm5\n\t" \
-        "vmovdqu 192(%0), %%ymm6\n\t" \
-        "vmovdqu 224(%0), %%ymm7\n\t" \
-        "vmovdqu 256(%0), %%ymm8\n\t" \
-        "vmovdqu 288(%0), %%ymm9\n\t" \
-        "vmovdqu 320(%0), %%ymm10\n\t" \
-        "vmovdqu 352(%0), %%ymm11\n\t" \
-        "vmovdqu 384(%0), %%ymm12\n\t" \
-        "vmovdqu 416(%0), %%ymm13\n\t" \
-        "vmovdqu 448(%0), %%ymm14\n\t" \
-        "vmovdqu 480(%0), %%ymm15" \
+        "fxrstor64 (%0)" \
+        : : "r"(buf) : "memory" \
+    )
+
+#define FP_Init(buf) \
+    __asm__ volatile ( \
+        "fninit\n\t" \
+        "fxsave64 (%0)" \
         : : "r"(buf) : "memory" \
     )
 
@@ -104,7 +81,7 @@ typedef struct task {
     INode_t         *current_directory;
     task_privil_t   task_privilege;
 
-    uint8_t avx_state[512] __attribute__((aligned(32)));
+    uint8_t         fx_state[512] __attribute__((aligned(16)));
 
     struct task     *wait_queue;
     struct task     *wait_next;
