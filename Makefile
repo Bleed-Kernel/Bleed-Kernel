@@ -1,3 +1,5 @@
+export MAKEFLAGS = -j8
+
 IMAGE_NAME := bleed-kernel
 OBJDIR := bin/obj
 KERNEL_BIN := bin/bleed-kernel
@@ -74,6 +76,8 @@ userprogs:
 			echo "[USER] Pulling latest for $$name"; \
 			(cd "$$dir" && git pull --rebase); \
 		fi; \
+		echo "[USER] Preparing blibc for $$name"; \
+		$(MAKE) -C "$$dir" blibc; \
 		echo "[USER] Building $$name"; \
 		$(MAKE) -C "$$dir"; \
 		if [ -f "$$dir/bin/$$name" ]; then \
