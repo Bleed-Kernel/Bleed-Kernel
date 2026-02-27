@@ -4,6 +4,9 @@
 #include <fs/vfs.h>
 #include <mm/kalloc.h>
 #include <string.h>
+#include <sched/scheduler.h>
+#include <user/user_copy.h>
+#include <user/errno.h>
 
 static long hpet_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     (void)inode;
@@ -16,7 +19,7 @@ static long hpet_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     if (len > sizeof(now))
         len = sizeof(now);
 
-    umemcpy(buf, &now, len);
+    memcpy(buf, &now, len);
     return (long)len;
 }
 
@@ -25,14 +28,17 @@ static int hpet_ioctl(INode_t *inode, unsigned long request, void *arg) {
 
     if (request == HPET_IOCTL_GET_FEMTOSECONDS) {
         if (!arg)
-            return -1;
+            return -EFAULT;
 
         uint64_t now = hpet_get_femtoseconds();
-        umemcpy(arg, &now, sizeof(now));
+        task_t *task = get_current_task();
+        if (!task || copy_to_user(task, arg, &now, sizeof(now)) != 0)
+            return -EFAULT;
+
         return 0;
     }
 
-    return -1;
+    return -EINVAL;
 }
 
 static INodeOps_t hpet_inode_ops = {
