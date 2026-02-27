@@ -5,6 +5,7 @@
 #include <drivers/serial/serial.h>
 #include <mm/paging.h>
 #include <ansii.h>
+#include <panic.h>
 #include <sched/scheduler.h>
 
 #define HPET_FREQUENCY          1000
@@ -16,10 +17,12 @@ uint64_t femtosecondsPerTick = 0;
 
 void acpi_init_hpet(void){
     hpet = (struct acpi_hpet *)acpi_find_sdt("HPET");
-    if (!hpet)
+    if (!hpet) {
         serial_printf(LOG_ERROR "HPET Table not found\n");
-    else
+        return;
+    } else {
         serial_printf(LOG_OK "HPET Found\n");
+    }
 
     address = paddr_to_vaddr(hpet->address.address);
 
@@ -64,5 +67,7 @@ void wait_s(uint64_t s) {
 }
 
 uint64_t hpet_get_femtoseconds(){
+    if (!address || femtosecondsPerTick == 0)
+        return 0;
     return *(uint64_t*)(address + 0xF0) * femtosecondsPerTick;
 }

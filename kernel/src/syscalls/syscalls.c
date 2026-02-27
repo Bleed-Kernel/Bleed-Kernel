@@ -71,7 +71,6 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_TASKCOUNT, sys_taskcount),
     SYSCALL(SYS_MAPFB, sys_mapfb),
     SYSCALL(SYS_SEEK, sys_seek),
-    SYSCALL(SYS_FEMTOSECONDS, sys_femtoseconds),
     SYSCALL(SYS_SIGACTION, sys_sigaction),
     SYSCALL(SYS_SIGPROCMASK, sys_sigprocmask),
     SYSCALL(SYS_SIGRETURN, sys_sigreturn),

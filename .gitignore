@@ -16,3 +16,4 @@ initrd/bin/*
 
 tools/mksymtab
 initrd/etc/kernel.sym
+initrd/proc/version

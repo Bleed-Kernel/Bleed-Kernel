@@ -41,6 +41,7 @@
 #include <kernel/bootargs.h>
 #include <cpu/features/features.h>
 #include <devices/type/serial_device.h>
+#include <devices/type/hpet_device.h>
 
 extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
@@ -139,6 +140,7 @@ void kmain() {
 
     bootargs_init(cmdline_request.response->cmdline);
     acpi_init_hpet();
+    hpet_device_init();
 
     kbd_device_init();
     mouse_device_init();

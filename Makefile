@@ -5,6 +5,11 @@ OBJDIR := bin/obj
 KERNEL_BIN := bin/bleed-kernel
 OVMF_FW := edk2-ovmf/OVMF-pure-efi.fd
 MEMSZ := 2G
+PROC_VERSION_FILE := initrd/proc/version
+BUILD_GIT_HASH := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+BUILD_GIT_COUNT := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
+BUILD_GIT_DIRTY := $(shell if git diff --quiet --ignore-submodules HEAD >/dev/null 2>&1; then echo ""; else echo "-dirty"; fi)
+BUILD_VERSION := r$(BUILD_GIT_COUNT)-g$(BUILD_GIT_HASH)$(BUILD_GIT_DIRTY)
 
 CC := cc
 LD := ld
@@ -33,6 +38,7 @@ DEPS := $(OBJ:.o=.d)
 USER_REPOS := \
     "https://codeberg.org/Bleed-Kernel/Verdict-Shell verdict" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Doom doom" \
+	"https://codeberg.org/Bleed-Kernel/Bleed-Quake2 quake2" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Taskman taskman" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Kilo kilo" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Coreutils cat" \
@@ -43,6 +49,16 @@ INITRD_BIN := initrd/bin
 
 .PHONY: all
 all: $(IMAGE_NAME).iso
+
+$(PROC_VERSION_FILE): FORCE
+	@mkdir -p $(dir $@)
+	@tmp="$@.tmp"; \
+	printf "%s\n" "$(BUILD_VERSION)" > "$$tmp"; \
+	if [ -f "$@" ] && cmp -s "$@" "$$tmp"; then \
+		rm -f "$$tmp"; \
+	else \
+		mv "$$tmp" "$@"; \
+	fi
 
 $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -89,7 +105,7 @@ userprogs:
 	done
 
 .PHONY: initrd
-initrd: $(KERNEL_BIN) userprogs
+initrd: $(KERNEL_BIN) $(PROC_VERSION_FILE) userprogs
 	@mkdir -p initrd
 	tar -cf initrd/initrd.tar initrd/*/* initrd/*.*
 
@@ -140,13 +156,18 @@ run-uefi: $(IMAGE_NAME).iso
 .PHONY: clean
 clean:
 	rm -rf bin $(IMAGE_NAME).iso iso_root
+	rm -f $(PROC_VERSION_FILE)
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete
 	find initrd -name '*.tar' -delete
 	rm -rf limine
 
+.PHONY: FORCE
+FORCE:
+
 distclean:
 	rm -rf bin $(IMAGE_NAME).iso iso_root
+	rm -f $(PROC_VERSION_FILE)
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete
 	rm -rf $(USER_BIN_DIR)
