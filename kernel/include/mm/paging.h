@@ -16,8 +16,8 @@
 #define PTE_PAT             (1ULL << 12)
 #define PTE_NX              (1ULL << 63)
 
-#define PAGE_KERNEL_RW      (PTE_WRITABLE | PTE_PAGESIZE)
-#define PAGE_KERNEL_RO      (PTE_PAGESIZE)
+#define PAGE_KERNEL_RW      (PTE_WRITABLE)
+#define PAGE_KERNEL_RO      (0)
 #define PAGE_USER_RW        (PTE_WRITABLE | PTE_USER)
 #define PAGE_USER_RO        (PTE_USER)
 

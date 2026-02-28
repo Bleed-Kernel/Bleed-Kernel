@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 
 /// @brief kernel symbol table
 struct ksym {
@@ -16,39 +17,116 @@ int main(int argc, char **argv) {
     }
 
     FILE *in = fopen(argv[1], "r");
+    if (!in) {
+        perror("fopen input");
+        return 1;
+    }
+
     FILE *out = fopen(argv[2], "wb");
-    if (!in || !out) return 1;
+    if (!out) {
+        perror("fopen output");
+        fclose(in);
+        return 1;
+    }
 
-    struct ksym syms[16384];
-    char strtab[131072];
+    struct ksym *syms = NULL;
+    size_t sc = 0, syms_cap = 0;
 
-    size_t sc = 0;
-    size_t so = 1;
-    strtab[0] = 0;
+    char *strtab = NULL;
+    size_t so = 1, strtab_cap = 0;
 
-    while (!feof(in)) {
-        uint64_t addr;
-        char type;
-        char name[256];
+    strtab_cap = 4096;
+    strtab = malloc(strtab_cap);
+    if (!strtab) {
+        perror("malloc strtab");
+        fclose(in);
+        fclose(out);
+        return 1;
+    }
+    strtab[0] = '\0';
 
-        if (fscanf(in, "%lx %c %255s", &addr, &type, name) != 3)
+    char *line = NULL;
+    size_t line_cap = 0;
+    ssize_t line_len;
+
+    while ((line_len = getline(&line, &line_cap, in)) > 0) {
+        (void)line_len;
+        uint64_t addr = 0;
+        char type = 0;
+        char name[512] = {0};
+
+        if (sscanf(line, "%" SCNx64 " %c %511s", &addr, &type, name) != 3)
             continue;
 
-        // strip everything but functions for the stack trace
         if (type != 'T' && type != 't')
             continue;
 
-        syms[sc].addr = addr;
-        syms[sc].name_off = so;
+        size_t name_len = strlen(name) + 1;
+        if (name_len > UINT32_MAX) {
+            fprintf(stderr, "symbol name too long\n");
+            free(line);
+            free(strtab);
+            free(syms);
+            fclose(in);
+            fclose(out);
+            return 1;
+        }
 
-        strcpy(&strtab[so], name);
-        so += strlen(name) + 1;
+        while (so + name_len > strtab_cap) {
+            size_t new_cap = strtab_cap * 2;
+            char *tmp = realloc(strtab, new_cap);
+            if (!tmp) {
+                perror("realloc strtab");
+                free(line);
+                free(strtab);
+                free(syms);
+                fclose(in);
+                fclose(out);
+                return 1;
+            }
+            strtab = tmp;
+            strtab_cap = new_cap;
+        }
+
+        if (sc == syms_cap) {
+            size_t new_cap = syms_cap ? syms_cap * 2 : 4096;
+            struct ksym *tmp = realloc(syms, new_cap * sizeof(*syms));
+            if (!tmp) {
+                perror("realloc syms");
+                free(line);
+                free(strtab);
+                free(syms);
+                fclose(in);
+                fclose(out);
+                return 1;
+            }
+            syms = tmp;
+            syms_cap = new_cap;
+        }
+
+        syms[sc].addr = addr;
+        syms[sc].name_off = (uint32_t)so;
+        memcpy(&strtab[so], name, name_len);
+        so += name_len;
         sc++;
     }
 
-    fwrite(&sc, sizeof(sc), 1, out);
-    fwrite(syms, sizeof(struct ksym), sc, out);
-    fwrite(strtab, so, 1, out);
+    if (fwrite(&sc, sizeof(sc), 1, out) != 1 ||
+        (sc && fwrite(syms, sizeof(struct ksym), sc, out) != sc) ||
+        fwrite(strtab, 1, so, out) != so) {
+        perror("fwrite");
+        free(line);
+        free(strtab);
+        free(syms);
+        fclose(in);
+        fclose(out);
+        return 1;
+    }
 
+    free(line);
+    free(strtab);
+    free(syms);
+    fclose(in);
+    fclose(out);
     return 0;
 }

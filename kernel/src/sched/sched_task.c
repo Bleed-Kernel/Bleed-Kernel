@@ -85,6 +85,22 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
 
     uint64_t pid = alloc_pid();
     if (pid > 0) task->id = pid;
+    
+    // SID is basically future facing semantics, i do intend on using it
+    task_t *parent = get_current_task();
+    if (parent && parent->id != 0) {
+        task->ppid = parent->id;
+        task->pgid = parent->pgid ? parent->pgid : parent->id;
+        task->sid = parent->sid ? parent->sid : parent->id;
+    } else if (parent) {
+        task->ppid = parent->id;
+        task->pgid = task->id;
+        task->sid = task->id;
+    } else {
+        task->ppid = 0;
+        task->pgid = task->id;
+        task->sid = task->id; 
+    }
 
     strcpy(task->name, task_name);
     task->state = TASK_READY;

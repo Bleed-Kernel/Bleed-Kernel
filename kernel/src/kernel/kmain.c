@@ -127,7 +127,11 @@ void kmain() {
     vfs_mount_root();
     initrd_load();
     psf_init("initrd/fonts/ttyfont.psf");
-    stack_trace_load_symbols("initrd/etc/kernel.sym");
+    if (stack_trace_load_symbols("initrd/etc/kernel.sym") < 0) {
+        kprintf(LOG_WARN "Failed to load kernel symbols from initrd/etc/kernel.sym\n");
+    } else {
+        kprintf(LOG_OK "Kernel symbols loaded from initrd/etc/kernel.sym\n");
+    }
     reinit_paging();
     acpi_init();
     

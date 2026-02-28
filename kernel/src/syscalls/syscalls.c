@@ -23,7 +23,7 @@ enum {
     SYS_REBOOT,
     SYS_EXIT,
     SYS_WAITPID,
-    SYS_TKILL,
+    SYS_KILL,
     SYS_MEMINFO,
     SYS_TIME,
     SYS_CHDIR,
@@ -36,8 +36,6 @@ enum {
     SYS_TASKINFO,
     SYS_MAPFB,
     SYS_SEEK,
-    SYS_FEMTOSECONDS,
-    SYS_KILL,
     SYS_SIGACTION,
     SYS_SIGPROCMASK,
     SYS_SIGRETURN,
@@ -58,7 +56,7 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_REBOOT, sys_reboot),
     SYSCALL(SYS_EXIT, sys_exit),
     SYSCALL(SYS_WAITPID, sys_waitpid),
-    SYSCALL(SYS_TKILL, sys_tkill),
+    SYSCALL(SYS_KILL, sys_kill),
     SYSCALL(SYS_MEMINFO, sys_meminfo),
     SYSCALL(SYS_TIME, sys_time),
     SYSCALL(SYS_CHDIR, sys_chdir),
@@ -100,8 +98,11 @@ uint64_t syscall_dispatch(cpu_context_t *cpu_ctx){
     if (current && (cpu_ctx->cs & 0x3) == 0x3) {
         if (sysno == SYS_SIGRETURN) {
             long sigreturn_rc = signal_handle_sigreturn(current, cpu_ctx);
-            if (sigreturn_rc < 0)
+            if (sigreturn_rc < 0) {
                 cpu_ctx->rax = (uint64_t)sigreturn_rc;
+            } else {
+                signal_deliver_pending(current, cpu_ctx);
+            }
         } else {
             signal_deliver_pending(current, cpu_ctx);
         }

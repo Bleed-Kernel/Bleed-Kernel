@@ -3,6 +3,7 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <console/console.h>
 #include <drivers/framebuffer/framebuffer_console.h>
+#include <mm/spinlock.h>
 
 /// @brief evaluate c and track its ansii state
 /// @param c target
@@ -73,7 +74,9 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
         return;
     }
 
+    unsigned long irq = irq_push();
     spinlock_acquire(framebuffer_lock);
     framebuffer_put_char(fb, c);
     spinlock_release(framebuffer_lock);
+    irq_restore(irq);
 }

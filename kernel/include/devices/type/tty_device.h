@@ -40,6 +40,7 @@ typedef struct {
 
 typedef struct tty{
     INode_t device;
+    spinlock_t in_lock;
 
     char inbuffer[TTY_BUFFER_SZ];
     char outbuffer[TTY_BUFFER_SZ];

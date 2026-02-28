@@ -118,6 +118,17 @@ extern void* ke_exception_handler(void *frame) {
         __builtin_unreachable();
     }
 
+    static volatile int panic_active = 0;
+    if (__atomic_exchange_n(&panic_active, 1, __ATOMIC_ACQ_REL) != 0) {
+        serial_write("\n[NESTED PANIC] Vec:");
+        serial_write_hex(f->vector);
+        serial_write(" RIP:");
+        serial_write_hex(f->rip);
+        serial_write("\nSystem halted.\n");
+        asm volatile ("cli");
+        for (;;) { __asm__ volatile ("hlt"); }
+    }
+
     kprintf("fault!"); // at the moment clearing the screen while the screen is empty causes ANOTHER panic
     kprintf("\x1b[J");
 

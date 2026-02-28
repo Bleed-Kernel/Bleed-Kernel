@@ -82,6 +82,9 @@ void sched_bootstrap(void *rsp) {
     memset(kernel_task, 0, sizeof(task_t));
 
     kernel_task->id                 = 0;
+    kernel_task->ppid               = 0;
+    kernel_task->pgid               = 0;
+    kernel_task->sid                = 0;    // future facing
     kernel_task->state              = TASK_RUNNING;
     kernel_task->quantum_remaining  = QUANTUM;
     kernel_task->context            = (cpu_context_t *)rsp;

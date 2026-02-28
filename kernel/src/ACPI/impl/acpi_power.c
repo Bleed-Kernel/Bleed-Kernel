@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include <mm/paging.h>
 #include <stdio.h>
 #include <panic.h>
@@ -10,6 +11,8 @@
 #include <mm/pmm.h>
 #include <cpu/control_registers.h>
 #include "../acpi_priv.h"
+
+#define FADT_FLAG_RESET_REG_SUP (1u << 10)
 
 void acpi_poweroff_fallback(){
     // ideally we never get here, but if we do so be it
@@ -101,48 +104,71 @@ void acpi_shutdown(void) {
 
 __attribute__((noreturn))
 void acpi_reboot(void) {
-    asm volatile ("cli");
-    kprintf(
-        "%sACPI Reboot attempted: Reset Register Address: %p, Reset Value: %u\nOffsets:\n\treset_reg: %ld\n\treset_value: %ld\n",
-        LOG_INFO,
-        (void *)fadt->reset_reg.address,
-        fadt->reset_value,
-        offsetof(struct acpi_fadt, reset_reg),
-        offsetof(struct acpi_fadt, reset_value)
-    );
+    uint64_t reset_address = 0;
+    uint8_t reset_value = 0;
+    uint8_t reset_space = 0xFF;
+    bool acpi_reset_valid = false;
 
     if (!fadt)
         ke_panic("ACPI FADT not present");
 
-    if (fadt->reset_reg.address == 0)
-        ke_panic("ACPI reset register not present");
+    // harden ACPI reset so we only try to perform one if its valid
+    size_t reset_reg_end = offsetof(struct acpi_fadt, reset_reg) + sizeof(fadt->reset_reg);
+    size_t reset_value_end = offsetof(struct acpi_fadt, reset_value) + sizeof(fadt->reset_value);
+    bool has_reset_fields = (fadt->header.length >= reset_reg_end) && (fadt->header.length >= reset_value_end);
+    bool reset_flag_set = (fadt->flags & FADT_FLAG_RESET_REG_SUP) != 0;
 
-    if (fadt->reset_reg.address <= 0xFFFF) {
-        outb((uint16_t)fadt->reset_reg.address, fadt->reset_value);
-    } else {
-        paddr_t phys_page = fadt->reset_reg.address & ~(PAGE_SIZE_4K - 1);
-        size_t offset = fadt->reset_reg.address & (PAGE_SIZE_4K - 1);
+    if (has_reset_fields) {
+        reset_address = fadt->reset_reg.address;
+        reset_value = fadt->reset_value;
+        reset_space = fadt->reset_reg.address_space_id;
 
-        void *vpage = NULL;
-        paging_alloc_empty_frame(&vpage);
-        if (!vpage)
-            ke_panic("Failed to allocate virtual page for ACPI reset MMIO");
-
-        paging_map_page(read_cr3(), phys_page, (paddr_t)vpage, PAGE_KERNEL_RW);
-
-        volatile uint8_t *reset_mmio = (volatile uint8_t *)((uintptr_t)vpage + offset);
-        *reset_mmio = fadt->reset_value;
+        if (reset_flag_set && reset_address != 0 && (reset_space == 0 || reset_space == 1))
+            acpi_reset_valid = true;
     }
 
-
-    serial_printf("%sACPI Power Control Failed to initiate shutdown, despite this all services are stopped", LOG_ERROR);
-    kprintf("\n");
-
-    serial_printf(
-        RESET "ACPI Reboot attempted: Reset Register Address: %p, Reset Value: %u\n",
-        (void *)fadt->reset_reg.address,
-        fadt->reset_value
+    asm volatile ("cli");
+    kprintf(
+        "%sACPI reboot: fadt_len=%u reset_supported=%u reset_reg_present=%u reset_addr_space=%u reset_addr=%p reset_value=%u\n",
+        LOG_INFO,
+        fadt->header.length,
+        (unsigned)reset_flag_set,
+        (unsigned)has_reset_fields,
+        (unsigned)reset_space,
+        (void *)reset_address,
+        reset_value
     );
+
+    if (acpi_reset_valid) {
+        if (reset_space == 1) {
+            outb((uint16_t)reset_address, reset_value);
+        } else {
+            paddr_t phys_page = reset_address & ~(PAGE_SIZE_4K - 1);
+            size_t offset = reset_address & (PAGE_SIZE_4K - 1);
+
+            void *vpage = NULL;
+            paging_alloc_empty_frame(&vpage);
+            if (!vpage)
+                ke_panic("Failed to allocate virtual page for ACPI reset MMIO");
+
+            paging_map_page(read_cr3(), phys_page, (paddr_t)vpage, PAGE_KERNEL_RW);
+
+            volatile uint8_t *reset_mmio = (volatile uint8_t *)((uintptr_t)vpage + offset);
+            *reset_mmio = reset_value;
+        }
+    }
+
+    outb(0xCF9, 0x02);
+    outb(0xCF9, 0x06);
+
+    for (uint32_t i = 0; i < 100000; i++) {
+        if ((inb(0x64) & 0x02) == 0)
+            break;
+    }
+    outb(0x64, 0xFE);
+
+    serial_printf("%sACPI reboot failed to reset hardware; entering halted state", LOG_ERROR);
+    kprintf("\n");
 
     acpi_poweroff_fallback();
 

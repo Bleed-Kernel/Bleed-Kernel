@@ -18,30 +18,56 @@ struct ksymtab{
 };
 
 static struct ksymtab kernel_symbols;
+static void *kernel_symbols_blob = NULL;
+static size_t kernel_symbols_blob_size = 0;
 
 int stack_trace_load_symbols(const char *path){
     INode_t *file = NULL;
     path_t filepath = vfs_path_from_abs(path);
-    vfs_lookup(&filepath, &file);
-
-    if (!file)
+    if (vfs_lookup(&filepath, &file) < 0 || !file)
         return -1;
-    
-    void *buf = kmalloc(vfs_filesize(file));
+
+    size_t sz = vfs_filesize(file);
+    if (sz < sizeof(size_t)) {
+        vfs_drop(file);
+        return -1;
+    }
+
+    void *buf = kmalloc(sz);
     if (!buf)
         return -1;
 
-    if (inode_read(file, buf, vfs_filesize(file), 0) != (long)vfs_filesize(file))
+    if (inode_read(file, buf, sz, 0) != (long)sz) {
+        vfs_drop(file);
+        kfree(buf, sz);
         return -1;
-    
+    }
+    vfs_drop(file);
+
     uint8_t *p = buf;
     kernel_symbols.count = *(size_t*)p;
     p += sizeof(size_t);
 
+    if (kernel_symbols.count > (sz / sizeof(struct ksym))) {
+        kfree(buf, sz);
+        return -1;
+    }
+
+    size_t syms_bytes = sizeof(struct ksym) * kernel_symbols.count;
+    if (sizeof(size_t) + syms_bytes > sz) {
+        kfree(buf, sz);
+        return -1;
+    }
+
+    if (kernel_symbols_blob && kernel_symbols_blob_size)
+        kfree(kernel_symbols_blob, kernel_symbols_blob_size);
+
     kernel_symbols.syms = (struct ksym *)p;
-    p += sizeof(struct ksym) * kernel_symbols.count;
+    p += syms_bytes;
 
     kernel_symbols.strtab = (const char *)p;
+    kernel_symbols_blob = buf;
+    kernel_symbols_blob_size = sz;
 
     return 0;
 }
@@ -70,6 +96,7 @@ void stack_trace_print(uint64_t *rbp) {
         if ((uint64_t)rbp < 0x1000 || ((uint64_t)rbp & 0xF)) break;
 
         SMAP_ALLOW{
+            uint64_t *next_rbp = (uint64_t *)rbp[0];
             uint64_t rip = rbp[1];
             if (!rip) break;
             uint64_t sym_addr = 0;
@@ -86,8 +113,11 @@ void stack_trace_print(uint64_t *rbp) {
                     GRAY_FG, RESET, (void *)rip,
                     ORANGE_FG, RESET);
             }
-            
-            rbp = (uint64_t *)rbp[0];
+
+            // Stop on corrupted/cyclic frame pointers to avoid repeated spam.
+            if (!next_rbp || next_rbp <= rbp || ((uint64_t)next_rbp & 0xF))
+                break;
+            rbp = next_rbp;
         }
     }
 }

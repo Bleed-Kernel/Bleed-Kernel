@@ -15,6 +15,9 @@ uint64_t sys_taskinfo(uint64_t pid, uint64_t user_info_ptr) {
 
     user_task_info_t info;
     info.id = task->id;
+    info.ppid = task->ppid;
+    info.pgid = task->pgid;
+    info.sid = task->sid;
     info.state = task->state;
     info.quantum_remaining = task->quantum_remaining;
     info.privilege_level = task->task_privilege;

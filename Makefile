@@ -4,7 +4,7 @@ IMAGE_NAME := bleed-kernel
 OBJDIR := bin/obj
 KERNEL_BIN := bin/bleed-kernel
 OVMF_FW := edk2-ovmf/OVMF-pure-efi.fd
-MEMSZ := 2G
+MEMSZ := 3G
 PROC_VERSION_FILE := initrd/proc/version
 BUILD_GIT_HASH := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_GIT_COUNT := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
@@ -13,6 +13,7 @@ BUILD_VERSION := r$(BUILD_GIT_COUNT)-g$(BUILD_GIT_HASH)$(BUILD_GIT_DIRTY)
 
 CC := cc
 LD := ld
+NM := nm
 
 CFLAGS := -g -O2 -Wall -Werror -Wextra -std=gnu11 \
           -nostdinc -ffreestanding -fno-stack-protector \
@@ -34,6 +35,10 @@ KLIBC_OBJ := $(patsubst %.c, $(OBJDIR)/%.o, $(shell find klibc -name '*.c')) \
 OBJ := $(KERNEL_OBJ) $(KLIBC_OBJ)
 DEPS := $(OBJ:.o=.d)
 -include $(DEPS)
+
+MK_SYMTAB := bin/tools/mksymtab
+KERNEL_NM := bin/kernel.nm
+KERNEL_SYM := initrd/etc/kernel.sym
 
 USER_REPOS := \
     "https://codeberg.org/Bleed-Kernel/Verdict-Shell verdict" \
@@ -72,6 +77,18 @@ $(KERNEL_BIN): $(OBJ)
 	@mkdir -p $(dir $@)
 	$(LD) $(LDFLAGS) $(OBJ) -o $@
 
+$(MK_SYMTAB): tools/mksymtab.c
+	@mkdir -p $(dir $@)
+	$(CC) -O2 -Wall -Wextra -std=gnu11 $< -o $@
+
+$(KERNEL_NM): $(KERNEL_BIN)
+	@mkdir -p $(dir $@)
+	$(NM) -n $(KERNEL_BIN) > $@
+
+$(KERNEL_SYM): $(KERNEL_NM) $(MK_SYMTAB)
+	@mkdir -p $(dir $@)
+	$(MK_SYMTAB) $(KERNEL_NM) $@
+
 limine/limine:
 	rm -rf limine
 	git clone https://codeberg.org/Limine/Limine.git limine --branch v10.5.0-binary --depth 1
@@ -105,7 +122,7 @@ userprogs:
 	done
 
 .PHONY: initrd
-initrd: $(KERNEL_BIN) $(PROC_VERSION_FILE) userprogs
+initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs
 	@mkdir -p initrd
 	tar -cf initrd/initrd.tar initrd/*/* initrd/*.*
 
@@ -157,6 +174,7 @@ run-uefi: $(IMAGE_NAME).iso
 clean:
 	rm -rf bin $(IMAGE_NAME).iso iso_root
 	rm -f $(PROC_VERSION_FILE)
+	rm -f $(KERNEL_SYM)
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete
 	find initrd -name '*.tar' -delete

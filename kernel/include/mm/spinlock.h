@@ -10,6 +10,7 @@ static inline unsigned long irq_push(void){
     asm volatile(
         "pushfq\n\t"
         "pop %0\n\t"
+        "cli\n\t"
         : "=r"(flags)
         :
         : "memory"

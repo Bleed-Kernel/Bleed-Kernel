@@ -8,6 +8,7 @@
 #include <mm/kalloc.h>
 #include <drivers/serial/serial.h>
 #include <sched/scheduler.h>
+#include <sched/signal.h>
 #include <user/user_file.h>
 #include <user/errno.h>
 #include <mm/spinlock.h>
@@ -343,6 +344,10 @@ long vfs_read(int fd, void *buf, size_t count) {
     }
 
     for (;;) {
+        task_t *current = get_current_task();
+        if (signal_should_interrupt(current))
+            return -EINTR;
+
         long r = inode_read(f->inode, buf, count, f->offset);
 
         if (r > 0) {
@@ -357,8 +362,7 @@ long vfs_read(int fd, void *buf, size_t count) {
         if (is_size_finite)
             return 0;
 
-        task_t *current = get_current_task();
-        if (current && (current->sig_pending & ~current->sig_blocked))
+        if (signal_should_interrupt(current))
             return -EINTR;
 
         sched_yield();

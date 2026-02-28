@@ -11,6 +11,8 @@
 #include <user/errno.h>
 #include <devices/type/tty_device.h>
 #include <mm/smap.h>
+#include <sched/signal.h>
+#include <sched/scheduler.h>
 
 static kbd_device_t *keyboard_device = NULL;
 
@@ -18,11 +20,36 @@ static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     (void)offset;
     kbd_device_t *kbd = inode->internal_data;
     if (!kbd) return -1;
+    // ensure only the right task gets the int
+    task_t *current = get_current_task();
+    if (signal_should_interrupt(current))
+        return -EINTR;
 
+    unsigned long irq = irq_push();
     spinlock_acquire(&kbd->lock);
+
+    if (current && current->task_privilege == PRIVILEGE_USER) {
+        task_t *owner = NULL;
+        if (kbd->owner_pid != 0)
+            owner = sched_get_task(kbd->owner_pid);
+
+        if (!owner ||
+            owner->state == TASK_DEAD ||
+            owner->state == TASK_FREE ||
+            owner->state == TASK_ZOMBIE ||
+            owner->state == TASK_BLOCKED) {
+            kbd->owner_pid = current->id;
+            kbd->owner_pgid = current->pgid ? current->pgid : current->id;
+        } else if (kbd->owner_pid != current->id) {
+            spinlock_release(&kbd->lock);
+            irq_restore(irq);
+            return -EAGAIN;
+        }
+    }
 
     if (kbd->head == kbd->tail) {
         spinlock_release(&kbd->lock);
+        irq_restore(irq);
         if (kbd->flags & TTY_NONBLOCK)
             return -EAGAIN;
         return 0;
@@ -30,6 +57,12 @@ static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
 
     size_t bytes_read = 0;
     while (bytes_read + sizeof(keyboard_event_t) <= len && kbd->tail != kbd->head) {
+        if (signal_should_interrupt(current)) {
+            spinlock_release(&kbd->lock);
+            irq_restore(irq);
+            return bytes_read ? (long)bytes_read : -EINTR;
+        }
+
         keyboard_event_t *event = &kbd->buffer[kbd->tail];
         memcpy((uint8_t*)buf + bytes_read, event, sizeof(keyboard_event_t));
         
@@ -38,6 +71,7 @@ static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     }
 
     spinlock_release(&kbd->lock);
+    irq_restore(irq);
     return bytes_read;
 }
 
@@ -70,6 +104,9 @@ static struct INodeOps kbd_inode_ops = {
 static void kbd_listener(const keyboard_event_t *ev) {
     if (!keyboard_device) return;
 
+    unsigned long irq = irq_push();
+    spinlock_acquire(&keyboard_device->lock);
+
     size_t head = keyboard_device->head;
     size_t next = (head + 1) % KBD_BUFFER_SIZE;
 
@@ -80,6 +117,8 @@ static void kbd_listener(const keyboard_event_t *ev) {
     keyboard_device->buffer[head] = *ev;
     keyboard_device->head = next;
 
+    spinlock_release(&keyboard_device->lock);
+    irq_restore(irq);
 }
 
 void kbd_device_init(void) {

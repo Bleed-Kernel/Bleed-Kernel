@@ -23,12 +23,15 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
     (void)offset;
     tty_t *tty = dev->internal_data;
     char *user_buf = (char *)buf;
+    unsigned long irq = irq_push();
+    spinlock_acquire(&tty->in_lock);
 
     if (tty->flags & TTY_NONBLOCK) {
         if (tty->in_head == tty->in_tail) {
+            spinlock_release(&tty->in_lock);
+            irq_restore(irq);
             return -EAGAIN;
         }
-        return len;
     }
 
     if (tty->flags & TTY_CANNONICAL) {
@@ -41,7 +44,11 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
             }
             i = (i + 1) % TTY_BUFFER_SZ;
         }
-        if (!has_line) return 0;
+        if (!has_line) {
+            spinlock_release(&tty->in_lock);
+            irq_restore(irq);
+            return 0;
+        }
     }
 
     size_t bytes_read = 0;
@@ -55,6 +62,8 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
         }
     }
 
+    spinlock_release(&tty->in_lock);
+    irq_restore(irq);
     return bytes_read;
 }
 
@@ -110,17 +119,19 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
     return -1;
 }
 
+typedef struct tty_sig_pick_ctx {
+    task_t *picked;
+} tty_sig_pick_ctx_t;
+
 static void tty_pick_sigint_target(task_t *candidate, void *userdata) {
-    if (!candidate || !userdata)
+    tty_sig_pick_ctx_t *ctx = (tty_sig_pick_ctx_t *)userdata;
+    if (!candidate || !ctx || ctx->picked)
         return;
     if (candidate->task_privilege != PRIVILEGE_USER)
         return;
-    if (candidate->state == TASK_DEAD || candidate->state == TASK_FREE)
+    if (candidate->state == TASK_DEAD || candidate->state == TASK_FREE || candidate->state == TASK_ZOMBIE)
         return;
-
-    task_t *ctx = (task_t *)userdata;
-    if (!ctx)
-        ctx = candidate;
+    ctx->picked = candidate;
 }
 
 static void tty_input_listener(const keyboard_event_t *ev) {
@@ -136,9 +147,9 @@ static void tty_input_listener(const keyboard_event_t *ev) {
     if ((ev->keymod & KEYMOD_CTRL) && (c == 'c' || c == 'C')) {
         task_t *task = get_current_task();
         if (!task || task->task_privilege != PRIVILEGE_USER) {
-            cpu_context_t ctx = {0};
+            tty_sig_pick_ctx_t ctx = {0};
             itterate_each_task(tty_pick_sigint_target, &ctx);
-            task->context = &ctx;
+            task = ctx.picked;
         }
 
         if (task)
@@ -202,6 +213,8 @@ void fb_clear(fb_console_t *fb) {
 
 void tty_process_input(tty_t *tty, char c) {
     if (c == '\r') c = '\n';
+    unsigned long irq = irq_push();
+    spinlock_acquire(&tty->in_lock);
 
     if (c == '\b' || c == 127) {
         if (tty->in_head != tty->in_tail) {
@@ -212,11 +225,17 @@ void tty_process_input(tty_t *tty, char c) {
                 tty->ops->putchar(tty, '\b');
             }
         }
+        spinlock_release(&tty->in_lock);
+        irq_restore(irq);
         return;
     }
 
     size_t next = (tty->in_head + 1) % TTY_BUFFER_SZ;
-    if (next == tty->in_tail) return; 
+    if (next == tty->in_tail) {
+        spinlock_release(&tty->in_lock);
+        irq_restore(irq);
+        return;
+    }
 
     tty->inbuffer[tty->in_head] = c;
     tty->in_head = next;
@@ -224,16 +243,20 @@ void tty_process_input(tty_t *tty, char c) {
     if (tty->flags & TTY_ECHO) {
         tty->ops->putchar(tty, c);
     }
+
+    spinlock_release(&tty->in_lock);
+    irq_restore(irq);
 }
 
 void tty_init(tty_t *tty, void *backend, spinlock_t lock, uint32_t flags) {
+    (void)lock;
     memset(tty, 0, sizeof(*tty));
     tty->flags = flags;
     tty->backend = backend;
     tty->device.ops = &tty_inode_ops;
     tty->ops = &tty_ops;
     tty->device.internal_data = tty;
-    spinlock_init(&lock);
+    spinlock_init(&tty->in_lock);
     keyboard_register_listener(tty_input_listener);
 }
 

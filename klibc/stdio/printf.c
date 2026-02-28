@@ -12,7 +12,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <lib/nanoprintf.h>
-#include <mm/kalloc.h>
 #include <drivers/serial/serial.h>
 #include <console/console.h>
 #include <devices/type/tty_device.h>
@@ -33,33 +32,14 @@ int snprintf(char *buf, size_t size, const char *fmt, ...) {
 /// @brief formatted print to tty
 /// @param s string
 void kprintf(const char *fmt, ...) {
-    char *buf = NULL;
-    size_t size = 256;
-
-    while (1) {
-        buf = kmalloc(size);
-        if (!buf) return;
-
-        va_list args;
-        va_start(args, fmt);
-        int written = npf_vsnprintf(buf, size, fmt, args);
-        va_end(args);
-
-        if (written < 0) {
-            kfree(buf, size);
-            return;
-        }
-
-        if ((size_t)written < size) {
-            // exact fit, done
-            size = (size_t)written;
-            break;
-        }
-
-        // buffer too small, free and grow
-        kfree(buf, size);
-        size = (size_t)written + 1;
-    }
+    char buf[2048];
+    va_list args;
+    va_start(args, fmt);
+    int written = npf_vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    if (written < 0)
+        return;
+    buf[sizeof(buf) - 1] = '\0';
 
     // Output to tty framebuffer if available
     INode_t *dev = device_get_by_name("tty0");
@@ -76,40 +56,23 @@ void kprintf(const char *fmt, ...) {
 
     // Also write to serial
     serial_printf("%s", buf);
-
-    kfree(buf, size);
 }
 
 void kprintf_pos(uint64_t x, uint64_t y, const char *fmt, ...) {
-    char *buf = NULL;
-    size_t size = 256;
-
-    while (1) {
-        buf = kmalloc(size);
-        if (!buf) return;
-
-        va_list args;
-        va_start(args, fmt);
-        int written = npf_vsnprintf(buf, size, fmt, args);
-        va_end(args);
-
-        if (written < 0) {
-            kfree(buf, size);
-            return;
-        }
-
-        if ((size_t)written < size)
-            break;
-
-        kfree(buf, size);
-        size <<= 1;
-    }
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    int written = npf_vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    if (written < 0)
+        return;
+    buf[sizeof(buf) - 1] = '\0';
 
     INode_t *dev = device_get_by_name("tty0");
-    if (!dev) goto out;
+    if (!dev) return;
 
     tty_t *tty = dev->internal_data;
-    if (!tty || !tty->backend) goto out;
+    if (!tty || !tty->backend) return;
 
     tty_fb_backend_t *b = tty->backend;
     fb_console_t *fb = &b->fb;
@@ -118,7 +81,7 @@ void kprintf_pos(uint64_t x, uint64_t y, const char *fmt, ...) {
 
     uint64_t cols = fb->width / fb->font->width;
     if (x >= cols)
-        goto out;
+        return;
         
     /* save cursor */
     uint64_t old_x = fb->cursor_x;
@@ -136,10 +99,5 @@ void kprintf_pos(uint64_t x, uint64_t y, const char *fmt, ...) {
 
     fb->cursor_x = old_x;
     fb->cursor_y = old_y;
-
-out:
-    kfree(buf, size);
 }
-
-
 

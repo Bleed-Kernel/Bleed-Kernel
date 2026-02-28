@@ -25,7 +25,7 @@ long sys_waitpid(uint64_t pid);
 void sys_shutdown(void);
 void sys_reboot(void);
 
-long sys_tkill(long pid, signal_number_t signal);
+long sys_kill(long pid, signal_number_t signal);
 long sys_sigaction(int sig, const sigaction_t *user_act, sigaction_t *user_old);
 long sys_sigprocmask(int how, const sigset_t *user_set, sigset_t *user_old);
 long sys_sigreturn(void);

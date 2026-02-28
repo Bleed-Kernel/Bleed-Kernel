@@ -23,13 +23,20 @@ static inline sigset_t sig_bit(int sig) {
     return (sigset_t)1ULL << (sig - 1);
 }
 
+static inline sigset_t valid_sig_mask(void) {
+    return ((sigset_t)1ULL << (NSIG - 1)) - 1ULL;
+}
+
 static int signal_default_ignored(int sig) {
     return sig == SIGCHLD || sig == SIGWINCH || sig == SIGCONT;
 }
 
+static int signal_default_stop(int sig) {
+    return sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU;
+}
+
 static int signal_default_terminate(int sig) {
-    (void)sig;
-    return 1;
+    return !signal_default_ignored(sig) && !signal_default_stop(sig);
 }
 
 int signal_send(task_t *task, int sig) {
@@ -38,8 +45,19 @@ int signal_send(task_t *task, int sig) {
     if (!valid_signal(sig))
         return -EINVAL;
 
+    if (sig == SIGCONT) {
+        task->sig_pending &= ~sig_bit(SIGSTOP);
+        task->sig_pending &= ~sig_bit(SIGTSTP);
+        task->sig_pending &= ~sig_bit(SIGTTIN);
+        task->sig_pending &= ~sig_bit(SIGTTOU);
+        if (task->state == TASK_STOPPED)
+            task->state = TASK_READY;
+    }
+    if (signal_default_stop(sig))
+        task->sig_pending &= ~sig_bit(SIGCONT);
+
     task->sig_pending |= sig_bit(sig);
-    if (task->state == TASK_BLOCKED)
+    if (task->state == TASK_BLOCKED || task->state == TASK_STOPPED || sig == SIGKILL)
         task->state = TASK_READY;
     return 0;
 }
@@ -102,6 +120,7 @@ int signal_set_mask(task_t *task, int how, const sigset_t *set, sigset_t *old) {
             return -EINVAL;
     }
 
+    new_mask &= valid_sig_mask();
     new_mask &= ~sig_bit(SIGKILL);
     new_mask &= ~sig_bit(SIGSTOP);
     task->sig_blocked = new_mask;
@@ -187,6 +206,12 @@ void signal_deliver_pending(task_t *task, cpu_context_t *ctx) {
         if (handler == SIG_IGN || (handler == SIG_DFL && signal_default_ignored(sig)))
             return;
 
+        if (handler == SIG_DFL && signal_default_stop(sig)) {
+            task->state = TASK_STOPPED;
+            sched_yield();
+            return;
+        }
+
         if (handler == SIG_DFL && signal_default_terminate(sig)) {
             task->exit_signal = sig;
             task->exit_code = 128 + sig;
@@ -200,4 +225,28 @@ void signal_deliver_pending(task_t *task, cpu_context_t *ctx) {
         }
         return;
     }
+}
+
+int signal_should_interrupt(task_t *task) {
+    if (!task)
+        return 0;
+
+    sigset_t ready = task->sig_pending & ~task->sig_blocked;
+    if (!ready)
+        return 0;
+
+    for (int sig = 1; sig < NSIG; sig++) {
+        sigset_t bit = sig_bit(sig);
+        if (!(ready & bit))
+            continue;
+
+        uintptr_t handler = task->sig_handlers[sig];
+        if (handler == SIG_IGN)
+            continue;
+        if (handler == SIG_DFL && signal_default_ignored(sig))
+            continue;
+        return 1;
+    }
+
+    return 0;
 }

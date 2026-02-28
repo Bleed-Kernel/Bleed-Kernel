@@ -5,6 +5,7 @@
 #include <mm/vmm.h>
 #include <mm/kalloc.h>
 #include <ansii.h>
+#include <sched/signal.h>
 
 __attribute__((noreturn))
 void exit(void) {
@@ -35,7 +36,19 @@ void exit(void) {
 
     current_task->wait_queue = NULL;
 
-    sched_mark_task_dead(current_task);
+    task_t *parent = NULL;
+    if (current_task->ppid > 0)
+        parent = sched_get_task(current_task->ppid);
+
+    if (parent && parent->task_privilege == PRIVILEGE_USER)
+        signal_send(parent, SIGCHLD);
+
+    if (!parent || parent->state == TASK_DEAD || parent->state == TASK_ZOMBIE || parent->state == TASK_FREE) {
+        sched_mark_task_dead(current_task);
+    } else {
+        current_task->state = TASK_ZOMBIE;
+    }
+
     sched_yield();
 
     serial_printf(

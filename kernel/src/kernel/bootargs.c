@@ -14,6 +14,7 @@ static inline int tolower(int c) {
 }
 
 // Fixed strcasecmp: ensures the final difference is based on the lowercase version
+// move this to libc?
 static int strcasecmp(const char* s1, const char* s2) {
     if (!s1 || !s2) return -1;
     const unsigned char *p1 = (const unsigned char *)s1;

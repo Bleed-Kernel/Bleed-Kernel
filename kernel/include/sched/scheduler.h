@@ -49,6 +49,8 @@ typedef enum {
     TASK_READY,
     TASK_RUNNING,
     TASK_BLOCKED,
+    TASK_STOPPED,
+    TASK_ZOMBIE,
     TASK_DEAD
 } task_state_t;
 
@@ -67,6 +69,9 @@ typedef enum {
 
 typedef struct task {
     uint64_t        id;
+    uint64_t        ppid;
+    uint64_t        pgid;
+    uint64_t        sid;
     char            name[128];
     task_state_t    state;
     cpu_context_t  *context;
@@ -85,6 +90,7 @@ typedef struct task {
 
     struct task     *wait_queue;
     struct task     *wait_next;
+    uint64_t        wait_target_pid;
 
     struct task     *next;
     struct task     *dead_next;

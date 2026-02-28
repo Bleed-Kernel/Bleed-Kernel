@@ -2,6 +2,7 @@
 #include <devices/type/mouse_device.h>
 #include <input/mouse_dispatch.h>
 #include <mm/kalloc.h>
+#include <mm/spinlock.h>
 #include <string.h>
 #include <user/errno.h>
 
@@ -13,10 +14,12 @@ static long mouse_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     if (!mouse)
         return -1;
 
+    unsigned long irq = irq_push();
     spinlock_acquire(&mouse->lock);
 
     if (mouse->head == mouse->tail) {
         spinlock_release(&mouse->lock);
+        irq_restore(irq);
         return -EAGAIN;
     }
 
@@ -30,6 +33,7 @@ static long mouse_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     }
 
     spinlock_release(&mouse->lock);
+    irq_restore(irq);
     return (long)bytes_read;
 }
 
@@ -41,6 +45,7 @@ static void mouse_listener(const mouse_event_t *ev) {
     if (!mouse_device)
         return;
 
+    unsigned long irq = irq_push();
     spinlock_acquire(&mouse_device->lock);
 
     size_t head = mouse_device->head;
@@ -53,6 +58,7 @@ static void mouse_listener(const mouse_event_t *ev) {
     mouse_device->head = next;
 
     spinlock_release(&mouse_device->lock);
+    irq_restore(irq);
 }
 
 void mouse_device_init(void) {
