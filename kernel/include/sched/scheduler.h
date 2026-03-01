@@ -82,6 +82,7 @@ typedef struct task {
     paddr_t         page_map;
     user_alloc_t    *alloc_list;
     user_heap_t     *heap;
+    fd_table_t      *fd_table;
 
     INode_t         *current_directory;
     task_privil_t   task_privilege;

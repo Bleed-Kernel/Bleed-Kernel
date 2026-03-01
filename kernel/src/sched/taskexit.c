@@ -25,6 +25,8 @@ void exit(void) {
         alloc = next;
     }
     current_task->alloc_list = NULL;
+    vfs_fd_table_drop(current_task->fd_table);
+    current_task->fd_table = NULL;
 
     while (w) {
         task_t *next = w->wait_next;

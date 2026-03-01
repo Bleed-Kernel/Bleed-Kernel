@@ -271,7 +271,11 @@ int tempfs_create(INode_t* parent, const char* name, size_t namelen, INode_t** r
     if (!file)
         return status_print_error(OUT_OF_MEMORY);
     tempfs_INode_t* file_int = file->internal_data;
-    if (namelen >= TEMPFS_MAX_NAME_LEN) return status_print_error(NAME_LIMITS);
+    if (namelen >= TEMPFS_MAX_NAME_LEN) {
+        tempfs_drop(file);
+        kfree(file, sizeof(*file));
+        return status_print_error(NAME_LIMITS);
+    }
     memcpy(file_int->name, name, namelen);
     file_int->name[namelen] = '\0';
 

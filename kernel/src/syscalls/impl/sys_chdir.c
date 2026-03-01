@@ -19,6 +19,13 @@ long sys_chdir(const char *user_path) {
 
     if (copy_from_user(caller, kbuf, user_path, PATH_MAX) != 0)
         return -EFAULT;
+    kbuf[PATH_MAX - 1] = '\0';
+
+    size_t plen = 0;
+    while (plen < PATH_MAX && kbuf[plen] != '\0')
+        plen++;
+    if (plen == PATH_MAX)
+        return -E2BIG;
 
     int r = vfs_chdir(kbuf);
     if (r == 0)

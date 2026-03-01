@@ -8,6 +8,7 @@
 #include <tss/tss.h>
 #include <string.h>
 #include <mm/spinlock.h>
+#include <fs/vfs.h>
 
 #include "priv_scheduler.h"
 
@@ -94,6 +95,9 @@ void sched_bootstrap(void *rsp) {
 
     strncpy(kernel_task->name, KERNEL_TASK_NAME, 128-1);
     kernel_task->page_map = kernel_page_map;
+    kernel_task->fd_table = vfs_get_kernel_table();
+    if (!kernel_task->fd_table)
+        ke_panic("Failed to allocate kernel fd table");
 
     current_task   = kernel_task;
     task_queue     = kernel_task;

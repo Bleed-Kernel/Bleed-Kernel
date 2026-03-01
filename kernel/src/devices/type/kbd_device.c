@@ -139,7 +139,12 @@ void kbd_device_init(void) {
 
     keyboard_device->device.type = INODE_DEVICE;
 
-    current_fd_table->fds[0] = kbfd;
+    fd_table_t *boot_fds = vfs_get_kernel_table();
+    if (boot_fds) {
+        boot_fds->fds[0] = kbfd;
+    } else {
+        kfree(kbfd, sizeof(*kbfd));
+    }
     device_register(&keyboard_device->device, "kbd0");
     keyboard_register_listener(kbd_listener);
 }

@@ -5,6 +5,7 @@
 #include <sched/scheduler.h>
 #include <panic.h>
 #include <stdio.h>
+#include <mm/spinlock.h>
 
 #include "priv_scheduler.h"
 
@@ -16,30 +17,47 @@ static void unlink_from_list(task_t **head, task_t *task) {
     if (!*head || !task)
         return;
 
-    if (*head == task && (*head)->next == *head) {
+    if ((*head)->next == *head && *head == task) {
         *head = NULL;
         return;
     }
 
-    task_t *prev = *head;
-    task_t *cur  = (*head)->next;
+    task_t *cur = *head;
+    task_t *prev = NULL;
 
-    while (cur != *head) {
-        if (cur == task) {
-            prev->next = cur->next;
-            return;
-        }
+    do {
+        if (cur == task)
+            break;
         prev = cur;
         cur  = cur->next;
+    } while (cur != *head);
+
+    if (cur != task)
+        return;
+
+    if (cur == *head) {
+        task_t *tail = *head;
+        while (tail->next != *head)
+            tail = tail->next;
+        *head = cur->next;
+        tail->next = *head;
+        return;
     }
 
-    if (*head == task)
-        *head = (*head)->next;
+    prev->next = cur->next;
 }
 
 void sched_mark_task_dead(task_t *task) {
     if (!task){
         kprintf(LOG_ERROR "Nothing Happend, This task does not exist\n");
+        return;
+    }
+
+    unsigned long flags = irq_push();
+    spinlock_acquire(&sched_lock);
+    if (task->state == TASK_DEAD) {
+        spinlock_release(&sched_lock);
+        irq_restore(flags);
         return;
     }
 
@@ -52,29 +70,60 @@ void sched_mark_task_dead(task_t *task) {
     if (!dead_task_head) {
         dead_task_head = task;
         dead_task_tail = task;
+        spinlock_release(&sched_lock);
+        irq_restore(flags);
+        vfs_drop(task->current_directory);
+        task->current_directory = NULL;
         return;
     }
 
     dead_task_tail->dead_next = task;
     dead_task_tail = task;
+    spinlock_release(&sched_lock);
+    irq_restore(flags);
 
     vfs_drop(task->current_directory);
+    task->current_directory = NULL;
 }
 
 void scheduler_reap(void) {
     for (;;) {
         int reaped = 0;
 
-        while (dead_task_head && reaped < 15) {
+        while (reaped < 15) {
+            unsigned long flags = irq_push();
+            spinlock_acquire(&sched_lock);
+
+            if (!dead_task_head) {
+                spinlock_release(&sched_lock);
+                irq_restore(flags);
+                break;
+            }
+
             task_t *task = dead_task_head;
-            if (!task) break;
+            if (!task) {
+                spinlock_release(&sched_lock);
+                irq_restore(flags);
+                break;
+            }
 
             dead_task_head = task->dead_next;
             if (!dead_task_head)
                 dead_task_tail = NULL;
 
-            if (task == current_task)
+            if (task == current_task) {
+                task->dead_next = NULL;
+                if (dead_task_tail) {
+                    dead_task_tail->dead_next = task;
+                    dead_task_tail = task;
+                } else {
+                    dead_task_head = task;
+                    dead_task_tail = task;
+                }
+                spinlock_release(&sched_lock);
+                irq_restore(flags);
                 continue;
+            }
 
             serial_printf("%sReaping Task %u\n", LOG_INFO, (unsigned int)task->id);
 
@@ -83,6 +132,13 @@ void scheduler_reap(void) {
             if (task_list_head)
                 unlink_from_list(&task_list_head, task);
 
+            uint64_t task_id = task->id;
+            if (task_id > 1 && task_id < MAX_PIDS)
+                pid_list[task_id] = 0;
+
+            spinlock_release(&sched_lock);
+            irq_restore(flags);
+
             if (task->kernel_stack)
                 kfree(task->kernel_stack, KERNEL_STACK_SIZE);
 
@@ -90,8 +146,6 @@ void scheduler_reap(void) {
             kfree(task, sizeof(task_t));
 
             reaped++;
-            if (task->id > 1 && task->id < MAX_PIDS)
-                pid_list[task->id] = 0;
         }
 
         sched_yield();

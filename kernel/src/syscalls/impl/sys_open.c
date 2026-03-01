@@ -20,6 +20,13 @@ int sys_open(char *path_str, int flags) {
 
     if (copy_from_user(caller, kpath, path_str, sizeof(kpath)) != 0)
         return -EFAULT;
+    kpath[sizeof(kpath) - 1] = '\0';
+
+    size_t plen = 0;
+    while (plen < sizeof(kpath) && kpath[plen] != '\0')
+        plen++;
+    if (plen == sizeof(kpath))
+        return -E2BIG;
 
     int fd = vfs_open(kpath, flags);
     if (fd >= 0)

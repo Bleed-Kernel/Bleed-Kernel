@@ -22,7 +22,6 @@
 #define MAX_FDS     256
 
 typedef struct fd_table fd_table_t;
-extern fd_table_t *current_fd_table;
 
 typedef struct INode INode_t;
 
@@ -125,6 +124,10 @@ int vfs_chdir(const char *path_str);
 int vfs_close(int fd);
 long vfs_seek(int fd, long offset, int whence);
 int vfs_ioctl(int fd, unsigned long request, void* arg);
+
+fd_table_t *vfs_get_kernel_table(void);
+fd_table_t *vfs_fd_table_clone(const fd_table_t *src);
+void vfs_fd_table_drop(fd_table_t *table);
 
 int inode_create(INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type);
 long inode_read(INode_t* inode, void* buf, size_t count, size_t offset);

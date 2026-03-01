@@ -16,9 +16,74 @@
 
 extern const filesystem tempfs;
 
-fd_table_t *current_fd_table = NULL;
+static fd_table_t *boot_fd_table = NULL;
 
 INode_t* vfs_root = NULL;
+
+static fd_table_t *vfs_fd_table_alloc(void) {
+    fd_table_t *table = kmalloc(sizeof(fd_table_t));
+    if (!table)
+        return NULL;
+    memset(table, 0, sizeof(fd_table_t));
+    
+    return table;
+}
+
+static fd_table_t *vfs_get_active_fd_table(void) {
+    task_t *task = get_current_task();
+    if (task && task->fd_table)
+        return task->fd_table;
+
+    return boot_fd_table;
+}
+
+fd_table_t *vfs_get_kernel_table(void) {
+    if (!boot_fd_table)
+        boot_fd_table = vfs_fd_table_alloc();
+    return boot_fd_table;
+}
+
+fd_table_t *vfs_fd_table_clone(const fd_table_t *src) {
+    if (!src)
+        return vfs_fd_table_alloc();
+
+    fd_table_t *dst = vfs_fd_table_alloc();
+    if (!dst)
+        return NULL;
+
+    for (int fd = 0; fd < MAX_FDS; fd++) {
+        file_t *f = src->fds[fd];
+        dst->fds[fd] = f;
+        if (f)
+            f->shared++;
+    }
+
+    return dst;
+}
+
+void vfs_fd_table_drop(fd_table_t *table) {
+    if (!table)
+        return;
+
+    for (int fd = 0; fd < MAX_FDS; fd++) {
+        file_t *f = table->fds[fd];
+        if (!f)
+            continue;
+
+        table->fds[fd] = NULL;
+
+        f->shared--;
+        if (f->shared <= 0) {
+            vfs_drop(f->inode);
+            kfree(f, sizeof(*f));
+        }
+    }
+
+    if (table == boot_fd_table)
+        boot_fd_table = NULL;
+
+    kfree(table, sizeof(*table));
+}
 
 INode_t* vfs_get_root(){
     if (vfs_root) return vfs_root;
@@ -36,11 +101,7 @@ int vfs_mount_root(){
     INode_t *devinode = NULL;
     vfs_create(&devpath, &devinode, INODE_DIRECTORY);
 
-    if (!current_fd_table) {
-        current_fd_table = kmalloc(sizeof(fd_table_t));
-        if (current_fd_table)
-            memset(current_fd_table, 0, sizeof(fd_table_t));
-    }
+    (void)vfs_get_kernel_table();
 
     return r;
 }
@@ -121,9 +182,11 @@ int vfs_create(const path_t* path, INode_t** out_result, inode_type node_type){
 }
 
 int vfs_ioctl(int fd, unsigned long request, void* arg) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table) return -1;
     if (fd < 0 || fd >= MAX_FDS) return -1;
     
-    file_t *file = current_fd_table->fds[fd];
+    file_t *file = fd_table->fds[fd];
     if (!file || !file->inode) return -1;
 
     INode_t *inode = file->inode;
@@ -246,7 +309,10 @@ int vfs_chdir(const char *path_str) {
 }
 
 int vfs_open(const char *path_str, int flags){
-    if (!current_fd_table) return status_print_error(OUT_OF_BOUNDS);
+    if (!path_str || path_str[0] == '\0')
+        return status_print_error(FILE_NOT_FOUND);
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table) return status_print_error(OUT_OF_BOUNDS);
 
     if (strncmp(path_str, "/dev/", 5) == 0) {
         const char *dev_name = path_str + 5;
@@ -259,13 +325,14 @@ int vfs_open(const char *path_str, int flags){
 
                 f->type = FD_TYPE_DEV;
                 f->inode = dev_inode;
+                f->inode->shared++;
                 f->offset = 0;
                 f->flags = flags & (O_MODE | O_APPEND | O_TRUNC);
                 f->shared = 1;
 
                 for (int fd = 0; fd < MAX_FDS; fd++) {
-                    if (!current_fd_table->fds[fd]) {
-                        current_fd_table->fds[fd] = f;
+                    if (!fd_table->fds[fd]) {
+                        fd_table->fds[fd] = f;
                         return fd;
                     }
                 }
@@ -301,8 +368,8 @@ int vfs_open(const char *path_str, int flags){
     f->shared = 1;
 
     for (int fd = 0; fd < MAX_FDS; fd++){
-        if (!current_fd_table->fds[fd]){
-            current_fd_table->fds[fd] = f;
+        if (!fd_table->fds[fd]){
+            fd_table->fds[fd] = f;
             return fd;
         }
     }
@@ -313,10 +380,11 @@ int vfs_open(const char *path_str, int flags){
 }
 
 long vfs_read(int fd, void *buf, size_t count) {
-    if (!current_fd_table || fd >= MAX_FDS)
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS)
         return -1;
 
-    file_t *f = current_fd_table->fds[fd];
+    file_t *f = fd_table->fds[fd];
     if (!f || !f->inode)
         return -2;
 
@@ -370,7 +438,11 @@ long vfs_read(int fd, void *buf, size_t count) {
 }
 
 long vfs_write(int fd, const void *buf, size_t count){
-    file_t *f = current_fd_table->fds[fd];
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS)
+        return -1;
+
+    file_t *f = fd_table->fds[fd];
     if (!f) return -1;
 
     int mode = f->flags & O_MODE;
@@ -383,14 +455,16 @@ long vfs_write(int fd, const void *buf, size_t count){
 }
 
 int vfs_close(int fd){
-    if (!current_fd_table || fd >= MAX_FDS) return status_print_error(FILE_NOT_FOUND);
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS) return status_print_error(FILE_NOT_FOUND);
 
-    file_t *f = current_fd_table->fds[fd];
+    file_t *f = fd_table->fds[fd];
     if (!f) return status_print_error(FILE_NOT_FOUND);
 
-    current_fd_table->fds[fd] = NULL;
+    fd_table->fds[fd] = NULL;
 
-    if (f->shared == 0){
+    f->shared--;
+    if (f->shared <= 0){
         vfs_drop(f->inode);
         kfree(f, sizeof(*f));
     }
@@ -399,10 +473,11 @@ int vfs_close(int fd){
 }
 
 long vfs_seek(int fd, long offset, int whence) {
-    if (!current_fd_table || fd < 0 || fd >= MAX_FDS)
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS)
         return status_print_error(FILE_NOT_FOUND);
 
-    file_t *f = current_fd_table->fds[fd];
+    file_t *f = fd_table->fds[fd];
     if (!f || !f->inode)
         return status_print_error(FILE_NOT_FOUND);
 

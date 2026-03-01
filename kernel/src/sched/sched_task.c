@@ -102,7 +102,10 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
         task->sid = task->id; 
     }
 
-    strcpy(task->name, task_name);
+    if (task_name) {
+        strncpy(task->name, task_name, sizeof(task->name) - 1);
+        task->name[sizeof(task->name) - 1] = '\0';
+    }
     task->state = TASK_READY;
     task->quantum_remaining = QUANTUM;
     task->page_map = cr3;
@@ -131,6 +134,10 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     FP_Init(task->fx_state);
 
     sched_init_task_heap(task);
+
+    task->fd_table = vfs_fd_table_clone(parent ? parent->fd_table : NULL);
+    if (!task->fd_table)
+        ke_panic("Failed to allocate task fd table");
 
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);

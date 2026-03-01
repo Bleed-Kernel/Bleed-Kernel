@@ -7,10 +7,13 @@
 #include <user/errno.h>
 
 uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
-    if (fd >= MAX_FDS || !current_fd_table)
+    task_t *caller = get_current_task();
+    if (!caller)
+        return (uint64_t)-ESRCH;
+    if (fd >= MAX_FDS || !caller->fd_table)
         return (uint64_t)-EBADF;
 
-    file_t *f = current_fd_table->fds[fd];
+    file_t *f = caller->fd_table->fds[fd];
     if (!f)
         return (uint64_t)-EBADF;
 
@@ -18,10 +21,6 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
         return 0;
     if (!user_buf)
         return (uint64_t)-EFAULT;
-
-    task_t *caller = get_current_task();
-    if (!caller)
-        return (uint64_t)-ESRCH;
 
     char kbuf[2048];
     uint64_t copied = 0;

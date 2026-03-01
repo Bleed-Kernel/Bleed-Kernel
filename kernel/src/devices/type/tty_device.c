@@ -275,7 +275,14 @@ void tty_device_init(INode_t *tty_inode) {
     f0->inode = tty_inode;
     f0->flags = O_RDWR;
     f0->offset = 0;
-    f0->shared = 1;
-    current_fd_table->fds[1] = f0;
-    current_fd_table->fds[2] = f0;
+    f0->shared = 2;
+
+    fd_table_t *boot_fds = vfs_get_kernel_table();
+    if (!boot_fds) {
+        kfree(f0, sizeof(*f0));
+        return;
+    }
+
+    boot_fds->fds[1] = f0;
+    boot_fds->fds[2] = f0;
 }

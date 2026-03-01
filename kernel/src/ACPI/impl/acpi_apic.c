@@ -11,8 +11,8 @@
 #include <cpu/io.h>
 #include "../acpi_priv.h"
 
-#define LAPIC_SIZE 0x1000
-#define LAPIC_VIRT 0xFFFFFFFFFFE00000ULL
+#define LAPIC_SIZE  0x1000
+#define LAPIC_VIRT  0xFFFFFFFFFFE00000ULL
 #define IOAPIC_VIRT 0xFFFFFFFFFEC00000ULL
 
 #define IA32_APIC_BASE_MSR 0x1B
@@ -34,6 +34,8 @@
 #define APIC_LVT_MASKED       (1U << 16)
 #define APIC_SVR_ENABLE       (1U << 8)
 
+#define IOAPIC_REG_SEL        0x00
+#define IOAPIC_REG_WIN        0x10
 #define IOAPIC_REG_ID         0x00
 #define IOAPIC_REG_VER        0x01
 #define IOAPIC_REG_TABLE_BASE 0x10
@@ -48,13 +50,26 @@ static inline void lapic_write(uint32_t reg, uint32_t val) {
 }
 
 static inline void ioapic_write(uint32_t reg, uint32_t val) {
-    ioapic[IOAPIC_REG_ID / 4] = reg;
-    ioapic[0x10 / 4] = val;
+    ioapic[IOAPIC_REG_SEL / 4] = reg;
+    ioapic[IOAPIC_REG_WIN / 4] = val;
 }
 
 static inline uint32_t ioapic_read(uint32_t reg) {
-    ioapic[IOAPIC_REG_ID / 4] = reg;
-    return ioapic[0x10 / 4];
+    ioapic[IOAPIC_REG_SEL / 4] = reg;
+    return ioapic[IOAPIC_REG_WIN / 4];
+}
+
+static void ioapic_write_redir(uint32_t pin, uint64_t entry) {
+    uint32_t reg_low = IOAPIC_REG_TABLE_BASE + pin * 2;
+    uint32_t reg_high = reg_low + 1;
+
+    // dest first then unmask/control
+    ioapic_write(reg_high, (uint32_t)(entry >> 32));
+    ioapic_write(reg_low, (uint32_t)entry);
+}
+
+static void ioapic_mask_pin(uint32_t pin) {
+    ioapic_write_redir(pin, APIC_LVT_MASKED);
 }
 
 int apic_is_enabled(void) {
@@ -142,8 +157,9 @@ int apic_init(void) {
 
     uint32_t ver = ioapic_read(IOAPIC_REG_VER);
     uint32_t max_redir = (ver >> 16) & 0xFF;
-    if (max_redir == 0)
-        ke_panic("APIC: IOAPIC not supported");
+
+    for (uint32_t pin = 0; pin <= max_redir; pin++)
+        ioapic_mask_pin(pin);
 
     uint32_t ioapic_gsi_base = acpi_ioapic_gsi_base();
 
@@ -166,13 +182,8 @@ int apic_init(void) {
         if (pin > max_redir)
             continue;
 
-        uint32_t reg_low  = IOAPIC_REG_TABLE_BASE + pin * 2;
-        uint32_t reg_high = reg_low + 1;
-
         uint64_t entry = ioapic_entry_for_irq(irqs[i].vector, bsp_id, irqs[i].irq);
-
-        ioapic_write(reg_low, entry & 0xFFFFFFFF);
-        ioapic_write(reg_high, entry >> 32);
+        ioapic_write_redir(pin, entry);
     }
 
     apic_enabled = 1;
