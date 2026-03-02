@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <ansii.h>
 #include <mm/spinlock.h>
+#include <user/errno.h>
 
 #include "priv_scheduler.h"
 
@@ -36,6 +37,51 @@ int alloc_pid(){
     spinlock_release(&sched_lock);
     irq_restore(flags);
     return pid;
+}
+
+static void free_pid(int pid) {
+    if (pid <= 0 || pid >= MAX_PIDS)
+        return;
+
+    unsigned long flags = irq_push();
+    spinlock_acquire(&sched_lock);
+    pid_list[pid] = 0;
+    spinlock_release(&sched_lock);
+    irq_restore(flags);
+}
+
+static void free_user_alloc_list(user_alloc_t *list) {
+    while (list) {
+        user_alloc_t *next = list->next;
+        kfree(list, sizeof(user_alloc_t));
+        list = next;
+    }
+}
+
+static user_alloc_t *clone_user_alloc_list(const user_alloc_t *src) {
+    user_alloc_t *head = NULL;
+    user_alloc_t *tail = NULL;
+
+    while (src) {
+        user_alloc_t *node = kmalloc(sizeof(user_alloc_t));
+        if (!node) {
+            free_user_alloc_list(head);
+            return NULL;
+        }
+
+        node->vaddr = src->vaddr;
+        node->pages = src->pages;
+        node->next = NULL;
+
+        if (!head)
+            head = node;
+        else
+            tail->next = node;
+        tail = node;
+        src = src->next;
+    }
+
+    return head;
 }
 
 static void queue_task(task_t *task) {
@@ -194,4 +240,120 @@ void sched_init_task_heap(task_t* task) {
     heap->current = 0x0000004000000000ULL;
     heap->end = heap->current;
     task->heap = heap;
+}
+
+task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
+    task_t *parent = get_current_task();
+    if (!parent || !parent_ctx || parent->task_privilege != P_USER)
+        return NULL;
+
+    paddr_t child_cr3 = paging_create_address_space();
+    if (!child_cr3)
+        return NULL;
+
+    if (paging_clone_user_space(parent->page_map, child_cr3) != 0) {
+        paging_destroy_address_space(child_cr3);
+        return NULL;
+    }
+
+    task_t *child = kmalloc(sizeof(task_t));
+    if (!child) {
+        paging_destroy_address_space(child_cr3);
+        return NULL;
+    }
+    memset(child, 0, sizeof(task_t));
+
+    uint64_t pid = alloc_pid();
+    if (pid == (uint64_t)-1 || pid == 0) {
+        kfree(child, sizeof(task_t));
+        paging_destroy_address_space(child_cr3);
+        return NULL;
+    }
+
+    child->id = pid;
+    child->ppid = parent->id;
+    child->pgid = parent->pgid ? parent->pgid : parent->id;
+    child->sid = parent->sid ? parent->sid : parent->id;
+    child->state = TASK_READY;
+    child->quantum_remaining = QUANTUM;
+    child->page_map = child_cr3;
+    child->task_privilege = parent->task_privilege;
+    child->wait_target_pid = 0;
+    child->wait_queue = NULL;
+    child->wait_next = NULL;
+    child->dead_next = NULL;
+    child->exit_code = 0;
+    child->exit_signal = 0;
+    child->sig_pending = 0;
+    child->sig_blocked = parent->sig_blocked;
+    child->sig_active_frame = 0;
+
+    memcpy(child->sig_handlers, parent->sig_handlers, sizeof(child->sig_handlers));
+    memcpy(child->sig_masks, parent->sig_masks, sizeof(child->sig_masks));
+    memcpy(child->sig_flags, parent->sig_flags, sizeof(child->sig_flags));
+    memcpy(child->sig_restorers, parent->sig_restorers, sizeof(child->sig_restorers));
+
+    strncpy(child->name, parent->name, sizeof(child->name) - 1);
+    child->name[sizeof(child->name) - 1] = '\0';
+
+    child->kernel_stack = kmalloc(KERNEL_STACK_SIZE);
+    if (!child->kernel_stack) {
+        free_pid((int)pid);
+        kfree(child, sizeof(task_t));
+        paging_destroy_address_space(child_cr3);
+        return NULL;
+    }
+
+    uint64_t kernel_stack_top = (uint64_t)child->kernel_stack + KERNEL_STACK_SIZE;
+    child->context = (cpu_context_t *)(kernel_stack_top - sizeof(cpu_context_t));
+    memcpy(child->context, parent_ctx, sizeof(cpu_context_t));
+    child->context->rax = 0;
+    FP_Init(child->fx_state);
+
+    child->fd_table = vfs_fd_table_clone(parent->fd_table);
+    if (!child->fd_table) {
+        free_pid((int)pid);
+        kfree(child->kernel_stack, KERNEL_STACK_SIZE);
+        kfree(child, sizeof(task_t));
+        paging_destroy_address_space(child_cr3);
+        return NULL;
+    }
+
+    child->alloc_list = clone_user_alloc_list(parent->alloc_list);
+    if (parent->alloc_list && !child->alloc_list) {
+        free_pid((int)pid);
+        vfs_fd_table_drop(child->fd_table);
+        kfree(child->kernel_stack, KERNEL_STACK_SIZE);
+        kfree(child, sizeof(task_t));
+        paging_destroy_address_space(child_cr3);
+        return NULL;
+    }
+
+    if (parent->heap) {
+        child->heap = kmalloc(sizeof(user_heap_t));
+        if (!child->heap) {
+            free_pid((int)pid);
+            free_user_alloc_list(child->alloc_list);
+            vfs_fd_table_drop(child->fd_table);
+            kfree(child->kernel_stack, KERNEL_STACK_SIZE);
+            kfree(child, sizeof(task_t));
+            paging_destroy_address_space(child_cr3);
+            return NULL;
+        }
+        child->heap->current = parent->heap->current;
+        child->heap->end = parent->heap->end;
+        child->heap->task = child;
+    }
+
+    child->current_directory = parent->current_directory ? parent->current_directory : vfs_get_root();
+    if (child->current_directory)
+        child->current_directory->shared++;
+
+    unsigned long flags = irq_push();
+    spinlock_acquire(&sched_lock);
+    queue_task(child);
+    spinlock_release(&sched_lock);
+    irq_restore(flags);
+
+    return child;
 }

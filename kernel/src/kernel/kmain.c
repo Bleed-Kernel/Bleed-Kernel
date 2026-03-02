@@ -123,6 +123,7 @@ void kmain() {
     sse_enable();
     avx_enable();
     serial_init();
+    serial_printf("[PROC] TRACE BUILD ACTIVE\n");
     pmm_init();
     vfs_mount_root();
     initrd_load();

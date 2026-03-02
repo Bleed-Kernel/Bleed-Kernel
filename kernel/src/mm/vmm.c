@@ -6,6 +6,7 @@
 #include <mm/paging.h>
 #include <mm/vmm.h>
 #include <mm/spinlock.h>
+#include <mm/cow.h>
 
 #define VMM_BASE_FLAGS (PTE_WRITABLE | PTE_NX)
 
@@ -188,7 +189,13 @@ int vmm_unmap_free_pages(vmm_cr3_t cr3, void *virt, size_t page_count) {
         uintptr_t vpage = va + i * PAGE_SIZE;
         paddr_t ppage = 0;
         if (vmm_page_paddr(cr3, vpage, &ppage) == 0) {
-            pmm_free_pages(ppage & PADDR_ENTRY_MASK, 1);
+            uint64_t *pte = paging_get_page(cr3, vpage, 0);
+            if (pte && (*pte & PTE_COW)) {
+                if (cow_unref_page(ppage & PADDR_ENTRY_MASK) == 0)
+                    pmm_free_pages(ppage & PADDR_ENTRY_MASK, 1);
+            } else {
+                pmm_free_pages(ppage & PADDR_ENTRY_MASK, 1);
+            }
             paging_unmap_page(cr3, vpage);
         }
     }

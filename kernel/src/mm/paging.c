@@ -13,6 +13,7 @@
 #include <sched/scheduler.h>
 #include <cpu/features/features.h>
 #include <cpu/msrs.h>
+#include <mm/cow.h>
 
 paddr_t kernel_page_map = 0;
 
@@ -225,7 +226,8 @@ void paging_switch_address_space(paddr_t cr3){
 /// @brief free address space CR3 provided
 /// @param cr3 target
 void paging_destroy_address_space(paddr_t cr3){
-    if (!cr3) return;
+    if (!cr3 || (cr3 & PADDR_ENTRY_MASK) == kernel_page_map) return;
+    paging_release_user_space(cr3);
     pmm_free_pages(cr3, 1);
 }
 
@@ -282,4 +284,185 @@ uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create) {
     }
 
     return &pt[pt_index];
+}
+
+int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
+    uint64_t *parent_pml4 = (uint64_t *)paddr_to_vaddr(parent_cr3 & PADDR_ENTRY_MASK);
+    if (!parent_pml4 || !child_cr3)
+        return -1;
+
+    for (size_t pml4i = 0; pml4i < 256; pml4i++) {
+        if (!(parent_pml4[pml4i] & PTE_PRESENT))
+            continue;
+
+        uint64_t *pdpt = (uint64_t *)paddr_to_vaddr(parent_pml4[pml4i] & PADDR_ENTRY_MASK);
+        if (!pdpt)
+            return -1;
+
+        for (size_t pdpti = 0; pdpti < 512; pdpti++) {
+            if (!(pdpt[pdpti] & PTE_PRESENT))
+                continue;
+            if (pdpt[pdpti] & PTE_PAGESIZE)
+                return -1;
+
+            uint64_t *pd = (uint64_t *)paddr_to_vaddr(pdpt[pdpti] & PADDR_ENTRY_MASK);
+            if (!pd)
+                return -1;
+
+            for (size_t pdi = 0; pdi < 512; pdi++) {
+                if (!(pd[pdi] & PTE_PRESENT))
+                    continue;
+                if (pd[pdi] & PTE_PAGESIZE)
+                    return -1;
+
+                uint64_t *pt = (uint64_t *)paddr_to_vaddr(pd[pdi] & PADDR_ENTRY_MASK);
+                if (!pt)
+                    return -1;
+
+                for (size_t pti = 0; pti < 512; pti++) {
+                    uint64_t pte = pt[pti];
+                    if (!(pte & PTE_PRESENT))
+                        continue;
+                    if (!(pte & PTE_USER))
+                        continue;
+
+                    uint64_t vaddr = ((uint64_t)pml4i << 39)
+                                   | ((uint64_t)pdpti << 30)
+                                   | ((uint64_t)pdi << 21)
+                                   | ((uint64_t)pti << 12);
+                    paddr_t phys = pte & PADDR_ENTRY_MASK;
+                    uint64_t flags = (pte & ~PADDR_ENTRY_MASK) & ~PTE_PRESENT;
+
+                    if ((pte & PTE_WRITABLE) || (pte & PTE_COW)) {
+                        if (!(pte & PTE_COW)) {
+                            pt[pti] = (pte & ~PTE_WRITABLE) | PTE_COW;
+                            cow_ref_page(phys);
+                            asm volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
+                        }
+
+                        cow_ref_page(phys);
+                        flags &= ~PTE_WRITABLE;
+                        flags |= PTE_COW;
+                        paging_map_page_invl(child_cr3, phys, vaddr, flags, 0);
+                    } else {
+                        paddr_t child_phys = pmm_alloc_pages(1);
+                        if (!child_phys)
+                            return -1;
+
+                        memcpy(paddr_to_vaddr(child_phys), paddr_to_vaddr(phys), PAGE_SIZE);
+                        paging_map_page_invl(child_cr3, child_phys, vaddr, flags, 0);
+                    }
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_error) {
+    if (!task)
+        return 0;
+
+    if (!(pf_error & (1U << 0)))
+        return 0;
+    if (!(pf_error & (1U << 1)))
+        return 0;
+    if (!(pf_error & (1U << 2)))
+        return 0;
+
+    uint64_t page = PAGE_ALIGN_DOWN(fault_addr);
+    uint64_t *pte = paging_get_page(task->page_map, page, 0);
+    if (!pte || !(*pte & PTE_PRESENT) || !(*pte & PTE_COW))
+        return 0;
+
+    paddr_t old_phys = *pte & PADDR_ENTRY_MASK;
+    uint64_t old_flags = *pte & ~PADDR_ENTRY_MASK;
+    uint32_t refs = cow_get_refcount(old_phys);
+
+    if (refs > 1) {
+        paddr_t new_phys = pmm_alloc_pages(1);
+        if (!new_phys)
+            return 0;
+
+        memcpy(paddr_to_vaddr(new_phys), paddr_to_vaddr(old_phys), PAGE_SIZE);
+
+        uint64_t new_flags = (old_flags | PTE_WRITABLE) & ~PTE_COW;
+        *pte = (new_phys & PADDR_ENTRY_MASK) | new_flags;
+        (void)cow_unref_page(old_phys);
+    } else {
+        uint64_t new_flags = (old_flags | PTE_WRITABLE) & ~PTE_COW;
+        *pte = (old_phys & PADDR_ENTRY_MASK) | new_flags;
+        (void)cow_unref_page(old_phys);
+    }
+
+    asm volatile("invlpg (%0)" :: "r"(page) : "memory");
+    return 1;
+}
+
+void paging_release_user_space(paddr_t cr3) {
+    uint64_t *pml4 = (uint64_t *)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
+    if (!pml4)
+        return;
+
+    for (size_t pml4i = 0; pml4i < 256; pml4i++) {
+        uint64_t pml4e = pml4[pml4i];
+        if (!(pml4e & PTE_PRESENT))
+            continue;
+
+        paddr_t pdpt_phys = pml4e & PADDR_ENTRY_MASK;
+        uint64_t *pdpt = (uint64_t *)paddr_to_vaddr(pdpt_phys);
+        if (!pdpt)
+            continue;
+
+        for (size_t pdpti = 0; pdpti < 512; pdpti++) {
+            uint64_t pdpte = pdpt[pdpti];
+            if (!(pdpte & PTE_PRESENT))
+                continue;
+            if (pdpte & PTE_PAGESIZE)
+                continue;
+
+            paddr_t pd_phys = pdpte & PADDR_ENTRY_MASK;
+            uint64_t *pd = (uint64_t *)paddr_to_vaddr(pd_phys);
+            if (!pd)
+                continue;
+
+            for (size_t pdi = 0; pdi < 512; pdi++) {
+                uint64_t pde = pd[pdi];
+                if (!(pde & PTE_PRESENT))
+                    continue;
+                if (pde & PTE_PAGESIZE)
+                    continue;
+
+                paddr_t pt_phys = pde & PADDR_ENTRY_MASK;
+                uint64_t *pt = (uint64_t *)paddr_to_vaddr(pt_phys);
+                if (!pt)
+                    continue;
+
+                for (size_t pti = 0; pti < 512; pti++) {
+                    uint64_t pte = pt[pti];
+                    if (!(pte & PTE_PRESENT))
+                        continue;
+
+                    paddr_t phys = pte & PADDR_ENTRY_MASK;
+                    if (pte & PTE_COW) {
+                        if (cow_unref_page(phys) == 0)
+                            pmm_free_pages(phys, 1);
+                    } else {
+                        pmm_free_pages(phys, 1);
+                    }
+                    pt[pti] = 0;
+                }
+
+                pmm_free_pages(pt_phys, 1);
+                pd[pdi] = 0;
+            }
+
+            pmm_free_pages(pd_phys, 1);
+            pdpt[pdpti] = 0;
+        }
+
+        pmm_free_pages(pdpt_phys, 1);
+        pml4[pml4i] = 0;
+    }
 }

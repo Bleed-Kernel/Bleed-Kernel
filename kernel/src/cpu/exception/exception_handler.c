@@ -6,6 +6,7 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <sched/scheduler.h>
 #include <threads/exit.h>
+#include <mm/paging.h>
 
 struct isr_stackframe {
     uint64_t rax; uint64_t rbx; uint64_t rcx; uint64_t rdx;
@@ -107,6 +108,10 @@ extern void* ke_exception_handler(void *frame) {
         uint64_t cr2 = 0;
         __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
 
+        if (f->vector == 14 && paging_handle_cow_fault(current, cr2, f->error_code)) {
+            return frame;
+        }
+
         serial_printf("\nA User Program Crashed\n %u (%s) at %p (%s - %u)\n", f->vector, exception_name(f->vector), f->rip, get_current_task()->name, get_current_task()->id);
         
         if (f->vector == 14) {
@@ -129,7 +134,7 @@ extern void* ke_exception_handler(void *frame) {
         for (;;) { __asm__ volatile ("hlt"); }
     }
 
-    kprintf("fault!"); // at the moment clearing the screen while the screen is empty causes ANOTHER panic
+    kprintf("fault, at this point the screen should clear, if not attach a debugger to see why or contact a developer"); // at the moment clearing the screen while the screen is empty causes ANOTHER panic
     kprintf("\x1b[J");
 
     serial_write("\n[PANIC] Vec:"); serial_write_hex(f->vector);

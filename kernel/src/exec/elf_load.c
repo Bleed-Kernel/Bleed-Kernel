@@ -16,7 +16,7 @@
 
 #define ELF_MAGIC "\x7F""ELF"
 
-static int setup_user_args(task_t *task, int argc, const char *const argv[]) {
+int elf_setup_user_args(task_t *task, int argc, const char *const argv[]) {
     if (!task || argc < 0 || argc > EXEC_MAX_ARGS) return -1;
     if (argc > 0 && !argv) return -1;
 
@@ -181,7 +181,7 @@ task_t *elf_sched(INode_t *file, int argc, const char *const argv[]){
 
     task_t *task = sched_create_task(cr3, entry, USER_CS, USER_SS, file->internal_data);
     if (!task) return NULL;
-    if (setup_user_args(task, argc, argv) != 0) {
+    if (elf_setup_user_args(task, argc, argv) != 0) {
         sched_mark_task_dead(task);
         return NULL;
     }

@@ -6,6 +6,7 @@
 #include <syscalls/syscall.h>
 #include <sched/signal.h>
 #include <user/errno.h>
+#include <drivers/serial/serial.h>
 
 #define SYSCALL(idx, func) [idx] = (SyscallHandler)func
 
@@ -39,7 +40,9 @@ enum {
     SYS_SIGACTION,
     SYS_SIGPROCMASK,
     SYS_SIGRETURN,
-    SYS_GETPID
+    SYS_GETPID,
+    SYS_FORK,
+    SYS_EXEC
 };
 
 #pragma GCC diagnostic push
@@ -72,13 +75,19 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_SIGACTION, sys_sigaction),
     SYSCALL(SYS_SIGPROCMASK, sys_sigprocmask),
     SYSCALL(SYS_SIGRETURN, sys_sigreturn),
-    SYSCALL(SYS_GETPID, sys_getpid)
+    SYSCALL(SYS_GETPID, sys_getpid),
+    SYSCALL(SYS_FORK, sys_fork),
+    SYSCALL(SYS_EXEC, sys_exec)
 };
 #pragma GCC diagnostic pop
 
 uint64_t syscall_dispatch(cpu_context_t *cpu_ctx){
     uint64_t sysno = cpu_ctx->rax;
     uint64_t ret = (uint64_t)-ENOSYS;
+
+    task_t *current = get_current_task();
+    if (current)
+        current->context = cpu_ctx;
 
     if (sysno < (sizeof(syscall_handlers) / sizeof(syscall_handlers[0])) &&
         syscall_handlers[sysno]) {
@@ -93,8 +102,7 @@ uint64_t syscall_dispatch(cpu_context_t *cpu_ctx){
     }
 
     cpu_ctx->rax = ret;
-
-    task_t *current = get_current_task();
+    
     if (current && (cpu_ctx->cs & 0x3) == 0x3) {
         if (sysno == SYS_SIGRETURN) {
             long sigreturn_rc = signal_handle_sigreturn(current, cpu_ctx);

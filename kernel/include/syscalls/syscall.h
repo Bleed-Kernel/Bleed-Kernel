@@ -20,6 +20,8 @@ void sys_yield();
 uint64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg);
 
 uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc);
+long sys_fork(void);
+long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc);
 long sys_waitpid(uint64_t pid);
 
 void sys_shutdown(void);

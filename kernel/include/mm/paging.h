@@ -13,6 +13,7 @@
 #define PTE_DIRTY           (1ULL << 6)
 #define PTE_PAGESIZE        (1ULL << 7)
 #define PTE_GLOBAL          (1ULL << 8)
+#define PTE_COW             (1ULL << 9)
 #define PTE_PAT             (1ULL << 12)
 #define PTE_NX              (1ULL << 63)
 
@@ -32,6 +33,7 @@
 
 extern paddr_t cr3_paddr;
 extern paddr_t kernel_page_map;
+struct task;
 
 void reinit_paging();
 
@@ -53,11 +55,15 @@ void paging_switch_address_space(paddr_t cr3);
 /// @brief free address space CR3 provided
 /// @param cr3 target
 void paging_destroy_address_space(paddr_t cr3);
+void paging_release_user_space(paddr_t cr3);
 
 uint64_t paging_alloc_empty_frame(void **vaddr);
 
 uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create);
 
 void paging_unmap_page(paddr_t cr3, uint64_t vaddr);
+
+int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3);
+int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_error);
 
 void pat_init(void);
