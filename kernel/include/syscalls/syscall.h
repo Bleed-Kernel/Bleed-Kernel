@@ -11,6 +11,8 @@
 int sys_open(char *path_str, int flags);
 uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len);
 uint64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len);
+long sys_pipe(uint64_t user_fds_ptr);
+long sys_dup2(uint64_t oldfd, uint64_t newfd);
 long sys_readdir(int fd, size_t index, dirent_t *user_ent);
 
 int sys_close(int fd);

@@ -33,7 +33,8 @@ typedef enum {
 
 typedef enum {
     FD_TYPE_FS,
-    FD_TYPE_DEV
+    FD_TYPE_DEV,
+    FD_TYPE_PIPE
 } fd_type_t;
 
 typedef struct INodeOps{
@@ -120,6 +121,8 @@ user_file_t *vfs_file_stat(int fd);
 int vfs_open(const char *path_str, int flags);
 long vfs_read(int fd, void *buf, size_t count);
 long vfs_write(int fd, const void *buf, size_t count);
+int vfs_pipe(int out_fds[2]);
+int vfs_dup2(int oldfd, int newfd);
 int vfs_chdir(const char *path_str);
 int vfs_close(int fd);
 long vfs_seek(int fd, long offset, int whence);

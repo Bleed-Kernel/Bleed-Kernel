@@ -44,7 +44,9 @@ enum {
     SYS_FORK,
     SYS_EXEC,
     SYS_IPC_SEND,
-    SYS_IPC_RECV
+    SYS_IPC_RECV,
+    SYS_PIPE,
+    SYS_DUP2
 };
 
 #pragma GCC diagnostic push
@@ -81,7 +83,9 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_FORK, sys_fork),
     SYSCALL(SYS_EXEC, sys_exec),
     SYSCALL(SYS_IPC_SEND, sys_ipc_send),
-    SYSCALL(SYS_IPC_RECV, sys_ipc_recv)
+    SYSCALL(SYS_IPC_RECV, sys_ipc_recv),
+    SYSCALL(SYS_PIPE, sys_pipe),
+    SYSCALL(SYS_DUP2, sys_dup2)
 };
 #pragma GCC diagnostic pop
 

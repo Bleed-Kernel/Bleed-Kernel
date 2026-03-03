@@ -13,6 +13,7 @@
 #include <user/errno.h>
 #include <mm/spinlock.h>
 #include <devices/devices.h>
+#include <fs/pipe.h>
 
 extern const filesystem tempfs;
 
@@ -74,7 +75,10 @@ void vfs_fd_table_drop(fd_table_t *table) {
 
         f->shared--;
         if (f->shared <= 0) {
-            vfs_drop(f->inode);
+            if (f->type == FD_TYPE_PIPE)
+                pipe_file_release(f);
+            else
+                vfs_drop(f->inode);
             kfree(f, sizeof(*f));
         }
     }
@@ -427,6 +431,9 @@ long vfs_read(int fd, void *buf, size_t count) {
         if (r < 0)
             return r;
 
+        if (f->type == FD_TYPE_PIPE)
+            return 0;
+
         if (is_size_finite)
             return 0;
 
@@ -450,8 +457,69 @@ long vfs_write(int fd, const void *buf, size_t count){
         return -1;
 
     long r = inode_write(f->inode, buf, count, f->offset);
-    if (r > 0) f->offset += r;
+    if (r > 0 && f->type != FD_TYPE_PIPE)
+        f->offset += r;
     return r;
+}
+
+int vfs_pipe(int out_fds[2]) {
+    if (!out_fds)
+        return -1;
+
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table)
+        return -1;
+
+    int read_fd = -1;
+    int write_fd = -1;
+    // Preserve stdio slots (0,1,2) for shell interactivity.
+    for (int i = 3; i < MAX_FDS; i++) {
+        if (!fd_table->fds[i]) {
+            if (read_fd < 0)
+                read_fd = i;
+            else {
+                write_fd = i;
+                break;
+            }
+        }
+    }
+
+    if (read_fd < 0 || write_fd < 0)
+        return -1;
+
+    file_t *read_file = NULL;
+    file_t *write_file = NULL;
+    if (pipe_create_file_pair(&read_file, &write_file) != 0)
+        return -1;
+
+    fd_table->fds[read_fd] = read_file;
+    fd_table->fds[write_fd] = write_file;
+    out_fds[0] = read_fd;
+    out_fds[1] = write_fd;
+    return 0;
+}
+
+int vfs_dup2(int oldfd, int newfd) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || oldfd < 0 || oldfd >= MAX_FDS || newfd < 0 || newfd >= MAX_FDS)
+        return -1;
+
+    file_t *src = fd_table->fds[oldfd];
+    if (!src)
+        return -1;
+
+    if (oldfd == newfd)
+        return newfd;
+
+    if (fd_table->fds[newfd]) {
+        int rc = vfs_close(newfd);
+        if (rc < 0)
+            return rc;
+    }
+
+    src->shared++;
+    fd_table->fds[newfd] = src;
+    return newfd;
 }
 
 int vfs_close(int fd){
@@ -465,7 +533,10 @@ int vfs_close(int fd){
 
     f->shared--;
     if (f->shared <= 0){
-        vfs_drop(f->inode);
+        if (f->type == FD_TYPE_PIPE)
+            pipe_file_release(f);
+        else
+            vfs_drop(f->inode);
         kfree(f, sizeof(*f));
     }
 
