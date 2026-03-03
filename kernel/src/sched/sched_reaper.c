@@ -6,6 +6,7 @@
 #include <panic.h>
 #include <stdio.h>
 #include <mm/spinlock.h>
+#include <ipc/zero_copy.h>
 
 #include "priv_scheduler.h"
 
@@ -142,6 +143,7 @@ void scheduler_reap(void) {
             if (task->kernel_stack)
                 kfree(task->kernel_stack, KERNEL_STACK_SIZE);
 
+            ipc_task_cleanup(task);
             paging_destroy_address_space(task->page_map);
             kfree(task, sizeof(task_t));
 

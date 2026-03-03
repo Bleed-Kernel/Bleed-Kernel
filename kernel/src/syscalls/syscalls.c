@@ -42,7 +42,9 @@ enum {
     SYS_SIGRETURN,
     SYS_GETPID,
     SYS_FORK,
-    SYS_EXEC
+    SYS_EXEC,
+    SYS_IPC_SEND,
+    SYS_IPC_RECV
 };
 
 #pragma GCC diagnostic push
@@ -77,7 +79,9 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_SIGRETURN, sys_sigreturn),
     SYSCALL(SYS_GETPID, sys_getpid),
     SYSCALL(SYS_FORK, sys_fork),
-    SYSCALL(SYS_EXEC, sys_exec)
+    SYSCALL(SYS_EXEC, sys_exec),
+    SYSCALL(SYS_IPC_SEND, sys_ipc_send),
+    SYSCALL(SYS_IPC_RECV, sys_ipc_recv)
 };
 #pragma GCC diagnostic pop
 

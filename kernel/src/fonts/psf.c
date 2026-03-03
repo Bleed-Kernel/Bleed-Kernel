@@ -136,6 +136,8 @@ psf_font_t *psf_parse_font(const void *data, size_t size) {
 
 uint16_t psf_lookup_glyph(const psf_font_t *font, uint32_t codepoint) {
     if (!font) return 0;
+    if (codepoint < 0x80 && codepoint < font->glyph_count)
+        return (uint16_t)codepoint;
     if (font->unicode_map && codepoint < 0x3000) {
         uint16_t g = font->unicode_map[codepoint];
         if (g != PSF_GLYPH_INVALID) return g;

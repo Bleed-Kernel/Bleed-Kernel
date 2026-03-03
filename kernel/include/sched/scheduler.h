@@ -35,6 +35,7 @@
     )
 
 typedef struct user_heap user_heap_t;
+typedef struct ipc_message ipc_message_t;
 
 typedef struct cpu_context {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
@@ -106,6 +107,9 @@ typedef struct task {
 
     int             exit_signal;
     int             exit_code;
+
+    ipc_message_t   *ipc_head;
+    ipc_message_t   *ipc_tail;
 } task_t;
 
 typedef void (*task_itteration_fn)(task_t *task, void *userdata);
