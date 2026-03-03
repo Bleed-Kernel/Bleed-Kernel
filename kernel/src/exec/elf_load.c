@@ -56,18 +56,19 @@ int elf_setup_user_args(task_t *task, int argc, const char *const argv[]) {
     argv_user[argc] = 0;
 
     size_t argv_bytes = (size_t)(argc + 1) * sizeof(uint64_t);
-    if (sp < argv_bytes) return -1;
-    sp -= argv_bytes;
-    sp &= ~0xFULL;
+    size_t frame_bytes = sizeof(uint64_t) + argv_bytes;
+    if (sp < frame_bytes) return -1;
 
-    if (sp < stack_floor) return -1;
-    if (copy_to_user(task, (void *)sp, argv_user, argv_bytes) != 0) return -1;
-    uintptr_t user_argv = sp;
-    if (sp < sizeof(uint64_t)) return -1;
-    sp -= sizeof(uint64_t);
+    uintptr_t frame_base = (sp - frame_bytes) & ~0xFULL;
+    uintptr_t user_argv = frame_base + sizeof(uint64_t);
+    if (frame_base < stack_floor) return -1;
+    if (user_argv + argv_bytes > sp) return -1;
 
     uint64_t ret_addr = (uint64_t)tramp_addr;
-    if (copy_to_user(task, (void *)sp, &ret_addr, sizeof(ret_addr)) != 0) return -1;
+    if (copy_to_user(task, (void *)frame_base, &ret_addr, sizeof(ret_addr)) != 0) return -1;
+    if (copy_to_user(task, (void *)user_argv, argv_user, argv_bytes) != 0) return -1;
+
+    sp = frame_base;
 
     task->context->rsp = (uint64_t)sp;
     task->context->rdi = (uint64_t)argc;
