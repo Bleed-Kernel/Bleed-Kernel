@@ -1,5 +1,4 @@
 #include <sched/scheduler.h>
-#include <drivers/serial/serial.h>
 #include <mm/kalloc.h>
 #include <ansii.h>
 #include <sched/scheduler.h>
@@ -125,8 +124,6 @@ void scheduler_reap(void) {
                 irq_restore(flags);
                 continue;
             }
-
-            serial_printf("%sReaping Task %u\n", LOG_INFO, (unsigned int)task->id);
 
             if (task_queue)
                 unlink_from_list(&task_queue, task);

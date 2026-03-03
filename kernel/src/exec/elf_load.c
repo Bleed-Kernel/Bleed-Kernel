@@ -13,16 +13,28 @@
 #include <string.h>
 #include <status.h>
 #include <user/user_copy.h>
+#include <syscalls/syscall.h>
 
 #define ELF_MAGIC "\x7F""ELF"
+
+static const uint8_t exec_exit_trampoline[] = {
+    0x89, 0xC7,                                 // preserve main() return code
+    0xB8, SYS_EXIT, 0x00, 0x00, 0x00,
+    0x0F, 0x05,
+    0x0F, 0x0B
+};
 
 int elf_setup_user_args(task_t *task, int argc, const char *const argv[]) {
     if (!task || argc < 0 || argc > EXEC_MAX_ARGS) return -1;
     if (argc > 0 && !argv) return -1;
 
     uint64_t argv_user[EXEC_MAX_ARGS + 1];
-    uintptr_t sp = USER_STACK_TOP;
+    uintptr_t tramp_addr = (USER_STACK_TOP - sizeof(exec_exit_trampoline)) & ~0xFULL;
+    uintptr_t sp = tramp_addr;
     uintptr_t stack_floor = USER_STACK_TOP - USER_STACK_SIZE;
+
+    if (tramp_addr < stack_floor) return -1;
+    if (copy_to_user(task, (void *)tramp_addr, exec_exit_trampoline, sizeof(exec_exit_trampoline)) != 0) return -1;
 
     for (int i = argc - 1; i >= 0; i--) {
         if (!argv[i]) return -1;
@@ -51,6 +63,11 @@ int elf_setup_user_args(task_t *task, int argc, const char *const argv[]) {
     if (sp < stack_floor) return -1;
     if (copy_to_user(task, (void *)sp, argv_user, argv_bytes) != 0) return -1;
     uintptr_t user_argv = sp;
+    if (sp < sizeof(uint64_t)) return -1;
+    sp -= sizeof(uint64_t);
+
+    uint64_t ret_addr = (uint64_t)tramp_addr;
+    if (copy_to_user(task, (void *)sp, &ret_addr, sizeof(ret_addr)) != 0) return -1;
 
     task->context->rsp = (uint64_t)sp;
     task->context->rdi = (uint64_t)argc;

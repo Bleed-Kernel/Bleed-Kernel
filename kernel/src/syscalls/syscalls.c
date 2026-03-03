@@ -12,43 +12,6 @@
 
 typedef uint64_t (*SyscallHandler)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
-enum {
-    SYS_READ,
-    SYS_WRITE,
-    SYS_OPEN,
-    SYS_CLOSE,
-    SYS_IOCTL,
-    SYS_YEILD,
-    SYS_SPAWN,
-    SYS_SHUTDOWN,
-    SYS_REBOOT,
-    SYS_EXIT,
-    SYS_WAITPID,
-    SYS_KILL,
-    SYS_MEMINFO,
-    SYS_TIME,
-    SYS_CHDIR,
-    SYS_GETCWD,
-    SYS_READDIR,
-    SYS_STAT,
-    SYS_MMAP,
-    SYS_MUNMAP,
-    SYS_TASKCOUNT,
-    SYS_TASKINFO,
-    SYS_MAPFB,
-    SYS_SEEK,
-    SYS_SIGACTION,
-    SYS_SIGPROCMASK,
-    SYS_SIGRETURN,
-    SYS_GETPID,
-    SYS_FORK,
-    SYS_EXEC,
-    SYS_IPC_SEND,
-    SYS_IPC_RECV,
-    SYS_PIPE,
-    SYS_DUP2
-};
-
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-function-type"
 SyscallHandler syscall_handlers[] = {

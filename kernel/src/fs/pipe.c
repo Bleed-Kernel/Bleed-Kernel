@@ -15,7 +15,12 @@ typedef struct pipe_state {
     size_t count;
     int readers;
     int writers;
+    char buffer[PIPE_BUFFER_SIZE];
 } pipe_state_t;
+
+static inline size_t min_size(size_t a, size_t b) {
+    return (a < b) ? a : b;
+}
 
 static long pipe_read_inode(INode_t *inode, void *out_buffer, size_t size, size_t offset) {
     (void)offset;
@@ -34,9 +39,21 @@ static long pipe_read_inode(INode_t *inode, void *out_buffer, size_t size, size_
         spinlock_acquire(&state->lock);
 
         while (copied < size && state->count > 0) {
-            dst[copied++] = ((char *)state + sizeof(pipe_state_t))[state->read_pos];
-            state->read_pos = (state->read_pos + 1) % PIPE_BUFFER_SIZE;
-            state->count--;
+            size_t bytes = min_size(size - copied, state->count);
+            size_t first = min_size(bytes, PIPE_BUFFER_SIZE - state->read_pos);
+
+            memcpy(dst + copied, state->buffer + state->read_pos, first);
+            state->read_pos = (state->read_pos + first) % PIPE_BUFFER_SIZE;
+            state->count -= first;
+            copied += first;
+
+            size_t remaining = bytes - first;
+            if (remaining > 0) {
+                memcpy(dst + copied, state->buffer + state->read_pos, remaining);
+                state->read_pos += remaining;
+                state->count -= remaining;
+                copied += remaining;
+            }
         }
 
         int writers = state->writers;
@@ -75,9 +92,22 @@ static long pipe_write_inode(INode_t *inode, const void *in_buffer, size_t size,
         }
 
         while (copied < size && state->count < PIPE_BUFFER_SIZE) {
-            ((char *)state + sizeof(pipe_state_t))[state->write_pos] = src[copied++];
-            state->write_pos = (state->write_pos + 1) % PIPE_BUFFER_SIZE;
-            state->count++;
+            size_t space = PIPE_BUFFER_SIZE - state->count;
+            size_t bytes = min_size(size - copied, space);
+            size_t first = min_size(bytes, PIPE_BUFFER_SIZE - state->write_pos);
+
+            memcpy(state->buffer + state->write_pos, src + copied, first);
+            state->write_pos = (state->write_pos + first) % PIPE_BUFFER_SIZE;
+            state->count += first;
+            copied += first;
+
+            size_t remaining = bytes - first;
+            if (remaining > 0) {
+                memcpy(state->buffer + state->write_pos, src + copied, remaining);
+                state->write_pos += remaining;
+                state->count += remaining;
+                copied += remaining;
+            }
         }
 
         int full = (state->count == PIPE_BUFFER_SIZE);
@@ -119,11 +149,10 @@ int pipe_create_file_pair(file_t **out_read, file_t **out_write) {
     if (!out_read || !out_write)
         return -EINVAL;
 
-    size_t state_bytes = sizeof(pipe_state_t) + PIPE_BUFFER_SIZE;
-    pipe_state_t *state = (pipe_state_t *)kmalloc(state_bytes);
+    pipe_state_t *state = (pipe_state_t *)kmalloc(sizeof(pipe_state_t));
     if (!state)
         return -ENOMEM;
-    memset(state, 0, state_bytes);
+    memset(state, 0, sizeof(pipe_state_t));
     spinlock_init(&state->lock);
     state->readers = 1;
     state->writers = 1;
@@ -138,7 +167,7 @@ int pipe_create_file_pair(file_t **out_read, file_t **out_write) {
         if (write_inode) kfree(write_inode, sizeof(INode_t));
         if (read_file) kfree(read_file, sizeof(file_t));
         if (write_file) kfree(write_file, sizeof(file_t));
-        kfree(state, state_bytes);
+        kfree(state, sizeof(pipe_state_t));
         return -ENOMEM;
     }
 
@@ -199,5 +228,5 @@ void pipe_file_release(file_t *f) {
 
     kfree(f->inode, sizeof(INode_t));
     if (free_state)
-        kfree(state, sizeof(pipe_state_t) + PIPE_BUFFER_SIZE);
+        kfree(state, sizeof(pipe_state_t));
 }
