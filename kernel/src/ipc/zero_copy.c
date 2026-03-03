@@ -162,52 +162,39 @@ long ipc_send_pages(task_t *sender, uint64_t target_pid, uint64_t src_addr, uint
     if (!msg)
         return -ENOMEM;
 
-    void *target_addr = task_mmap(target, pages);
-    if (!target_addr) {
+    paddr_t *phys_pages = kmalloc((size_t)pages * sizeof(paddr_t));
+    if (!phys_pages) {
         kfree(msg, sizeof(ipc_message_t));
         return -ENOMEM;
     }
 
+    for (size_t i = 0; i < pages; i++) {
+        uintptr_t src_page = (uintptr_t)src_addr + i * PAGE_SIZE;
+        uint64_t *src_pte = paging_get_page(sender->page_map, src_page, 0);
+        if (!src_pte || !(*src_pte & PTE_PRESENT)) {
+            kfree(phys_pages, (size_t)pages * sizeof(paddr_t));
+            kfree(msg, sizeof(ipc_message_t));
+            return -EFAULT;
+        }
+        phys_pages[i] = (paddr_t)(*src_pte & PADDR_ENTRY_MASK);
+    }
+
     int detach_rc = ipc_detach_alloc_range(sender, (uintptr_t)src_addr, (size_t)pages);
     if (detach_rc != 0) {
-        task_munmap(target, target_addr);
+        kfree(phys_pages, (size_t)pages * sizeof(paddr_t));
         kfree(msg, sizeof(ipc_message_t));
         return detach_rc;
     }
 
     for (size_t i = 0; i < pages; i++) {
         uintptr_t src_page = (uintptr_t)src_addr + i * PAGE_SIZE;
-        uintptr_t dst_page = (uintptr_t)target_addr + i * PAGE_SIZE;
-
-        uint64_t *src_pte = paging_get_page(sender->page_map, src_page, 0);
-        uint64_t *dst_pte = paging_get_page(target->page_map, dst_page, 0);
-        if (!src_pte || !dst_pte || !(*src_pte & PTE_PRESENT) || !(*dst_pte & PTE_PRESENT)) {
-            task_munmap(target, target_addr);
-            kfree(msg, sizeof(ipc_message_t));
-            return -EFAULT;
-        }
-    }
-
-    for (size_t i = 0; i < pages; i++) {
-        uintptr_t src_page = (uintptr_t)src_addr + i * PAGE_SIZE;
-        uintptr_t dst_page = (uintptr_t)target_addr + i * PAGE_SIZE;
-
-        uint64_t *src_pte = paging_get_page(sender->page_map, src_page, 0);
-        uint64_t *dst_pte = paging_get_page(target->page_map, dst_page, 0);
-
-        paddr_t src_phys = *src_pte & PADDR_ENTRY_MASK;
-        paddr_t dst_phys = *dst_pte & PADDR_ENTRY_MASK;
-        uint64_t src_flags = (*src_pte & ~PADDR_ENTRY_MASK) & ~PTE_PRESENT;
-
-        paging_map_page_invl(target->page_map, src_phys, dst_page, src_flags, 0);
-        pmm_free_pages(dst_phys, 1);
         paging_unmap_page(sender->page_map, src_page);
     }
 
     msg->sender_pid = sender->id;
-    msg->addr = (uint64_t)(uintptr_t)target_addr;
     msg->pages = pages;
     msg->flags = 0;
+    msg->phys_pages = phys_pages;
 
     ipc_init_lock();
     unsigned long irq_flags = irq_push();
@@ -235,17 +222,36 @@ long ipc_recv(task_t *receiver, uint64_t user_msg_ptr) {
     if (!msg)
         return -EAGAIN;
 
+    void *target_addr = task_mmap(receiver, msg->pages);
+    if (!target_addr) {
+        for (size_t i = 0; i < (size_t)msg->pages; i++)
+            pmm_free_pages(msg->phys_pages[i], 1);
+        kfree(msg->phys_pages, (size_t)msg->pages * sizeof(paddr_t));
+        kfree(msg, sizeof(ipc_message_t));
+        return -ENOMEM;
+    }
+
+    for (size_t i = 0; i < (size_t)msg->pages; i++) {
+        uintptr_t dst_page = (uintptr_t)target_addr + i * PAGE_SIZE;
+        paging_map_page_invl(receiver->page_map, msg->phys_pages[i], dst_page, PTE_USER | PTE_WRITABLE, 0);
+    }
+
     user_ipc_msg_t out = {
         .sender_pid = msg->sender_pid,
-        .addr = msg->addr,
+        .addr = (uint64_t)(uintptr_t)target_addr,
         .pages = msg->pages,
         .flags = msg->flags
     };
 
-    kfree(msg, sizeof(ipc_message_t));
-
-    if (copy_to_user(receiver, (void *)user_msg_ptr, &out, sizeof(out)) != 0)
+    if (copy_to_user(receiver, (void *)user_msg_ptr, &out, sizeof(out)) != 0) {
+        task_munmap(receiver, target_addr);
+        kfree(msg->phys_pages, (size_t)msg->pages * sizeof(paddr_t));
+        kfree(msg, sizeof(ipc_message_t));
         return -EFAULT;
+    }
+
+    kfree(msg->phys_pages, (size_t)msg->pages * sizeof(paddr_t));
+    kfree(msg, sizeof(ipc_message_t));
 
     return 0;
 }
@@ -265,6 +271,9 @@ void ipc_task_cleanup(task_t *task) {
 
     while (msg) {
         ipc_message_t *next = msg->next;
+        for (size_t i = 0; i < (size_t)msg->pages; i++)
+            pmm_free_pages(msg->phys_pages[i], 1);
+        kfree(msg->phys_pages, (size_t)msg->pages * sizeof(paddr_t));
         kfree(msg, sizeof(ipc_message_t));
         msg = next;
     }

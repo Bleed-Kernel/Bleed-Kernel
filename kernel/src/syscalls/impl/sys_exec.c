@@ -18,6 +18,22 @@ static void free_user_alloc_nodes(user_alloc_t *alloc) {
     }
 }
 
+static const char *exec_display_name(const char *path, const char *inode_name) {
+    if (inode_name && inode_name[0] != '\0')
+        return inode_name;
+
+    if (!path || path[0] == '\0')
+        return "Bleed Program";
+
+    const char *base = path;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/')
+            base = p + 1;
+    }
+
+    return (*base) ? base : "Bleed Program";
+}
+
 long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc) {
     task_t *task = get_current_task();
 
@@ -163,6 +179,10 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     }
 
     paging_switch_address_space(new_cr3);
+
+    const char *new_name = exec_display_name(kpath, file->internal_data);
+    strncpy(task->name, new_name, sizeof(task->name) - 1);
+    task->name[sizeof(task->name) - 1] = '\0';
 
     free_user_alloc_nodes(old_alloc_list);
     if (old_heap)
