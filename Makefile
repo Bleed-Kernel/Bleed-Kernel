@@ -45,7 +45,7 @@ USER_REPOS := \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Doom doom" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Quake2 quake2" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Taskman taskman" \
-	"https://codeberg.org/Bleed-Kernel/Bleed-Kilo kilo" \
+	"https://codeberg.org/Bleed-Kernel/Bleed-tvi tvi" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Coreutils cat" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Coreutils echo" \
 
@@ -104,15 +104,19 @@ userprogs:
 		dir=$(USER_BIN_DIR)/$$name; \
 		if [ ! -d "$$dir" ]; then \
 			echo "[USER] Cloning $$name from $$repo"; \
-			git clone "$$repo" "$$dir"; \
+			git clone "$$repo" "$$dir" || exit $$?; \
 		else \
 			echo "[USER] Pulling latest for $$name"; \
-			(cd "$$dir" && git pull --rebase); \
+			(cd "$$dir" && git pull --rebase) || exit $$?; \
 		fi; \
-		echo "[USER] Preparing blibc for $$name"; \
-		$(MAKE) -C "$$dir" blibc; \
+		echo "[USER] Preparing libc for $$name"; \
+		if $(MAKE) -C "$$dir" -n blibc >/dev/null 2>&1; then \
+			$(MAKE) -C "$$dir" blibc || exit $$?; \
+		elif $(MAKE) -C "$$dir" -n libc >/dev/null 2>&1; then \
+			$(MAKE) -C "$$dir" libc || exit $$?; \
+		fi; \
 		echo "[USER] Building $$name"; \
-		$(MAKE) -C "$$dir"; \
+		$(MAKE) -C "$$dir" || exit $$?; \
 		if [ -f "$$dir/bin/$$name" ]; then \
 			cp "$$dir/bin/$$name" $(INITRD_BIN)/$$name; \
 		else \
