@@ -44,6 +44,7 @@ void acpi_poweroff_fallback(){
 
     kprintf_pos(x1, y,     "%s", line1);
     kprintf_pos(x2, y + 1, "%s", line2);
+    kprintf(RESET);
 }
 
 static uint16_t SLP_TYPa = 0;
