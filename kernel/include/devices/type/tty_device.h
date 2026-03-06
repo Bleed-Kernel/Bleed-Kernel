@@ -17,6 +17,7 @@
 
 #define TTY_IOCTL_GET_CURSOR    0x5403
 #define TTY_IOCTL_SET_CURSOR    0x5404
+#define TTY_IOCTL_GET_WINSIZE   0x5405
 
 typedef struct tty tty_t;
 
@@ -37,6 +38,11 @@ typedef struct {
     uint32_t x;
     uint32_t y;
 } tty_cursor_t;
+
+typedef struct {
+    uint32_t cols;
+    uint32_t rows;
+} tty_winsize_t;
 
 typedef struct tty{
     INode_t device;

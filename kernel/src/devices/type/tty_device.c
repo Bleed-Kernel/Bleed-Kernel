@@ -101,11 +101,32 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
                 return 0;
             }
 
+            case TTY_IOCTL_GET_WINSIZE: {
+                if (!arg) return -1;
+                tty_fb_backend_t *b = tty->backend;
+                tty_winsize_t *ws = (tty_winsize_t *)arg;
+                uint32_t cols = b->fb.width;
+                uint32_t rows = b->fb.height;
+                if (b->fb.font && b->fb.font->width) cols /= b->fb.font->width;
+                if (b->fb.font && b->fb.font->height) rows /= b->fb.font->height;
+                if (!cols) cols = 1;
+                if (!rows) rows = 1;
+                ws->cols = cols;
+                ws->rows = rows;
+                return 0;
+            }
+
             case TTY_IOCTL_SET_CURSOR: {
                 if (!arg) return -1;
                 tty_fb_backend_t *b = tty->backend;
                 tty_cursor_t *cursor = (tty_cursor_t *)arg;
-                if (cursor->x < b->fb.width && cursor->y < b->fb.height) {
+                uint32_t cols = b->fb.width;
+                uint32_t rows = b->fb.height;
+                if (b->fb.font && b->fb.font->width) cols /= b->fb.font->width;
+                if (b->fb.font && b->fb.font->height) rows /= b->fb.font->height;
+                if (!cols) cols = 1;
+                if (!rows) rows = 1;
+                if (cursor->x < cols && cursor->y < rows) {
                     b->fb.cursor_x = cursor->x;
                     b->fb.cursor_y = cursor->y;
                 }
