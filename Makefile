@@ -104,19 +104,15 @@ userprogs:
 		dir=$(USER_BIN_DIR)/$$name; \
 		if [ ! -d "$$dir" ]; then \
 			echo "[USER] Cloning $$name from $$repo"; \
-			git clone "$$repo" "$$dir" || exit $$?; \
+			git clone "$$repo" "$$dir"; \
 		else \
 			echo "[USER] Pulling latest for $$name"; \
-			(cd "$$dir" && git pull --rebase) || exit $$?; \
+			(cd "$$dir" && git pull --rebase); \
 		fi; \
-		echo "[USER] Preparing libc for $$name"; \
-		if $(MAKE) -C "$$dir" -n blibc >/dev/null 2>&1; then \
-			$(MAKE) -C "$$dir" blibc || exit $$?; \
-		elif $(MAKE) -C "$$dir" -n libc >/dev/null 2>&1; then \
-			$(MAKE) -C "$$dir" libc || exit $$?; \
-		fi; \
+		echo "[USER] Preparing blibc for $$name"; \
+		$(MAKE) -C "$$dir" blibc; \
 		echo "[USER] Building $$name"; \
-		$(MAKE) -C "$$dir" || exit $$?; \
+		$(MAKE) -C "$$dir"; \
 		if [ -f "$$dir/bin/$$name" ]; then \
 			cp "$$dir/bin/$$name" $(INITRD_BIN)/$$name; \
 		else \
