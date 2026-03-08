@@ -4,6 +4,9 @@
 
 typedef struct {
     uint32_t *pixels;
+    uint32_t *shadow_pixels;
+    size_t shadow_pixels_size;
+    uint8_t shadow_initialized;
     uint64_t width;
     uint64_t height;
     uint64_t pitch;

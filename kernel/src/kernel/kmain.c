@@ -43,6 +43,9 @@
 #include <devices/type/serial_device.h>
 #include <devices/type/hpet_device.h>
 
+#define KERNEL_BOOT_TTY_COUNT 4
+#define KERNEL_MAX_LAZY_TTYS 12
+
 extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
 extern volatile struct limine_executable_cmdline_request cmdline_request;
@@ -50,6 +53,95 @@ extern volatile struct limine_executable_cmdline_request cmdline_request;
 extern void avx_enable(void);
 extern void sse_enable(void);
 tty_t tty0;
+
+static INode_t *g_shell_elf = NULL;
+static char g_shell_path[256];
+static uint8_t g_shell_spawned[KERNEL_MAX_LAZY_TTYS];
+static volatile uint32_t g_lazy_spawn_pending_mask = 0;
+static spinlock_t g_shell_spawn_lock = {0};
+
+static int kernel_bind_stdio_to_tty(uint32_t tty_index) {
+    char tty_name[16];
+    snprintf(tty_name, sizeof(tty_name), "tty%u", tty_index);
+    INode_t *tty_inode = device_get_by_name(tty_name);
+    if (!tty_inode)
+        return -1;
+
+    fd_table_t *boot_fds = vfs_get_kernel_table();
+    if (!boot_fds)
+        return -1;
+
+    file_t *f = kmalloc(sizeof(file_t));
+    if (!f)
+        return -1;
+    memset(f, 0, sizeof(*f));
+    f->type = FD_TYPE_DEV;
+    f->inode = tty_inode;
+    f->flags = O_RDWR;
+    f->offset = 0;
+    f->shared = 2;
+
+    boot_fds->fds[1] = f;
+    boot_fds->fds[2] = f;
+    return 0;
+}
+
+int kernel_spawn_shell_on_tty(uint32_t tty_index) {
+    if (tty_index >= KERNEL_MAX_LAZY_TTYS)
+        return -1;
+    if (!g_shell_elf)
+        return -1;
+    if (g_shell_spawned[tty_index])
+        return 0;
+
+    if (kernel_bind_stdio_to_tty(tty_index) < 0)
+        return -1;
+
+    if (!elf_sched(g_shell_elf, 0, NULL))
+        return -1;
+
+    g_shell_spawned[tty_index] = 1;
+    return 0;
+}
+
+void kernel_request_shell_spawn(uint32_t tty_index) {
+    if (tty_index >= KERNEL_MAX_LAZY_TTYS)
+        return;
+    if (!g_shell_elf)
+        return;
+
+    unsigned long irq = irq_push();
+    spinlock_acquire(&g_shell_spawn_lock);
+    if (!g_shell_spawned[tty_index]) {
+        g_lazy_spawn_pending_mask |= (1u << tty_index);
+    }
+    spinlock_release(&g_shell_spawn_lock);
+    irq_restore(irq);
+}
+
+int kernel_has_shell_spawn_request(void) {
+    return g_lazy_spawn_pending_mask != 0;
+}
+
+void kernel_service_shell_spawn_requests(void) {
+    uint32_t pending = 0;
+
+    unsigned long irq = irq_push();
+    spinlock_acquire(&g_shell_spawn_lock);
+    pending = g_lazy_spawn_pending_mask;
+    g_lazy_spawn_pending_mask = 0;
+    spinlock_release(&g_shell_spawn_lock);
+    irq_restore(irq);
+
+    if (!pending)
+        return;
+
+    for (uint32_t i = 0; i < KERNEL_MAX_LAZY_TTYS; i++) {
+        if (pending & (1u << i)) {
+            (void)kernel_spawn_shell_on_tty(i);
+        }
+    }
+}
 
 void initrd_load(){ 
     if (!module_request.response || module_request.response->module_count == 0){
@@ -105,14 +197,32 @@ void shell_start() {
     }
 
     if (target_path && target_path[0] != '\0') {
-        kprintf(LOG_INFO "Starting init process: %s\n", target_path);
+        memset(g_shell_spawned, 0, sizeof(g_shell_spawned));
+        memset(g_shell_path, 0, sizeof(g_shell_path));
+        strncpy(g_shell_path, target_path, sizeof(g_shell_path) - 1);
+        g_shell_path[sizeof(g_shell_path) - 1] = '\0';
 
-        void* elf = elf_get_from_path(target_path);
-        if (elf) {
-            elf_sched(elf, 0, NULL);
-        } else {
-            kprintf(LOG_ERROR "Failed to load ELF: %s\n", target_path);
+        kprintf(LOG_INFO "Starting init process %s\n", g_shell_path);
+
+        g_shell_elf = elf_get_from_path(g_shell_path);
+        if (!g_shell_elf) {
+            kprintf(LOG_ERROR "Failed to load ELF: %s\n", g_shell_path);
+            return;
         }
+
+        for (uint32_t i = 1; i < KERNEL_BOOT_TTY_COUNT; i++) {
+            if (tty_create_framebuffer(NULL) < 0) {
+                kprintf(LOG_WARN "Failed to create tty%u\n", i);
+                break;
+            }
+        }
+
+        if (kernel_spawn_shell_on_tty(0) < 0) {
+            kprintf(LOG_WARN "Failed to start shell on tty0\n");
+        }
+
+        (void)tty_set_active_index(0);
+        (void)kernel_bind_stdio_to_tty(0);
     } else {
         kprintf(LOG_ERROR "No valid shell path provided.\n");
     }
@@ -167,6 +277,9 @@ void kmain() {
     shell_start();
 
     for (;;) {
+        if (kernel_has_shell_spawn_request()) {
+            kernel_service_shell_spawn_requests();
+        }
         sched_yield();
     }
 }

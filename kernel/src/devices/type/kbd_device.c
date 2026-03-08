@@ -10,11 +10,37 @@
 #include <ansii.h>
 #include <user/errno.h>
 #include <devices/type/tty_device.h>
+#include <console/console.h>
 #include <mm/smap.h>
 #include <sched/signal.h>
 #include <sched/scheduler.h>
 
 static kbd_device_t *keyboard_device = NULL;
+extern struct INodeOps tty_inode_ops;
+
+static int kbd_fd_tty_index(file_t *f, uint32_t *index_out) {
+    if (!f || !index_out)
+        return -1;
+    if (!f->inode || f->inode->ops != &tty_inode_ops || !f->inode->internal_data)
+        return -1;
+
+    tty_t *tty = (tty_t *)f->inode->internal_data;
+    *index_out = tty->index;
+    return 0;
+}
+
+static int kbd_task_tty_index(task_t *task, uint32_t *index_out) {
+    if (!task || !task->fd_table || !index_out)
+        return -1;
+
+    // Prefer stdout tty, then stderr tty.
+    if (kbd_fd_tty_index(task->fd_table->fds[1], index_out) == 0)
+        return 0;
+    if (kbd_fd_tty_index(task->fd_table->fds[2], index_out) == 0)
+        return 0;
+
+    return -1;
+}
 
 static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     (void)offset;
@@ -29,18 +55,17 @@ static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     spinlock_acquire(&kbd->lock);
 
     if (current && current->task_privilege == PRIVILEGE_USER) {
-        task_t *owner = NULL;
-        if (kbd->owner_pid != 0)
-            owner = sched_get_task(kbd->owner_pid);
+        INode_t *active_console = console_get_active_console();
+        tty_t *active_tty = active_console ? (tty_t *)active_console->internal_data : NULL;
+        if (!active_tty) {
+            spinlock_release(&kbd->lock);
+            irq_restore(irq);
+            return -EAGAIN;
+        }
 
-        if (!owner ||
-            owner->state == TASK_DEAD ||
-            owner->state == TASK_FREE ||
-            owner->state == TASK_ZOMBIE ||
-            owner->state == TASK_BLOCKED) {
-            kbd->owner_pid = current->id;
-            kbd->owner_pgid = current->pgid ? current->pgid : current->id;
-        } else if (kbd->owner_pid != current->id) {
+        uint32_t current_tty_index = 0;
+        int has_task_tty = (kbd_task_tty_index(current, &current_tty_index) == 0);
+        if (has_task_tty && current_tty_index != active_tty->index) {
             spinlock_release(&kbd->lock);
             irq_restore(irq);
             return -EAGAIN;
@@ -77,17 +102,53 @@ static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
 
 static int kbd_ioctl(INode_t *inode, unsigned long request, void *arg) {
     kbd_device_t *kbd = inode->internal_data;
-    if (!kbd || !arg)
+    if (!kbd)
         return -1;
 
-    uint32_t *user_flags = (uint32_t *)arg;
     SMAP_ALLOW{
         switch (request) {
             case TTY_IOCTL_SET_FLAGS:
-                kbd->flags = *user_flags;
+                if (!arg) return -1;
+                kbd->flags = *(uint32_t *)arg;
                 return 0;
             case TTY_IOCTL_GET_FLAGS:
-                *user_flags = kbd->flags;
+                if (!arg) return -1;
+                *(uint32_t *)arg = kbd->flags;
+                return 0;
+            case TTY_IOCTL_TCGETS: {
+                if (!arg) return -1;
+                tty_termios_t term = {0};
+                if (kbd->flags & TTY_ECHO) term.c_lflag |= TTY_TERM_ECHO;
+                if (kbd->flags & TTY_CANNONICAL) term.c_lflag |= TTY_TERM_ICANON;
+                term.c_lflag |= TTY_TERM_ISIG;
+                term.c_cc[TTY_VINTR] = 3;
+                term.c_cc[TTY_VERASE] = 127;
+                term.c_cc[TTY_VMIN] = (kbd->flags & TTY_NONBLOCK) ? 0 : 1;
+                term.c_cc[TTY_VTIME] = 0;
+                *(tty_termios_t *)arg = term;
+                return 0;
+            }
+            case TTY_IOCTL_TCSETS:
+            case TTY_IOCTL_TCSETSW:
+            case TTY_IOCTL_TCSETSF: {
+                if (!arg) return -1;
+                tty_termios_t *term = (tty_termios_t *)arg;
+                if (term->c_lflag & TTY_TERM_ECHO) kbd->flags |= TTY_ECHO;
+                else kbd->flags &= ~TTY_ECHO;
+                if (term->c_lflag & TTY_TERM_ICANON) kbd->flags |= TTY_CANNONICAL;
+                else kbd->flags &= ~TTY_CANNONICAL;
+                if (term->c_cc[TTY_VMIN] == 0 && term->c_cc[TTY_VTIME] == 0)
+                    kbd->flags |= TTY_NONBLOCK;
+                else
+                    kbd->flags &= ~TTY_NONBLOCK;
+                return 0;
+            }
+            case TTY_IOCTL_FIONBIO:
+                if (!arg) return -1;
+                if (*(int *)arg)
+                    kbd->flags |= TTY_NONBLOCK;
+                else
+                    kbd->flags &= ~TTY_NONBLOCK;
                 return 0;
             default:
                 return -1;

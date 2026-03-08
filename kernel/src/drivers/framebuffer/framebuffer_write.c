@@ -11,20 +11,52 @@
 
 extern volatile struct limine_framebuffer_request framebuffer_request;
 
-static uint32_t *fb_buffer = NULL;
-static size_t fb_buffer_size = 0;
+void framebuffer_init_buffer(fb_console_t *fb);
+
+static uint32_t *framebuffer_get_shadow_buffer(fb_console_t *fb) {
+    if (!fb)
+        return NULL;
+
+    size_t size = fb->pitch * fb->height * sizeof(uint32_t);
+    if (!fb->shadow_pixels || fb->shadow_pixels_size != size) {
+        fb->shadow_pixels = kmalloc(size);
+        fb->shadow_pixels_size = size;
+        fb->shadow_initialized = 0;
+    }
+
+    return fb->shadow_pixels;
+}
 
 uint32_t* framebuffer_get_buffer(void) {
-    return fb_buffer;
+    return NULL;
+}
+
+void framebuffer_load_shadow(fb_console_t *fb, const uint32_t *src) {
+    if (!fb || !src)
+        return;
+
+    uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
+    if (!fb_buffer)
+        return;
+
+    size_t total_bytes = (size_t)fb->pitch * (size_t)fb->height * sizeof(uint32_t);
+    memcpy(fb_buffer, src, total_bytes);
+    fb->shadow_initialized = 1;
+    fb->dirty_top = fb->height;
+    fb->dirty_bottom = 0;
 }
 
 void framebuffer_flush(fb_console_t *fb) {
+    if (!fb)
+        return;
+
+    uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
     if (!fb_buffer) return;
 
     if (fb->dirty_top < fb->dirty_bottom) {
         uint32_t* src = fb_buffer + fb->dirty_top * fb->pitch;
         uint32_t* dst = fb->pixels + fb->dirty_top * fb->pitch;
-        framebuffer_blit(src, dst, fb->width, fb->dirty_bottom - fb->dirty_top);
+        framebuffer_blit(src, dst, fb->width, fb->dirty_bottom - fb->dirty_top, fb->pitch);
     }
 
     fb->dirty_top = fb->height;
@@ -32,12 +64,15 @@ void framebuffer_flush(fb_console_t *fb) {
 }
 
 void framebuffer_init_buffer(fb_console_t *fb) {
-    size_t size = fb->pitch * fb->height * sizeof(uint32_t);
-    if (size != fb_buffer_size) {
-        fb_buffer = kmalloc(size);
-        fb_buffer_size = size;
+    uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
+    if (!fb_buffer)
+        return;
+
+    size_t total_pixels = (size_t)fb->pitch * (size_t)fb->height;
+    for (size_t i = 0; i < total_pixels; i++) {
+        fb_buffer[i] = fb->bg;
     }
-    memset(fb_buffer, 0, fb_buffer_size);
+    fb->shadow_initialized = 1;
     fb->dirty_top = 0;
     fb->dirty_bottom = fb->height;
     framebuffer_flush(fb);
@@ -56,6 +91,10 @@ static inline void framebuffer_clear_row(uint32_t* buffer, size_t y, size_t pitc
 }
 
 static void framebuffer_render_glyph_index(fb_console_t *fb, size_t row, size_t col, uint16_t idx, uint32_t fg, uint32_t bg) {
+    uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
+    if (!fb_buffer)
+        return;
+
     const uint8_t *glyph = psf_get_glyph_font(fb->font, idx);
     if (!glyph) return;
 
@@ -85,6 +124,7 @@ static void framebuffer_render_glyph_index(fb_console_t *fb, size_t row, size_t 
 
 static void framebuffer_scroll_buffer(fb_console_t *fb) {
     size_t row_px = fb->font->height;
+    uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
     if (!fb_buffer) return;
 
     memmove(fb_buffer,
@@ -104,6 +144,7 @@ static void framebuffer_scroll_buffer(fb_console_t *fb) {
 
 static inline void framebuffer_draw_glyph_row_mem(fb_console_t *fb, size_t x, size_t y,
                                                   const uint8_t *glyph_row, uint32_t fg, uint32_t bg) {
+    uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
     if (y >= fb->height || !fb_buffer) return;
     framebuffer_mark_dirty(fb, y, 1);
 
@@ -120,7 +161,10 @@ static inline void framebuffer_draw_glyph_row_mem(fb_console_t *fb, size_t x, si
 }
 
 void framebuffer_put_char(fb_console_t *fb, uint32_t c) {
-    if (!fb_buffer) framebuffer_init_buffer(fb);
+    if (!framebuffer_get_shadow_buffer(fb))
+        return;
+    if (!fb->shadow_initialized)
+        framebuffer_init_buffer(fb);
 
     size_t max_cols = fb->width / fb->font->width;
     size_t max_rows = fb->height / fb->font->height;

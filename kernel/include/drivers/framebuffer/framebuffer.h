@@ -57,6 +57,7 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
 void framebuffer_clear(uint32_t *pixels, uint64_t width, uint64_t height, uint64_t pitch, uint32_t colour);
 
 uint32_t* framebuffer_get_buffer(void);
+void framebuffer_load_shadow(fb_console_t *fb, const uint32_t *src);
 
 /// @brief Draw a single line of text centered on the framebuffer
 /// @param fb framebuffer console
