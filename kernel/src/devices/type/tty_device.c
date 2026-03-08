@@ -323,6 +323,16 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
                 if (!arg) return -1;
                 return tty_set_active_index(*(uint32_t *)arg);
 
+            case TTY_IOCTL_GET_ACTIVE_INDEX: {
+                if (!arg) return -1;
+                INode_t *active = console_get_active_console();
+                if (!active || !active->internal_data)
+                    return -ENOENT;
+                tty_t *active_tty = (tty_t *)active->internal_data;
+                *(uint32_t *)arg = active_tty->index;
+                return 0;
+            }
+
             default:
                 return -1;
         }
