@@ -108,6 +108,9 @@ typedef struct task {
     int             exit_signal;
     int             exit_code;
 
+    uint8_t         tty_suspended;
+    uint8_t         tty_suspend_was_runnable;
+
     ipc_message_t   *ipc_head;
     ipc_message_t   *ipc_tail;
 } task_t;

@@ -41,6 +41,74 @@ static tty_t *tty_get_by_index(uint32_t index) {
     return tty_registry[index];
 }
 
+static int tty_fd_tty_index(file_t *f, uint32_t *index_out) {
+    if (!f || !index_out)
+        return -1;
+    if (!f->inode || f->inode->ops != &tty_inode_ops || !f->inode->internal_data)
+        return -1;
+
+    tty_t *tty = (tty_t *)f->inode->internal_data;
+    *index_out = tty->index;
+    return 0;
+}
+
+static int tty_task_tty_index(task_t *task, uint32_t *index_out) {
+    if (!task || !task->fd_table || !index_out)
+        return -1;
+
+    if (tty_fd_tty_index(task->fd_table->fds[1], index_out) == 0)
+        return 0;
+    if (tty_fd_tty_index(task->fd_table->fds[2], index_out) == 0)
+        return 0;
+
+    return -1;
+}
+
+typedef struct tty_task_activity_ctx {
+    uint32_t active_tty_index;
+} tty_task_activity_ctx_t;
+
+static void tty_update_task_activity_cb(task_t *task, void *userdata) {
+    tty_task_activity_ctx_t *ctx = (tty_task_activity_ctx_t *)userdata;
+    if (!task || !ctx)
+        return;
+    if (task->task_privilege != PRIVILEGE_USER)
+        return;
+    if (task->state == TASK_DEAD || task->state == TASK_FREE || task->state == TASK_ZOMBIE)
+        return;
+
+    uint32_t task_tty_index = 0;
+    if (tty_task_tty_index(task, &task_tty_index) != 0)
+        return;
+
+    if (task_tty_index == ctx->active_tty_index) {
+        if (task->tty_suspended) {
+            task->tty_suspended = 0;
+            if (task->tty_suspend_was_runnable && task->state == TASK_BLOCKED)
+                task->state = TASK_READY;
+            task->tty_suspend_was_runnable = 0;
+        }
+        return;
+    }
+
+    if (!task->tty_suspended) {
+        task->tty_suspended = 1;
+        if (task->state == TASK_READY || task->state == TASK_RUNNING) {
+            task->tty_suspend_was_runnable = 1;
+            task->state = TASK_BLOCKED;
+        } else {
+            task->tty_suspend_was_runnable = 0;
+        }
+    }
+}
+
+static void tty_update_task_activity(uint32_t active_tty_index) {
+    tty_task_activity_ctx_t ctx = {
+        .active_tty_index = active_tty_index,
+    };
+    itterate_each_task(tty_update_task_activity_cb, &ctx);
+}
+
 static void tty_sync_termios_from_flags(tty_t *tty) {
     if (tty->flags & TTY_ECHO) tty->termios.c_lflag |= TTY_TERM_ECHO;
     else tty->termios.c_lflag &= ~TTY_TERM_ECHO;
@@ -264,15 +332,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
 
             case TTY_IOCTL_GET_INDEX:
                 if (!arg) return -1;
-                if (tty->index == 0) {
-                    INode_t *active = console_get_active_console();
-                    if (!active || !active->internal_data)
-                        return -ENOENT;
-                    tty_t *active_tty = (tty_t *)active->internal_data;
-                    *(uint32_t *)arg = active_tty->index;
-                } else {
-                    *(uint32_t *)arg = tty->index;
-                }
+                *(uint32_t *)arg = tty->index;
                 return 0;
 
             case TTY_IOCTL_TCGETS:
@@ -331,6 +391,16 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
                 if (!arg) return -1;
                 return tty_set_active_index(*(uint32_t *)arg);
 
+            case TTY_IOCTL_GET_ACTIVE_INDEX: {
+                if (!arg) return -1;
+                INode_t *active = console_get_active_console();
+                if (!active || !active->internal_data)
+                    return -ENOENT;
+                tty_t *active_tty = (tty_t *)active->internal_data;
+                *(uint32_t *)arg = active_tty->index;
+                return 0;
+            }
+
             default:
                 return -1;
         }
@@ -347,7 +417,15 @@ int tty_set_active_index(uint32_t index) {
     tty_t *old_active_tty = old_active_node ? (tty_t *)old_active_node->internal_data : NULL;
     if (old_active_tty && old_active_tty->backend) {
         tty_fb_backend_t *ob = (tty_fb_backend_t *)old_active_tty->backend;
-        (void)ob;
+        // Move inactive tty rendering back to its private buffer.
+        // While active, fb.pixels points at display memory; leaving it that way
+        // causes background output to leak onto the newly active tty.
+        if (ob->tty_pixels) {
+            if (ob->fb.shadow_pixels && ob->fb.shadow_initialized) {
+                framebuffer_blit(ob->fb.shadow_pixels, ob->tty_pixels, ob->fb.width, ob->fb.height, ob->fb.pitch);
+            }
+            ob->fb.pixels = ob->tty_pixels;
+        }
     }
 
     for (size_t i = 0; i < tty_registry_count; i++) {
@@ -374,6 +452,7 @@ int tty_set_active_index(uint32_t index) {
     }
 
     console_set(&tty->device, *tty);
+    tty_update_task_activity(tty->index);
     kernel_request_shell_spawn(tty->index);
     tty->out_tail = tty->out_head;
     tty_drain_queued_output(tty);
