@@ -251,6 +251,7 @@ void kmain() {
     gdt_init();
     idt_init();
     tss_init();
+    syscall_init();
     fb_device_init();
 
     bootargs_init(cmdline_request.response->cmdline);

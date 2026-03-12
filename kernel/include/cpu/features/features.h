@@ -4,6 +4,7 @@
 #include <cpu/cpuid.h>
 #include <stdbool.h>
 #include <drivers/serial/serial.h>
+#include <ansii.h>
 
 // User Mode Instruction Protection
 #define CR4_UMIP (1ULL << 11)

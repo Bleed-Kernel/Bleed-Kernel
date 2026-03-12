@@ -103,3 +103,5 @@ uint64_t sys_femtoseconds();
 
 long sys_ipc_send(uint64_t target_pid, uint64_t src_addr, uint64_t pages);
 long sys_ipc_recv(uint64_t user_msg_ptr);
+
+void syscall_init(void);
