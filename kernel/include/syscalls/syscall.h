@@ -42,7 +42,10 @@ enum {
     SYS_IPC_SEND,
     SYS_IPC_RECV,
     SYS_PIPE,
-    SYS_DUP2
+    SYS_DUP2,
+    SYS_UNLINK,
+    SYS_RENAME,
+    SYS_MKDIR
 };
 
 int sys_open(char *path_str, int flags);
@@ -51,6 +54,9 @@ uint64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len);
 long sys_pipe(uint64_t user_fds_ptr);
 long sys_dup2(uint64_t oldfd, uint64_t newfd);
 long sys_readdir(int fd, size_t index, dirent_t *user_ent);
+int sys_unlink(const char *user_path);
+int sys_rename(const char *user_oldpath, const char *user_newpath);
+int sys_mkdir(const char *user_path, int mode);
 
 int sys_close(int fd);
 void sys_exit();

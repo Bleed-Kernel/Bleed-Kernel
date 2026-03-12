@@ -42,6 +42,8 @@ typedef struct INodeOps{
     long   (*read)    (INode_t* inode, void* out_buffer, size_t size, size_t offset);
     long   (*write)   (INode_t* inode, const void* in_buffer, size_t size, size_t offset);
     int    (*lookup)  (INode_t* dir, const char* name, size_t name_length, INode_t** result);
+    int    (*unlink)  (INode_t* dir, const char* name, size_t name_length);
+    int    (*rename)  (INode_t* dir, const char* oldname, size_t oldlen, const char* newname, size_t newlen);
     int    (*ioctl)   (INode_t* inode, unsigned long request, void* arg);
     void   (*drop)    (INode_t* inode);
     int    (*readdir) (INode_t* dir, size_t index, INode_t** result);
@@ -121,6 +123,9 @@ user_file_t *vfs_file_stat(int fd);
 int vfs_open(const char *path_str, int flags);
 long vfs_read(int fd, void *buf, size_t count);
 long vfs_write(int fd, const void *buf, size_t count);
+int vfs_unlink(const char *path_str);
+int vfs_rename(const char *oldpath, const char *newpath);
+int vfs_mkdir(const char *path_str);
 int vfs_pipe(int out_fds[2]);
 int vfs_dup2(int oldfd, int newfd);
 int vfs_chdir(const char *path_str);

@@ -128,6 +128,16 @@ int vfs_lookup(const path_t* path, INode_t** out_inode){
         while (head < head_end && *head != '/') head++;
         size_t comp_len = head - comp_start;
 
+        if (comp_len == 1 && comp_start[0] == '.') {
+            continue;
+        }
+        if (comp_len == 2 && comp_start[0] == '.' && comp_start[1] == '.') {
+            if (current_inode && current_inode->parent) {
+                current_inode = current_inode->parent;
+            }
+            continue;
+        }
+
         INode_t* next = NULL;
         long r = inode_lookup(current_inode, comp_start, comp_len, &next);
         if (r < 0){
@@ -244,6 +254,39 @@ size_t vfs_filesize(INode_t* inode) {
     }
 
     return total;
+}
+
+static int vfs_parent_and_name(const char *path_str, INode_t *cwd, path_t *out_parent, const char **out_name, size_t *out_namelen) {
+    if (!path_str || !*path_str || !out_parent || !out_name || !out_namelen)
+        return status_print_error(FILE_NOT_FOUND);
+
+    path_t path = vfs_path_from_relative(path_str, cwd);
+
+    const char *path_begin = path.data;
+    const char *path_end = path_begin + path.data_length;
+
+    while (path_end > path_begin && *(path_end - 1) == '/')
+        path_end--;
+    if (path_end == path_begin)
+        return status_print_error(FILE_NOT_FOUND);
+
+    const char *name = path_end;
+    while (name > path_begin && *(name - 1) != '/')
+        name--;
+
+    size_t namelen = (size_t)(path_end - name);
+    if (namelen == 0)
+        return status_print_error(FILE_NOT_FOUND);
+
+    *out_parent = (path_t){
+        .root = path.root,
+        .start = path.start,
+        .data = path_begin,
+        .data_length = (size_t)(name - path_begin),
+    };
+    *out_name = name;
+    *out_namelen = namelen;
+    return 0;
 }
 
 path_t vfs_path_from_relative(const char *path, INode_t *cwd) {
@@ -460,6 +503,106 @@ long vfs_write(int fd, const void *buf, size_t count){
     if (r > 0 && f->type != FD_TYPE_PIPE)
         f->offset += r;
     return r;
+}
+
+int vfs_unlink(const char *path_str) {
+    task_t *task = get_current_task();
+    INode_t *cwd = task ? task->current_directory : NULL;
+
+    path_t parent_path;
+    const char *name = NULL;
+    size_t namelen = 0;
+
+    int r = vfs_parent_and_name(path_str, cwd, &parent_path, &name, &namelen);
+    if (r < 0)
+        return r;
+
+    INode_t *parent_inode = NULL;
+    r = vfs_lookup(&parent_path, &parent_inode);
+    if (r < 0)
+        return r;
+
+    if (!parent_inode->ops || !parent_inode->ops->unlink) {
+        vfs_drop(parent_inode);
+        return status_print_error(UNIMPLEMENTED);
+    }
+
+    r = parent_inode->ops->unlink(parent_inode, name, namelen);
+    vfs_drop(parent_inode);
+    return r;
+}
+
+int vfs_rename(const char *oldpath, const char *newpath) {
+    task_t *task = get_current_task();
+    INode_t *cwd = task ? task->current_directory : NULL;
+
+    path_t old_parent_path;
+    const char *oldname = NULL;
+    size_t oldlen = 0;
+    int r = vfs_parent_and_name(oldpath, cwd, &old_parent_path, &oldname, &oldlen);
+    if (r < 0)
+        return r;
+
+    path_t new_parent_path;
+    const char *newname = NULL;
+    size_t newlen = 0;
+    r = vfs_parent_and_name(newpath, cwd, &new_parent_path, &newname, &newlen);
+    if (r < 0)
+        return r;
+
+    INode_t *old_parent = NULL;
+    r = vfs_lookup(&old_parent_path, &old_parent);
+    if (r < 0)
+        return r;
+
+    INode_t *new_parent = NULL;
+    r = vfs_lookup(&new_parent_path, &new_parent);
+    if (r < 0) {
+        vfs_drop(old_parent);
+        return r;
+    }
+
+    if (old_parent != new_parent) {
+        vfs_drop(old_parent);
+        vfs_drop(new_parent);
+        return -EXDEV;
+    }
+
+    if (!old_parent->ops || !old_parent->ops->rename) {
+        vfs_drop(old_parent);
+        if (new_parent != old_parent)
+            vfs_drop(new_parent);
+        return status_print_error(UNIMPLEMENTED);
+    }
+
+    r = old_parent->ops->rename(old_parent, oldname, oldlen, newname, newlen);
+
+    vfs_drop(old_parent);
+    if (new_parent != old_parent)
+        vfs_drop(new_parent);
+    return r;
+}
+
+int vfs_mkdir(const char *path_str) {
+    task_t *task = get_current_task();
+    INode_t *cwd = task ? task->current_directory : NULL;
+    path_t path = vfs_path_from_relative(path_str, cwd);
+
+    INode_t *existing = NULL;
+    if (vfs_lookup(&path, &existing) == 0) {
+        vfs_drop(existing);
+        return -EEXIST;
+    }
+
+    INode_t *inode = NULL;
+    int r = vfs_create(&path, &inode, INODE_DIRECTORY);
+    if (r < 0)
+        return r;
+
+    if (inode)
+        vfs_drop(inode);
+
+    return 0;
 }
 
 int vfs_pipe(int out_fds[2]) {

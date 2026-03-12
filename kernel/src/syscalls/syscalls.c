@@ -48,7 +48,10 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_IPC_SEND, sys_ipc_send),
     SYSCALL(SYS_IPC_RECV, sys_ipc_recv),
     SYSCALL(SYS_PIPE, sys_pipe),
-    SYSCALL(SYS_DUP2, sys_dup2)
+    SYSCALL(SYS_DUP2, sys_dup2),
+    SYSCALL(SYS_UNLINK, sys_unlink),
+    SYSCALL(SYS_RENAME, sys_rename),
+    SYSCALL(SYS_MKDIR, sys_mkdir)
 };
 #pragma GCC diagnostic pop
 

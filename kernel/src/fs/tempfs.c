@@ -40,6 +40,24 @@ static inline int tempfs_chunk_ptr_sane(const tempfs_data_t* p){
     return 1;
 }
 
+static INode_t **tempfs_entry_ptr(tempfs_INode_t *dir, size_t index) {
+    if (!dir)
+        return NULL;
+
+    tempfs_data_t *chunk = dir->data;
+    size_t idx = index;
+
+    while (chunk && idx >= MAX_ENTRIES_PER_DATA_CHUNK) {
+        idx -= MAX_ENTRIES_PER_DATA_CHUNK;
+        chunk = chunk->next_chunk;
+    }
+
+    if (!chunk)
+        return NULL;
+
+    return &directory_entries(chunk)[idx];
+}
+
 /// @brief Create a new inode, store operations inside
 /// @param type file or directory
 /// @param ops operations pointer
@@ -311,6 +329,99 @@ int tempfs_readdir(INode_t* dir, size_t index, INode_t** result){
     return 0;
 }
 
+static int tempfs_unlink(INode_t* dir, const char* name, size_t namelen) {
+    if (!dir || !dir->internal_data || !name || namelen == 0)
+        return status_print_error(FILE_NOT_FOUND);
+
+    tempfs_INode_t* dir_data = dir->internal_data;
+    size_t size = dir_data->capacity;
+
+    for (size_t i = 0; i < size; i++) {
+        INode_t **slot = tempfs_entry_ptr(dir_data, i);
+        if (!slot || !*slot)
+            continue;
+
+        INode_t *child = *slot;
+        tempfs_INode_t *child_data = child->internal_data;
+        if (!child_data)
+            continue;
+
+        if (strlen(child_data->name) == namelen && memcmp(child_data->name, name, namelen) == 0) {
+            if (child->type == INODE_DIRECTORY) {
+                tempfs_INode_t *child_dir = child->internal_data;
+                if (child_dir && child_dir->capacity > 0)
+                    return status_print_error(OUT_OF_BOUNDS);
+            }
+
+            size_t last_index = dir_data->capacity - 1;
+            if (i != last_index) {
+                INode_t **last_slot = tempfs_entry_ptr(dir_data, last_index);
+                if (last_slot)
+                    *slot = *last_slot;
+            }
+            {
+                INode_t **last_slot = tempfs_entry_ptr(dir_data, last_index);
+                if (last_slot)
+                    *last_slot = NULL;
+            }
+
+            dir_data->capacity--;
+
+            child->shared--;
+            if (child->shared <= 0) {
+                inode_drop(child);
+                kfree(child, sizeof(*child));
+            }
+
+            return 0;
+        }
+    }
+
+    return status_print_error(FILE_NOT_FOUND);
+}
+
+static int tempfs_rename(INode_t* dir, const char* oldname, size_t oldlen, const char* newname, size_t newlen) {
+    if (!dir || !dir->internal_data || !oldname || !newname || oldlen == 0 || newlen == 0)
+        return status_print_error(FILE_NOT_FOUND);
+
+    if (newlen >= TEMPFS_MAX_NAME_LEN)
+        return status_print_error(NAME_LIMITS);
+
+    tempfs_INode_t* dir_data = dir->internal_data;
+    size_t size = dir_data->capacity;
+
+    for (size_t i = 0; i < size; i++) {
+        INode_t **slot = tempfs_entry_ptr(dir_data, i);
+        if (!slot || !*slot)
+            continue;
+
+        tempfs_INode_t *child_data = (*slot)->internal_data;
+        if (!child_data)
+            continue;
+
+        if (strlen(child_data->name) == newlen && memcmp(child_data->name, newname, newlen) == 0)
+            return status_print_error(OUT_OF_BOUNDS);
+    }
+
+    for (size_t i = 0; i < size; i++) {
+        INode_t **slot = tempfs_entry_ptr(dir_data, i);
+        if (!slot || !*slot)
+            continue;
+
+        tempfs_INode_t *child_data = (*slot)->internal_data;
+        if (!child_data)
+            continue;
+
+        if (strlen(child_data->name) == oldlen && memcmp(child_data->name, oldname, oldlen) == 0) {
+            memcpy(child_data->name, newname, newlen);
+            child_data->name[newlen] = '\0';
+            return 0;
+        }
+    }
+
+    return status_print_error(FILE_NOT_FOUND);
+}
+
 static size_t tempfs_size(INode_t* inode){
     if (!inode || !inode->internal_data)
         return 0;
@@ -331,6 +442,8 @@ const INodeOps_t dir_ops = {
     .readdir= tempfs_readdir,
     .create = tempfs_create,
     .lookup = tempfs_lookup,
+    .unlink = tempfs_unlink,
+    .rename = tempfs_rename,
     .drop   = tempfs_drop,
 };
 
