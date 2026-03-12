@@ -43,7 +43,6 @@ KERNEL_SYM := initrd/etc/kernel.sym
 USER_REPOS := \
     "https://codeberg.org/Bleed-Kernel/Verdict-Shell verdict" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Doom doom" \
-	"https://codeberg.org/Bleed-Kernel/Bleed-Quake2 quake2" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Taskman taskman" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-tvi tvi" \
 	"https://codeberg.org/Bleed-Kernel/Bleed-Coreutils cat" \
