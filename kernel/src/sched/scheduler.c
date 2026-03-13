@@ -46,7 +46,7 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
     current_task->state = TASK_RUNNING;
     current_task->quantum_remaining = QUANTUM;
 
-    tss.rsp0 = (uint64_t)current_task->kernel_stack + KERNEL_STACK_SIZE;
+    tss.rsp0 = ((uint64_t)current_task->kernel_stack + KERNEL_STACK_SIZE) & ~0xFULL;
     paging_switch_address_space(current_task->page_map);
     FP_Restore(current_task->fx_state);
 

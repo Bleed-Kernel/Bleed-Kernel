@@ -160,6 +160,7 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     if (!task->kernel_stack)
         ke_panic("Failed to allocate kernel stack");
     uint64_t kernel_stack_top = (uint64_t)task->kernel_stack + KERNEL_STACK_SIZE;
+    kernel_stack_top &= ~0xFULL; // this should ensure we are 16 byte aligned
 
     for (uint64_t page = USER_STACK_TOP - USER_STACK_SIZE; page < USER_STACK_TOP; page += PAGE_SIZE) {
         paddr_t paddr = pmm_alloc_pages(1);
