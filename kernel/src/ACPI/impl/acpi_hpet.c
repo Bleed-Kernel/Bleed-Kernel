@@ -11,7 +11,7 @@
 #define HPET_FREQUENCY          1000
 
 struct acpi_hpet *hpet = NULL;
-volatile void* address = NULL;
+volatile uint64_t *address = NULL;
 
 uint64_t femtosecondsPerTick = 0;
 
@@ -24,7 +24,7 @@ void acpi_init_hpet(void){
         serial_printf(LOG_OK "HPET Found\n");
     }
 
-    address = paddr_to_vaddr(hpet->address.address);
+    uint64_t *address = paddr_to_vaddr(hpet->address.address);
 
     paging_map_page(kernel_page_map, (uint64_t)hpet->address.address, (uint64_t)address, PTE_PRESENT | PTE_WRITABLE);
     

@@ -16,7 +16,7 @@
 #define HPET_ENABLE_CNF   (1 << 0)
 #define HPET_LEGACY_CNF   (1 << 1)
 
-extern volatile void* address;
+extern volatile uint64_t *address;
 
 struct acpi_hpet{
     struct acpi_sdt header;
