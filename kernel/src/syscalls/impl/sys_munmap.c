@@ -2,6 +2,5 @@
 #include <sched/scheduler.h>
 
 void sys_munmap(void *addr){
-    task_munmap(get_current_task(), addr);
-    return;
+    return task_munmap(get_current_task(), addr);
 }
