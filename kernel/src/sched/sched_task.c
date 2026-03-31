@@ -88,15 +88,16 @@ static void queue_task(task_t *task) {
     if (!task_list_head) {
         task_list_head = task;
         task->next = task;
-        return;
+    } else {
+        task_t *tail = task_list_head;
+        while (tail->next != task_list_head)
+            tail = tail->next;
+        tail->next = task;
+        task->next = task_list_head;
     }
 
-    task_t *tail = task_list_head;
-    while (tail->next != task_list_head)
-        tail = tail->next;
-
-    tail->next = task;
-    task->next = task_list_head;
+    if (task->state == TASK_READY)
+        ready_enqueue(task);
 }
 
 task_t *sched_get_task(uint64_t pid) {

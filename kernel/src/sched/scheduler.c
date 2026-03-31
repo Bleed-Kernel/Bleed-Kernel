@@ -23,8 +23,55 @@ task_t *task_list_head = NULL;
 task_t *dead_task_head = NULL;
 task_t *dead_task_tail = NULL;
 
+task_t *ready_head     = NULL;
+
 task_t *get_current_task() {
     return current_task;
+}
+
+void ready_enqueue(task_t *task) {
+    if (!task || task->ready_next) return;   // already queued
+
+    if (!ready_head) {
+        ready_head       = task;
+        task->ready_next = task;
+        return;
+    }
+
+    task_t *tail = ready_head;
+    while (tail->ready_next != ready_head)
+        tail = tail->ready_next;
+
+    tail->ready_next = task;
+    task->ready_next = ready_head;
+}
+
+void ready_dequeue(task_t *task) {
+    if (!task || !ready_head) return;
+
+    if (ready_head == task && task->ready_next == task) {
+        ready_head       = NULL;
+        task->ready_next = NULL;
+        return;
+    }
+
+    task_t *cur  = ready_head;
+    task_t *prev = NULL;
+    do {
+        if (cur == task) break;
+        prev = cur;
+        cur  = cur->ready_next;
+    } while (cur != ready_head);
+
+    if (cur != task) return;
+
+    if (cur == ready_head)
+        ready_head = cur->ready_next;
+
+    if (prev)
+        prev->ready_next = cur->ready_next;
+
+    task->ready_next = NULL;
 }
 
 void init_scheduler(void) {
@@ -39,8 +86,8 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
 
     if (current_task->state == TASK_RUNNING) {
         current_task->state = TASK_READY;
+        ready_enqueue(current_task);       // back onto ready queue
     }
-
 
     current_task = next_task;
     current_task->state = TASK_RUNNING;
@@ -54,13 +101,18 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
 }
 
 void* sched_next_context(void* old_context) {
-    task_t *next_task = current_task->next;
+    task_t *start = task_queue->next;
+    task_t *next_task = start;
 
-    while (next_task->state != TASK_READY && next_task != current_task) {
+    do {
+        if (next_task->state == TASK_READY) {
+            task_queue = next_task;
+            return sched_switch_task(next_task, old_context);
+        }
         next_task = next_task->next;
-    }
+    } while (next_task != start);
 
-    return sched_switch_task(next_task, old_context);
+    return sched_switch_task(current_task, old_context);
 }
 
 cpu_context_t *sched_tick(cpu_context_t *context) {
@@ -85,11 +137,12 @@ void sched_bootstrap(void *rsp) {
     kernel_task->id                 = 0;
     kernel_task->ppid               = 0;
     kernel_task->pgid               = 0;
-    kernel_task->sid                = 0;    // future facing
+    kernel_task->sid                = 0;
     kernel_task->state              = TASK_RUNNING;
     kernel_task->quantum_remaining  = QUANTUM;
     kernel_task->context            = (cpu_context_t *)rsp;
     kernel_task->next               = kernel_task;
+    kernel_task->ready_next         = NULL;
     kernel_task->task_privilege     = P_KERNEL;
     FP_Init(kernel_task->fx_state);
 

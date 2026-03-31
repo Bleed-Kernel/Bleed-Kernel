@@ -92,6 +92,7 @@ typedef struct task {
 
     struct task     *wait_queue;
     struct task     *wait_next;
+    struct task     *ready_next;
     uint64_t        wait_target_pid;
 
     struct task     *next;

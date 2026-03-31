@@ -14,4 +14,9 @@ extern task_t *task_list_head;
 extern task_t *dead_task_head;
 extern task_t *dead_task_tail;
 
+extern task_t *ready_head;
+
 int alloc_pid();
+
+void ready_enqueue(task_t *task);
+void ready_dequeue(task_t *task);

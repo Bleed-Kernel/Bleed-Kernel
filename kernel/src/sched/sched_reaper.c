@@ -130,6 +130,8 @@ void scheduler_reap(void) {
             if (task_list_head)
                 unlink_from_list(&task_list_head, task);
 
+            ready_dequeue(task);
+
             uint64_t task_id = task->id;
             if (task_id > 1 && task_id < MAX_PIDS)
                 pid_list[task_id] = 0;

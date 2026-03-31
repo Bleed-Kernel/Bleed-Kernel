@@ -5,6 +5,8 @@
 #include <mm/kalloc.h>
 #include <sched/signal.h>
 
+#include "priv_scheduler.h"
+
 __attribute__((noreturn))
 void exit(void) {
     task_t *current_task = get_current_task();
@@ -25,9 +27,9 @@ void exit(void) {
 
     while (w) {
         task_t *next = w->wait_next;
-
         w->wait_next = NULL;
         w->state = TASK_READY;
+        ready_enqueue(w);
         w = next;
     }
 
