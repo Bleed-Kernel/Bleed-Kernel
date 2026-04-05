@@ -28,14 +28,20 @@ Generally any reasonable hardware should have this.
 - [x] Round Robin Premptive Scheduler for Multitasking + Context Switching
 - [x] ELF (non-relocatable) User Program Execution (yes, it can run doom)
 - [x] Unix-Like Devices and Device Handler
+- [x] FAT32 Support
+- [x] IDE Harddrive Persistant Storage Driver
+- [x] PS/2 Mouse Drivers
+- [x] Mount Points for Block Devices
 
 ## Upcomming Features
 - [ ] Network Drivers
 - [ ] Symetric Multiprocessing (SMP)
-- [ ] PS/2 Mouse Drivers
 - [ ] xHCI (HID)
 - [ ] Relocatable Executables
 - [ ] Task-Specific Framebuffers
+
+## Known Bugs
+- Running Doom, exiting and then Running doom again will result in a [kernel panic](https://bleedkernel.com/panic.html?sig=P4IAgP%2F%2F%20%2F%2F9QsA8A%20QAAAAAEA%20AAAO)
 
 ## Related Projects
 [The Verdict Shell - Default shell for the Bleed Kernel](https://codeberg.org/Bleed-Kernel/Verdict-Shell)
