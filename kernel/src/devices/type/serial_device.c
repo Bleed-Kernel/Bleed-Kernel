@@ -26,5 +26,5 @@ int serial_device_register() {
     dev_inode->shared = 1;
     dev_inode->type = INODE_DEVICE;
 
-    return device_register(dev_inode, "serial0");
+    return device_register(dev_inode, "serial");
 }

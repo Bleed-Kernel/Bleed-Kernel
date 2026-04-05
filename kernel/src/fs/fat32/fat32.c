@@ -696,9 +696,6 @@ int fat32_mount(blk_device_t *blk, INode_t **root) {
         return -1;
     }
 
-    serial_printf(LOG_INFO "fat32: attempting mount — drive lba_start=%u sectors=%u\n",
-                  blk->lba_start, blk->sector_count);
-
     uint8_t raw_sector[512];
     if (ide_read_sectors(blk->drive, blk->lba_start, 1, raw_sector) < 0) {
         serial_printf(LOG_ERROR "fat32: failed to read sector %u from drive\n", blk->lba_start);
@@ -760,9 +757,6 @@ int fat32_mount(blk_device_t *blk, INode_t **root) {
     }
     uint32_t data_sectors  = total_sectors - fs->data_start_lba;
     fs->total_clusters     = data_sectors / bpb.sectors_per_cluster;
-
-    serial_printf(LOG_OK "fat32: mounted — %u clusters, %u B/cluster, root@cluster %u\n",
-                  fs->total_clusters, fs->bytes_per_cluster, fs->root_cluster);
 
     fat32_dirent_t root_de;
     memset(&root_de, 0, sizeof(root_de));

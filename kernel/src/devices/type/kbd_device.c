@@ -206,6 +206,6 @@ void kbd_device_init(void) {
     } else {
         kfree(kbfd, sizeof(*kbfd));
     }
-    device_register(&keyboard_device->device, "kbd0");
+    device_register(&keyboard_device->device, "keyboard");
     keyboard_register_listener(kbd_listener);
 }
