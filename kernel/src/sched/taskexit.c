@@ -48,8 +48,6 @@ void exit(void) {
         current_task->state = TASK_ZOMBIE;
     }
 
-    sched_yield();
-
     for (;;)
-        sched_yield();
+        sched_yield(get_current_task());
 }

@@ -50,7 +50,7 @@ void wait_fs(uint64_t femtoseconds) {
     uint64_t target = start + ticks;
 
     while (hpet_read_counter() < target) {
-        sched_yield();
+        sched_yield(get_current_task());
     }
 }
 

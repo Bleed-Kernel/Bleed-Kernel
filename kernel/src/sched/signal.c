@@ -208,7 +208,7 @@ void signal_deliver_pending(task_t *task, cpu_context_t *ctx) {
 
         if (handler == SIG_DFL && signal_default_stop(sig)) {
             task->state = TASK_STOPPED;
-            sched_yield();
+            sched_yield(get_current_task());
             return;
         }
 

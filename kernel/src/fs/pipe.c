@@ -65,7 +65,7 @@ static long pipe_read_inode(INode_t *inode, void *out_buffer, size_t size, size_
         if (writers == 0)
             return 0;
 
-        sched_yield();
+        sched_yield(get_current_task());
     }
 }
 
@@ -119,7 +119,7 @@ static long pipe_write_inode(INode_t *inode, const void *in_buffer, size_t size,
         if (!full)
             continue;
 
-        sched_yield();
+        sched_yield(get_current_task());
     }
 }
 

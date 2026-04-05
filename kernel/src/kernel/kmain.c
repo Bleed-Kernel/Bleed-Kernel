@@ -281,6 +281,6 @@ void kmain() {
         if (kernel_has_shell_spawn_request()) {
             kernel_service_shell_spawn_requests();
         }
-        sched_yield();
+        sched_yield(get_current_task());
     }
 }

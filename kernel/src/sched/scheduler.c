@@ -159,12 +159,19 @@ void sched_bootstrap(void *rsp) {
     serial_printf(LOG_OK "Kernel Task Created, tid:0\n");
 }
 
-void sched_yield(void) {
+void sched_yield(task_t *task) {
     asm volatile ("cli");
-    if (current_task && current_task->state == TASK_RUNNING) {
-        current_task->quantum_remaining = 0;
-        current_task->state = TASK_READY;
+    if (task && task->state == TASK_RUNNING) {
+        task->quantum_remaining = 0;
+        task->state = TASK_READY;
     }
+    asm volatile ("sti");
+    asm volatile ("int $32");
+}
+
+void sched_block(task_t *task){
+    asm volatile ("cli");
+    task->state = TASK_BLOCKED;
     asm volatile ("sti");
     asm volatile ("int $32");
 }

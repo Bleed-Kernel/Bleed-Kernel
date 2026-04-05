@@ -149,7 +149,7 @@ void scheduler_reap(void) {
             reaped++;
         }
 
-        sched_yield();
+        sched_yield(get_current_task());
     }
     __builtin_unreachable();
 }

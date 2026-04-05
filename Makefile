@@ -155,7 +155,8 @@ run: $(IMAGE_NAME).iso
 		-boot d \
 		-m $(MEMSZ) \
 		-serial stdio \
-		-display sdl
+		-device virtio-balloon
+		
 
 .PHONY: run-uefi
 run-uefi: $(IMAGE_NAME).iso

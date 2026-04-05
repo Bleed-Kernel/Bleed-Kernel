@@ -98,23 +98,33 @@ int vfs_mount_root(){
     int r = tempfs.mount(&vfs_root);
     if (r < 0) {
         serial_printf("%s vfs_mount_root: tempfs.mount failed: %d\n", LOG_ERROR, r);
+        return r;
     }
     serial_printf("%sVFS Root Mounted\n", LOG_OK);
 
     path_t devpath = vfs_path_from_abs("/dev");
     INode_t *devinode = NULL;
-    vfs_create(&devpath, &devinode, INODE_DIRECTORY);
+    int dr = vfs_create(&devpath, &devinode, INODE_DIRECTORY);
+    if (dr < 0)
+        serial_printf("%s vfs_mount_root: failed to create /dev: %d\n", LOG_ERROR, dr);
+    else if (devinode)
+        vfs_drop(devinode); // tree holds its own ref so we can drop this one
 
     (void)vfs_get_kernel_table();
 
-    return r;
+    return 0;
 }
 
 void vfs_drop(INode_t* inode){
     if (!inode) return;
-    if (inode == vfs_get_root()) return;
-    if (inode->shared == 0) return;
+    /* Root is permanently pinned — never freed via drop */
+    if (inode == vfs_root) return;
+    if (inode->shared <= 0) return;
     inode->shared--;
+    if (inode->shared == 0) {
+        inode_drop(inode);
+        kfree(inode, sizeof(*inode));
+    }
 }
 
 int vfs_lookup(const path_t* path, INode_t** out_inode){
@@ -138,6 +148,12 @@ int vfs_lookup(const path_t* path, INode_t** out_inode){
             continue;
         }
 
+        if (!current_inode || !current_inode->ops || !current_inode->ops->lookup) {
+            serial_printf(LOG_WARN "vfs_lookup: inode has no lookup op at component '%.*s'\n",
+                          (int)comp_len, comp_start);
+            return -FILE_NOT_FOUND;
+        }
+
         INode_t* next = NULL;
         long r = inode_lookup(current_inode, comp_start, comp_len, &next);
         if (r < 0){
@@ -146,10 +162,12 @@ int vfs_lookup(const path_t* path, INode_t** out_inode){
 
         current_inode = next;
     }
-    if (current_inode){
-        current_inode->shared++;
-    }else{
+    if (current_inode){ // each caller still gets its own ref
+        if (current_inode != vfs_root)
+            current_inode->shared++;
+    } else {
         serial_printf(LOG_WARN "Failed to find file %s\n", path->data);
+        return -FILE_NOT_FOUND;
     }
     *out_inode = current_inode;
     return 0;
@@ -189,6 +207,7 @@ int vfs_create(const path_t* path, INode_t** out_result, inode_type node_type){
     e = inode_create(parent_inode, name, namelen, out_result, node_type);
     if (e == 0 && *out_result) {
         (*out_result)->parent = parent_inode;
+        (*out_result)->shared++;    // bump ref because it starts with 1, the tree ref but this should also have one
     }
 
     vfs_drop(parent_inode);
@@ -234,13 +253,15 @@ path_t vfs_path_from_abs(const char* path){
 }
 
 size_t vfs_filesize(INode_t* inode) {
-    if (!inode)
+    if (!inode || !inode->ops)
         return 0;
+        
+    if (inode->ops->size)
+        return inode->ops->size(inode); // ideally we should always hit this
 
-    if (inode->ops && inode->ops->size)
-        return inode->ops->size(inode);
+    // this fallback is super duper slow
 
-    if (!inode->ops || !inode->ops->read)
+    if (!inode->ops->read)
         return 0;
 
     size_t total = 0;
@@ -249,8 +270,8 @@ size_t vfs_filesize(INode_t* inode) {
     long r;
 
     while ((r = inode_read(inode, buffer, sizeof(buffer), offset)) > 0) {
-        total += r;
-        offset += r;
+        total += (size_t)r;
+        offset += (size_t)r;
     }
 
     return total;
@@ -345,12 +366,10 @@ int vfs_chdir(const char *path_str) {
         return -FILE_NOT_FOUND;
     }
 
-    // Drop old cwd
+    // Drop old cwd. Root is pinned so vfs_drop guards it 
     if (task->current_directory)
         vfs_drop(task->current_directory);
-
     task->current_directory = inode;
-    inode->shared++; // Increment since task now owns a reference
 
     return 0;
 }
@@ -408,9 +427,18 @@ int vfs_open(const char *path_str, int flags){
         return status_print_error(OUT_OF_MEMORY);
     }
 
+    if ((flags & O_TRUNC) && inode->type == INODE_FILE) {
+        int tr = inode_truncate(inode, 0);
+        if (tr < 0) {
+            kfree(f, sizeof(*f));
+            vfs_drop(inode);
+            return tr;
+        }
+    }
+
     f->inode = inode;
     f->type = FD_TYPE_FS;
-    f->offset = flags & O_TRUNC ? 0 : ((flags & O_APPEND) ? vfs_filesize(inode) : 0);
+    f->offset = (flags & O_APPEND) ? vfs_filesize(inode) : 0;
     f->flags = flags & (O_MODE | O_APPEND | O_TRUNC);
     f->shared = 1;
 
@@ -472,7 +500,7 @@ long vfs_read(int fd, void *buf, size_t count) {
         }
 
         if (r < 0)
-            return r;
+            return r;   // no data?
 
         if (f->type == FD_TYPE_PIPE)
             return 0;
@@ -480,10 +508,15 @@ long vfs_read(int fd, void *buf, size_t count) {
         if (is_size_finite)
             return 0;
 
+        // block the task rather than spinning while we wait
+        if (current) {
+            sched_block(get_current_task());
+        } else {
+            sched_yield(get_current_task());
+        }
+
         if (signal_should_interrupt(current))
             return -EINTR;
-
-        sched_yield();
     }
 }
 
@@ -570,16 +603,14 @@ int vfs_rename(const char *oldpath, const char *newpath) {
 
     if (!old_parent->ops || !old_parent->ops->rename) {
         vfs_drop(old_parent);
-        if (new_parent != old_parent)
-            vfs_drop(new_parent);
+        vfs_drop(new_parent);
         return status_print_error(UNIMPLEMENTED);
     }
 
     r = old_parent->ops->rename(old_parent, oldname, oldlen, newname, newlen);
 
     vfs_drop(old_parent);
-    if (new_parent != old_parent)
-        vfs_drop(new_parent);
+    vfs_drop(new_parent);
     return r;
 }
 
@@ -615,7 +646,8 @@ int vfs_pipe(int out_fds[2]) {
 
     int read_fd = -1;
     int write_fd = -1;
-    // Preserve stdio slots (0,1,2) for shell interactivity.
+
+    // Preserve stdio slots (0,1,2) for stdin stdout stderr
     for (int i = 3; i < MAX_FDS; i++) {
         if (!fd_table->fds[i]) {
             if (read_fd < 0)
@@ -676,10 +708,11 @@ int vfs_close(int fd){
 
     f->shared--;
     if (f->shared <= 0){
-        if (f->type == FD_TYPE_PIPE)
+        if (f->type == FD_TYPE_PIPE) {
             pipe_file_release(f);
-        else
+        } else {
             vfs_drop(f->inode);
+        }
         kfree(f, sizeof(*f));
     }
 
@@ -721,32 +754,65 @@ long vfs_seek(int fd, long offset, int whence) {
     return new_offset;
 }
 
+user_file_t *vfs_file_stat(int fd) {
+    // userfacing structure and function kernel wont really need this
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS)
+        return NULL;
+
+    file_t *f = fd_table->fds[fd];
+    if (!f || !f->inode)
+        return NULL;
+
+    user_file_t *stat = kmalloc(sizeof(*stat));
+    if (!stat)
+        return NULL;
+
+    memset(stat, 0, sizeof(*stat));
+
+    stat->filesize    = vfs_filesize(f->inode);
+    stat->permissions = f->flags & O_MODE;
+
+    // fname -> internal inode name.
+    if (f->inode->internal_data) {
+        const char *name = (const char *)f->inode->internal_data;
+        strncpy(stat->fname, name, sizeof(stat->fname) - 1);
+    }
+
+    return stat;
+}
+
 int inode_create(INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type){
-    if (parent->ops->create == NULL) return status_print_error(UNIMPLEMENTED);
+    if (!parent || !parent->ops || !parent->ops->create) return status_print_error(UNIMPLEMENTED);
     return parent->ops->create(parent, name, namelen, result, node_type);
 }
 
 int inode_lookup(INode_t* dir, const char* name, size_t name_len, INode_t** result){
-    if (dir->ops->lookup == NULL) return status_print_error(UNIMPLEMENTED);
+    if (!dir || !dir->ops || !dir->ops->lookup) return status_print_error(UNIMPLEMENTED);
     return dir->ops->lookup(dir, name, name_len, result);
 }
 
 void inode_drop(INode_t* inode){
-    if (inode->ops->drop == NULL) return;
+    if (!inode || !inode->ops || !inode->ops->drop) return;
     inode->ops->drop(inode);
 }
 
+int inode_truncate(INode_t* inode, size_t new_size){
+    if (!inode || !inode->ops || !inode->ops->truncate) return status_print_error(UNIMPLEMENTED);
+    return inode->ops->truncate(inode, new_size);
+}
+
 long inode_write(INode_t* inode, const void* in_buffer, size_t count, size_t offset){
-    if (inode->ops->write == NULL) return status_print_error(UNIMPLEMENTED);
+    if (!inode || !inode->ops || !inode->ops->write) return status_print_error(UNIMPLEMENTED);
     return inode->ops->write(inode, in_buffer, count, offset);
 }
 
 long inode_read(INode_t* inode, void* out_buffer, size_t count, size_t offset){
-    if (inode->ops->read == NULL) return status_print_error(UNIMPLEMENTED);
+    if (!inode || !inode->ops || !inode->ops->read) return status_print_error(UNIMPLEMENTED);
     return inode->ops->read(inode, out_buffer, count, offset);
 }
 
 int vfs_readdir(INode_t* dir, size_t index, INode_t** result){
-    if(!dir || !dir->ops->readdir) return status_print_error(UNIMPLEMENTED);
+    if(!dir || !dir->ops || !dir->ops->readdir) return status_print_error(UNIMPLEMENTED);
     return dir->ops->readdir(dir, index, result);
 }

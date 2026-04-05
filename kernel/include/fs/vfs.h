@@ -41,6 +41,7 @@ typedef struct INodeOps{
     int    (*create)  (INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type);
     long   (*read)    (INode_t* inode, void* out_buffer, size_t size, size_t offset);
     long   (*write)   (INode_t* inode, const void* in_buffer, size_t size, size_t offset);
+    int    (*truncate)(INode_t* inode, size_t new_size);
     int    (*lookup)  (INode_t* dir, const char* name, size_t name_length, INode_t** result);
     int    (*unlink)  (INode_t* dir, const char* name, size_t name_length);
     int    (*rename)  (INode_t* dir, const char* oldname, size_t oldlen, const char* newname, size_t newlen);
@@ -140,5 +141,6 @@ void vfs_fd_table_drop(fd_table_t *table);
 int inode_create(INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type);
 long inode_read(INode_t* inode, void* buf, size_t count, size_t offset);
 long inode_write(INode_t* inode, const void* buf, size_t count, size_t offset);
+int inode_truncate(INode_t* inode, size_t new_size);
 int inode_lookup(INode_t* dir, const char* name, size_t name_len, INode_t** ret);
 void inode_drop(INode_t* inode);

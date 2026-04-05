@@ -50,6 +50,6 @@ long sys_waitpid(uint64_t pid) {
         }
 
         current->state = TASK_BLOCKED;
-        sched_yield();
+        sched_yield(get_current_task());
     }
 }

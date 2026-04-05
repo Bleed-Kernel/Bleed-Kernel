@@ -128,7 +128,8 @@ task_t *sched_get_task(uint64_t pid);
 
 uint64_t get_task_count();
 task_t *get_current_task();
-void sched_yield(void);
+void sched_yield(task_t *task);
+void sched_block(task_t *task);
 
 void itterate_each_task(task_itteration_fn fn, void *userdata);
 

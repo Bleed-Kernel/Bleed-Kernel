@@ -4,33 +4,17 @@
 #include <stdio.h>
 #include <status.h>
 #include <stdint.h>
+#include <stddef.h>
 
-#define TEMPFS_MAX_NAME_LEN         128
-#define TEMPFS_DATA_CHUNK_SIZE      4096
-#define MAX_ENTRIES_PER_DATA_CHUNK  ((TEMPFS_DATA_CHUNK_SIZE-sizeof(tempfs_data_t))/sizeof(INode_t*))
-#define MAX_FILE_DATA_PER_CHUNK     ((TEMPFS_DATA_CHUNK_SIZE-sizeof(tempfs_data_t)))
+#include "priv_tempfs.h"
 
-const INodeOps_t dir_ops;
-const INodeOps_t file_ops;
-
-#define file_data(data)((char*)((data)+1))
-#define directory_entries(data)((INode_t**)((data)+1))
-
-typedef struct tempfs_data{
-    struct tempfs_data* next_chunk;
-}tempfs_data_t;
-
-typedef struct tempfs_INode{
-    char name[TEMPFS_MAX_NAME_LEN];
-    size_t capacity;
-    tempfs_data_t* data;
-}tempfs_INode_t;
-
+/// @brief sanity check chunk pointers to make sure theyre not silly
+/// @param p data pointer
+/// @return success
 static inline int tempfs_chunk_ptr_sane(const tempfs_data_t* p){
     uintptr_t v = (uintptr_t)p;
     if (!p) return 0;
     if (v & (sizeof(void*) - 1)) return 0;
-    /* x86_64 canonical pointer check */
     {
         uint64_t x = (uint64_t)v;
         uint64_t hi = x >> 48;
@@ -82,7 +66,7 @@ INode_t* tempfs_create_inode(int type, const INodeOps_t* ops){
     return inode;
 }
 
-/// @brief release an inode and empty its contents
+/// @brief release an inode's internal data (does not free the INode_t itself)
 /// @param inode target inode
 void tempfs_drop(INode_t* inode){
     tempfs_INode_t* tempfs_inode = inode->internal_data;
@@ -95,6 +79,60 @@ void tempfs_drop(INode_t* inode){
     }
     kfree(tempfs_inode, sizeof(tempfs_INode_t));
     inode->internal_data = NULL;
+}
+
+/// @brief truncate a file inode to new_size bytes, freeing excess chunks
+/// @param inode target file inode
+/// @param new_size new size in bytes
+/// @return 0 on success, negative on failure
+static int tempfs_truncate(INode_t* inode, size_t new_size){
+    if (!inode || !inode->internal_data)
+        return status_print_error(FILE_NOT_FOUND);
+
+    tempfs_INode_t* tempfs_inode = inode->internal_data;
+
+    if (new_size == tempfs_inode->capacity)
+        return 0;
+
+    if (new_size > tempfs_inode->capacity) {
+        uint8_t z = 0;
+        long r = tempfs_write(inode, &z, 1, new_size - 1);
+        if (r < 0) return (int)r;
+        tempfs_inode->capacity = new_size;
+        return 0;
+    }
+
+    /* Shrink: free chunks beyond new_size and zero-fill the tail of the last kept chunk */
+    size_t chunks_needed = (new_size + MAX_FILE_DATA_PER_CHUNK - 1) / MAX_FILE_DATA_PER_CHUNK;
+    size_t tail_used     = new_size % MAX_FILE_DATA_PER_CHUNK;
+
+    tempfs_data_t* chunk = tempfs_inode->data;
+    tempfs_data_t** prev_next = &tempfs_inode->data;
+    size_t chunk_idx = 0;
+
+    while (chunk && chunk_idx < chunks_needed) {
+        prev_next = &chunk->next_chunk;
+        chunk = chunk->next_chunk;
+        chunk_idx++;
+    }
+
+    /* Zero the unused tail bytes in the last kept chunk */
+    if (chunks_needed > 0 && tail_used > 0 && *prev_next != chunk) {
+        /* prev_next now points to the next_chunk field of the last kept chunk */
+        tempfs_data_t* last = (tempfs_data_t*)((char*)prev_next - offsetof(tempfs_data_t, next_chunk));
+        memset(file_data(last) + tail_used, 0, MAX_FILE_DATA_PER_CHUNK - tail_used);
+    }
+
+    /* Free all chunks past the new end */
+    *prev_next = NULL;
+    while (chunk) {
+        tempfs_data_t* next = chunk->next_chunk;
+        kfree(chunk, TEMPFS_DATA_CHUNK_SIZE);
+        chunk = next;
+    }
+
+    tempfs_inode->capacity = new_size;
+    return 0;
 }
 
 /// @brief create chunk of data and return its structure pointer
@@ -115,10 +153,14 @@ int tempfs_lookup(INode_t* dir, const char* name, size_t namelen, INode_t** resu
     tempfs_INode_t* tempfs_inode = dir->internal_data;
     tempfs_data_t*  data = tempfs_inode->data;
 
-    size_t size = tempfs_inode->capacity;
+    size_t remaining = tempfs_inode->capacity;
 
-    while(data && size > 0){
-        for (size_t i = 0; i < size && i < MAX_ENTRIES_PER_DATA_CHUNK; i++){
+    while(data && remaining > 0){
+        /* Only iterate the entries that are actually populated in this chunk */
+        size_t in_chunk = remaining < MAX_ENTRIES_PER_DATA_CHUNK
+                          ? remaining : MAX_ENTRIES_PER_DATA_CHUNK;
+
+        for (size_t i = 0; i < in_chunk; i++){
             INode_t* child_node = directory_entries(data)[i];
             if (!child_node) continue;
 
@@ -129,7 +171,7 @@ int tempfs_lookup(INode_t* dir, const char* name, size_t namelen, INode_t** resu
                 return 0;
             }
         }
-        size -= size < MAX_ENTRIES_PER_DATA_CHUNK ? size : MAX_ENTRIES_PER_DATA_CHUNK;
+        remaining -= in_chunk;
         data = data->next_chunk;
     }
     return -1;  // file not found
@@ -307,7 +349,7 @@ int tempfs_create(INode_t* parent, const char* name, size_t namelen, INode_t** r
 /// @param dir directory node
 /// @param index n directory
 /// @param result out results
-/// @return always 0
+/// @return 0
 int tempfs_readdir(INode_t* dir, size_t index, INode_t** result){
     tempfs_INode_t* data = dir->internal_data;
     if (index >= data->capacity) return -FILE_NOT_FOUND;
@@ -367,11 +409,13 @@ static int tempfs_unlink(INode_t* dir, const char* name, size_t namelen) {
 
             dir_data->capacity--;
 
-            child->shared--;
-            if (child->shared <= 0) {
-                inode_drop(child);
-                kfree(child, sizeof(*child));
-            }
+            /*
+             * Drop the tree's ref. If no fds are open (shared==1), vfs_drop
+             * will free the inode. If fds are still open (shared==2+), it
+             * stays alive until the last fd is closed.
+             */
+            extern void vfs_drop(INode_t*);
+            vfs_drop(child);
 
             return 0;
         }
@@ -448,10 +492,11 @@ const INodeOps_t dir_ops = {
 };
 
 const INodeOps_t file_ops = {
-    .read   = tempfs_read,
-    .write  = tempfs_write,
-    .drop   = tempfs_drop,
-    .size   = tempfs_size
+    .read     = tempfs_read,
+    .write    = tempfs_write,
+    .truncate = tempfs_truncate,
+    .drop     = tempfs_drop,
+    .size     = tempfs_size
 };
 
 const filesystem tempfs = {
