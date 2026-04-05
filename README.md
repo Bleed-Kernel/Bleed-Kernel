@@ -40,9 +40,6 @@ Generally any reasonable hardware should have this.
 - [ ] Relocatable Executables
 - [ ] Task-Specific Framebuffers
 
-## Known Bugs
-- Running Doom, exiting and then Running doom again will result in a [kernel panic](https://bleedkernel.com/panic.html?sig=P4IAgP%2F%2F%20%2F%2F9QsA8A%20QAAAAAEA%20AAAO)
-
 ## Related Projects
 [The Verdict Shell - Default shell for the Bleed Kernel](https://codeberg.org/Bleed-Kernel/Verdict-Shell)
 
