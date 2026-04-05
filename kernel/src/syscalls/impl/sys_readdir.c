@@ -27,12 +27,13 @@ long sys_readdir(int fd, size_t index, dirent_t *user_ent) {
     if (r < 0)
         return -ENOENT;
 
-    if (!child || !child->internal_data)
+    if (!child)
         return -ENOENT;
 
     dirent_t kent;
     memset(&kent, 0, sizeof(kent));
-    strncpy(kent.name, child->internal_data, sizeof(kent.name) - 1);
+
+    strncpy(kent.name, child->name, sizeof(kent.name) - 1);
     kent.type = child->type;
 
     if (copy_to_user(caller, user_ent, &kent, sizeof(kent)) != 0) {

@@ -11,6 +11,9 @@ BUILD_GIT_COUNT := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
 BUILD_GIT_DIRTY := $(shell if git diff --quiet --ignore-submodules HEAD >/dev/null 2>&1; then echo ""; else echo "-dirty"; fi)
 BUILD_VERSION := r$(BUILD_GIT_COUNT)-g$(BUILD_GIT_HASH)$(BUILD_GIT_DIRTY)
 
+DISK_IMG := disk.img
+DISK_SIZE_MB := 128
+
 CC := cc
 LD := ld
 NM := nm
@@ -52,7 +55,7 @@ USER_BIN_DIR := external/
 INITRD_BIN := initrd/bin
 
 .PHONY: all
-all: $(IMAGE_NAME).iso
+all: $(IMAGE_NAME).iso $(DISK_IMG)
 
 $(PROC_VERSION_FILE): FORCE
 	@mkdir -p $(dir $@)
@@ -147,7 +150,7 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 	rm -rf iso_root
 
 .PHONY: run
-run: $(IMAGE_NAME).iso
+run: $(IMAGE_NAME).iso $(DISK_IMG)
 	qemu-system-x86_64 \
 		--cdrom $(IMAGE_NAME).iso \
 		--enable-kvm \
@@ -155,11 +158,11 @@ run: $(IMAGE_NAME).iso
 		-boot d \
 		-m $(MEMSZ) \
 		-serial stdio \
-		-device virtio-balloon
-		
+		-display sdl \
+		-drive format=raw,file=disk.img
 
 .PHONY: run-uefi
-run-uefi: $(IMAGE_NAME).iso
+run-uefi: $(IMAGE_NAME).iso $(DISK_IMG)
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		--cdrom $(IMAGE_NAME).iso \
@@ -168,7 +171,20 @@ run-uefi: $(IMAGE_NAME).iso
 		-boot d \
 		-m $(MEMSZ) \
 		-serial stdio \
-		-display sdl
+		-display sdl \
+		-drive format=raw,file=disk.img
+
+$(DISK_IMG):
+	@echo "[DISK] Creating $(DISK_IMG) ($(DISK_SIZE_MB)MB)"
+	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
+	@echo "[DISK] Partitioning..."
+	@parted -s $(DISK_IMG) mklabel msdos mkpart primary fat32 1MiB 100%
+	@echo "[DISK] Formatting FAT32 partition..."
+	@mformat -i $(DISK_IMG)@@1M -F ::
+	@echo "[DISK] Adding hello.txt"
+	@echo "hello from bleed :)" > .hello.txt
+	@mcopy -i $(DISK_IMG)@@1M .hello.txt ::/hello.txt
+	@rm .hello.txt
 
 .PHONY: clean
 clean:

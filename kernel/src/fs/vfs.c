@@ -1,4 +1,5 @@
 #include <fs/vfs.h>
+#include <fs/vfs_mount.h>
 #include <string.h>
 #include <ansii.h>
 #include <stdio.h>
@@ -160,6 +161,27 @@ int vfs_lookup(const path_t* path, INode_t** out_inode){
             return -FILE_NOT_FOUND;
         }
 
+        // apply the component name this was my fix for the weird fs issues
+        if (next && next->name[0] == '\0') {
+            size_t copy_len = comp_len < sizeof(next->name) - 1
+                              ? comp_len : sizeof(next->name) - 1;
+            memcpy(next->name, comp_start, copy_len);
+            next->name[copy_len] = '\0';
+        }
+
+        // If "next" is a mount point transparently redirect into the mounted 
+        // filesystem's root instead
+        INode_t *mounted = vfs_mount_resolve(next);
+        if (mounted) {
+            if (mounted->name[0] == '\0') {
+                size_t copy_len = comp_len < sizeof(mounted->name) - 1
+                                  ? comp_len : sizeof(mounted->name) - 1;
+                memcpy(mounted->name, comp_start, copy_len);
+                mounted->name[copy_len] = '\0';
+            }
+            next = mounted;
+        }
+
         current_inode = next;
     }
     if (current_inode){ // each caller still gets its own ref
@@ -208,6 +230,12 @@ int vfs_create(const path_t* path, INode_t** out_result, inode_type node_type){
     if (e == 0 && *out_result) {
         (*out_result)->parent = parent_inode;
         (*out_result)->shared++;    // bump ref because it starts with 1, the tree ref but this should also have one
+        
+        // Store the component name so getcwd can walk up the tree
+        size_t copy_len = namelen < sizeof((*out_result)->name) - 1
+                          ? namelen : sizeof((*out_result)->name) - 1;
+        memcpy((*out_result)->name, name, copy_len);
+        (*out_result)->name[copy_len] = '\0';
     }
 
     vfs_drop(parent_inode);
@@ -419,6 +447,7 @@ int vfs_open(const char *path_str, int flags){
         if (!(flags & O_CREAT)) return l;
         l = vfs_create(&path, &inode, INODE_FILE);
         if (l < 0) return l;
+        // do not bump here! the file structure owns the caller ref and vfs_create ends up with shared = 2
     }
 
     file_t *f = kmalloc(sizeof(*f));
@@ -500,7 +529,7 @@ long vfs_read(int fd, void *buf, size_t count) {
         }
 
         if (r < 0)
-            return r;   // no data?
+            return r;
 
         if (f->type == FD_TYPE_PIPE)
             return 0;
@@ -508,11 +537,11 @@ long vfs_read(int fd, void *buf, size_t count) {
         if (is_size_finite)
             return 0;
 
-        // block the task rather than spinning while we wait
+        // Block the task rather than spinning while we wait for device data
         if (current) {
-            sched_block(get_current_task());
+            sched_block(current);
         } else {
-            sched_yield(get_current_task());
+            sched_yield(current);
         }
 
         if (signal_should_interrupt(current))
@@ -631,7 +660,7 @@ int vfs_mkdir(const char *path_str) {
         return r;
 
     if (inode)
-        vfs_drop(inode);
+        vfs_drop(inode); // release caller ref tree holds its own
 
     return 0;
 }

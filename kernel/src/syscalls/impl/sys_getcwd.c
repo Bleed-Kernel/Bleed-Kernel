@@ -17,6 +17,7 @@ long sys_getcwd(char *buf, long size) {
     INode_t *inode = task->current_directory;
     char kpath[PATH_MAX];
 
+    // fast root
     if (inode == vfs_get_root()) {
         if (size < 2)
             return -ERANGE;
@@ -30,12 +31,15 @@ long sys_getcwd(char *buf, long size) {
     size_t total_len = 0;
     INode_t *cur = inode;
     while (cur && cur != vfs_get_root()) {
-        if (!cur->internal_data)
+        size_t nlen = strlen(cur->name);
+        if (nlen == 0) {
             return -EIO;
-        total_len += strlen(cur->internal_data) + 1;
+        }
+        total_len += 1 + nlen;  // '/{name}'
         cur = cur->parent;
     }
 
+    // +1 for null terminator, path itself starts with '/' already accounted for
     if (total_len + 1 > (size_t)size || total_len + 1 > sizeof(kpath))
         return -ERANGE;
 
@@ -43,10 +47,9 @@ long sys_getcwd(char *buf, long size) {
     cur = inode;
     size_t pos = total_len;
     while (cur && cur != vfs_get_root()) {
-        const char *name = cur->internal_data;
-        size_t len = strlen(name);
-        pos -= len;
-        memcpy(kpath + pos, name, len);
+        size_t nlen = strlen(cur->name);
+        pos -= nlen;
+        memcpy(kpath + pos, cur->name, nlen);
         pos--;
         kpath[pos] = '/';
         cur = cur->parent;

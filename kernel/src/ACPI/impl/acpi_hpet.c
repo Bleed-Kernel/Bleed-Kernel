@@ -66,6 +66,10 @@ void wait_s(uint64_t s) {
     wait_fs(s * femtosecondsPerSecond);
 }
 
+void wait_ns(uint64_t ns) {
+    wait_fs(ns * femtosecondsPerNanosecond);
+}
+
 uint64_t hpet_get_femtoseconds(){
     if (!address || femtosecondsPerTick == 0)
         return 0;

@@ -42,6 +42,10 @@
 #include <cpu/features/features.h>
 #include <devices/type/serial_device.h>
 #include <devices/type/hpet_device.h>
+#include <drivers/ide/ide.h>
+#include <fs/fat32/fat32.h>
+#include <devices/type/blk_device.h>
+#include <fs/vfs_mount.h>
 
 #define KERNEL_BOOT_TTY_COUNT 4
 #define KERNEL_MAX_LAZY_TTYS 12
@@ -263,6 +267,26 @@ void kmain() {
     PS2_Keyboard_init();
     PS2_Mouse_init();
     serial_device_register();
+
+/*
+    HARDCODED SHITE :/
+    - make mount and unmount a systemcall
+    - mount and unmount programs so we can do it manually
+    - some sort of file system table?
+*/
+    ide_init();
+
+    INode_t *partition_node = device_get_by_name("hda1");
+
+    if (partition_node) {
+        blk_device_t *blk = (blk_device_t *)partition_node->internal_data;
+        vfs_mkdir("/mnt"); 
+
+        
+        if (vfs_mount("/mnt", blk) == 0) {
+            serial_printf(LOG_OK "fat32: Mounted to /mnt\n");
+        }
+    }
 
     scheduler_start();
 

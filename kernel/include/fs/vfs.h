@@ -57,6 +57,7 @@ typedef struct INode {
     const   INodeOps_t* ops;
     void*   internal_data;
     struct  INode* parent;
+    char    name[256]; // decided by whoever makes it
 } INode_t;
 
 typedef struct file {

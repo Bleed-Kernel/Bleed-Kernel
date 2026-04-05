@@ -70,6 +70,6 @@ void mouse_device_init(void) {
     mouse_device->device.internal_data = mouse_device;
     mouse_device->device.type = INODE_DEVICE;
 
-    device_register(&mouse_device->device, "mouse0");
+    device_register(&mouse_device->device, "mouse");
     mouse_register_listener(mouse_listener);
 }

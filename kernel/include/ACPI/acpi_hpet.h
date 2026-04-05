@@ -5,6 +5,7 @@
 #define femtosecondsPerSecond       1000000000000000
 #define femtosecondsPerMillisecond  1000000000000
 #define femtosecondsPerMicrosecond  1000000000
+#define femtosecondsPerNanosecond   1000
 
 #define HPET_MAINCOUNTER_ENABLE 0b1
 #define HPET_LEGACY_REPLACEMENT 0b01
@@ -46,6 +47,7 @@ static inline uint64_t hpet_read_counter(void) {
 
 uint64_t hpet_get_femtoseconds();
 
+void wait_ns(uint64_t ns);
 void wait_us(uint64_t us);
 void wait_ms(uint64_t ms);
 void wait_s(uint64_t s);

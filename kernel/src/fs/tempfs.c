@@ -49,6 +49,7 @@ static INode_t **tempfs_entry_ptr(tempfs_INode_t *dir, size_t index) {
 INode_t* tempfs_create_inode(int type, const INodeOps_t* ops){
     INode_t* inode = kmalloc(sizeof(*inode));
     if (inode){
+        memset(inode, 0, sizeof(*inode));   // ensure name is zero'd
         tempfs_INode_t* data = kmalloc(sizeof(*data));
         if (data){
             inode->type = type;
