@@ -2,6 +2,7 @@
 #include <devices/devices.h>
 #include <devices/type/blk_device.h>
 #include <fs/vfs.h>
+#include <fs/partition.h>
 #include <mm/kalloc.h>
 #include <mm/spinlock.h>
 #include <drivers/serial/serial.h>
@@ -192,36 +193,12 @@ ide_drive_t *ide_get_drive(int index) {
     return ide_drives[index].present ? &ide_drives[index] : NULL;
 }
 
-// MBR Parse
-
-static void ide_read_partitions(ide_drive_t *drive) {
-    uint8_t sector[IDE_SECTOR_SIZE];
-    if (ide_read_sectors(drive, 0, 1, sector) < 0) {
-        serial_printf(LOG_WARN "ide: failed to read MBR\n");
-        return;
-    }
-
-    mbr_t *mbr = (mbr_t *)sector;
-    if (mbr->signature != MBR_SIGNATURE) {
-        serial_printf(LOG_WARN "ide: MBR signature invalid (0x%04x)\n", mbr->signature);
-        return;
-    }
-
-    for (int i = 0; i < MBR_PARTITION_COUNT; i++) {
-        mbr_partition_entry_t *p = &mbr->partitions[i];
-        if (p->type == 0 || p->sector_count == 0)
-            continue;
-        drive->partitions[i].present      = true;
-        drive->partitions[i].type         = p->type;
-        drive->partitions[i].lba_start    = p->lba_start;
-        drive->partitions[i].sector_count = p->sector_count;
-        serial_printf(LOG_OK "ide: partition %d type=0x%x lba=%u sectors=%u\n",
-                      i + 1, p->type, p->lba_start, p->sector_count);
-    }
+// Wrapper for partition_probe to bridge uint8_t count to uint16_t count ABI cleanly
+static int ide_read_sectors_wrapper(void *drive, uint64_t lba, uint16_t count, void *buf) {
+    return ide_read_sectors((ide_drive_t *)drive, (uint32_t)lba, (uint8_t)count, buf);
 }
 
 // register the device within bleed, block device inode ops
-
 static long blk_inode_read(INode_t *inode, void *buf, size_t count, size_t offset) {
     blk_device_t *blk = inode->internal_data;
     if (!blk || count == 0) return 0;
@@ -320,7 +297,6 @@ static void ide_register_drive(int drive_idx, ide_drive_t *drive) {
     inode->internal_data = blk;
     inode->shared        = 1;
 
-    /* Store inode pointer inside blk so partitions can reference it */
     blk->inode = inode;
 
     if (device_register(inode, dev_name) < 0) {
@@ -331,68 +307,48 @@ static void ide_register_drive(int drive_idx, ide_drive_t *drive) {
     }
     serial_printf(LOG_OK "ide: registered /dev/%s (%s, %u sectors)\n",
                   dev_name, drive->model, drive->sector_count);
-
-    /* Register partitions */
-    for (int p = 0; p < IDE_MAX_PARTITIONS; p++) {
-        if (!drive->partitions[p].present) continue;
-
-        char part_name[12];
-        snprintf(part_name, sizeof(part_name), "hd%c%d", 'a' + drive_idx, p + 1);
-
-        blk_device_t *pblk = kmalloc(sizeof(blk_device_t));
-        if (!pblk) continue;
-        memset(pblk, 0, sizeof(*pblk));
-        pblk->drive        = drive;
-        pblk->lba_start    = drive->partitions[p].lba_start;
-        pblk->sector_count = drive->partitions[p].sector_count;
-
-        INode_t *pinode = kmalloc(sizeof(INode_t));
-        if (!pinode) { kfree(pblk, sizeof(*pblk)); continue; }
-        memset(pinode, 0, sizeof(*pinode));
-        pinode->type          = INODE_DEVICE;
-        pinode->ops           = &blk_inode_ops;
-        pinode->internal_data = pblk;
-        pinode->shared        = 1;
-        pblk->inode           = pinode;
-
-        if (device_register(pinode, part_name) < 0) {
-            serial_printf(LOG_WARN "ide: failed to register /dev/%s\n", part_name);
-            kfree(pinode, sizeof(*pinode));
-            kfree(pblk, sizeof(*pblk));
-            continue;
-        }
-        serial_printf(LOG_OK "ide: registered /dev/%s (lba=%u sectors=%u type=0x%x)\n",
-                      part_name,
-                      drive->partitions[p].lba_start,
-                      drive->partitions[p].sector_count,
-                      drive->partitions[p].type);
-    }
 }
 
-/* ── ide_init ─────────────────────────────────────────────────────────── */
+// Callback invoked by partition_probe for each partition found
+static void ide_register_part_cb(void *drive_obj, int drive_idx, int part_idx, uint64_t start, uint64_t count, uint8_t type) {
+    ide_drive_t *drive = (ide_drive_t *)drive_obj;
+    char part_name[16];
+    snprintf(part_name, sizeof(part_name), "hd%c%d", 'a' + drive_idx, part_idx + 1);
 
-/*
- * Drive index layout:
- *   0 = primary master   (base=0x1F0, slave=false)
- *   1 = primary slave    (base=0x1F0, slave=true)
- *   2 = secondary master (base=0x170, slave=false)
- *   3 = secondary slave  (base=0x170, slave=true)
- */
+    blk_device_t *pblk = kmalloc(sizeof(blk_device_t));
+    if (!pblk) return;
+    memset(pblk, 0, sizeof(*pblk));
+    pblk->drive        = drive;
+    pblk->lba_start    = (uint32_t)start;
+    pblk->sector_count = (uint32_t)count;
+
+    INode_t *pinode = kmalloc(sizeof(INode_t));
+    if (!pinode) { kfree(pblk, sizeof(*pblk)); return; }
+    memset(pinode, 0, sizeof(*pinode));
+    pinode->type          = INODE_DEVICE;
+    pinode->ops           = &blk_inode_ops;
+    pinode->internal_data = pblk;
+    pinode->shared        = 1;
+    pblk->inode           = pinode;
+
+    if (device_register(pinode, part_name) < 0) {
+        serial_printf(LOG_WARN "ide: failed to register /dev/%s\n", part_name);
+        kfree(pinode, sizeof(*pinode));
+        kfree(pblk, sizeof(*pblk));
+        return;
+    }
+    serial_printf(LOG_OK "ide: registered /dev/%s (lba=%u sectors=%u type=0x%x)\n",
+                  part_name, (uint32_t)start, (uint32_t)count, type);
+}
+
 void ide_init(void) {
     memset(ide_drives, 0, sizeof(ide_drives));
 
-    /*
-     * Software reset both buses before probing. Writing bit 2 (SRST) to the
-     * device control register resets the bus; clearing it releases it.
-     * This puts the controller in a known state regardless of what BIOS left.
-     */
     outb(ATA_PRIMARY_CTRL,   0x04); /* assert SRST */
     outb(ATA_SECONDARY_CTRL, 0x04);
-    /* Hold for ~5us - a few port reads is enough at PIO speeds */
     for (int i = 0; i < 4; i++) inb(ATA_PRIMARY_CTRL);
     outb(ATA_PRIMARY_CTRL,   0x02); /* release SRST, set nIEN to disable IRQs */
     outb(ATA_SECONDARY_CTRL, 0x02);
-    /* Give drives time to complete reset - ~2ms */
     for (int i = 0; i < 4000; i++) inb(ATA_PRIMARY_CTRL);
 
     struct { uint16_t base; uint16_t ctrl; bool slave; } probes[IDE_MAX_DRIVES] = {
@@ -408,7 +364,7 @@ void ide_init(void) {
             continue;
         }
 
-        ide_read_partitions(&ide_drives[i]);
         ide_register_drive(i, &ide_drives[i]);
+        partition_probe(&ide_drives[i], i, ide_read_sectors_wrapper, ide_register_part_cb);
     }
 }

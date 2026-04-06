@@ -184,7 +184,7 @@ run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK)
 $(IDE_DISK):
 	@echo "[DISK] Creating $(IDE_DISK) ($(DISK_SIZE_MB)MB)"
 	@dd if=/dev/zero of=$(IDE_DISK) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
-	@echo "[DISK] Partitioning IDE..."
+	@echo "[DISK] Partitioning IDE (MBR)..."
 	@parted -s $(IDE_DISK) mklabel msdos mkpart primary fat32 1MiB 100%
 	@echo "[DISK] Formatting IDE FAT32 partition..."
 	@mformat -i $(IDE_DISK)@@1M -F ::
@@ -196,8 +196,8 @@ $(IDE_DISK):
 $(SATA_DISK):
 	@echo "[DISK] Creating $(SATA_DISK) ($(DISK_SIZE_MB)MB)"
 	@dd if=/dev/zero of=$(SATA_DISK) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
-	@echo "[DISK] Partitioning SATA..."
-	@parted -s $(SATA_DISK) mklabel msdos mkpart primary fat32 1MiB 100%
+	@echo "[DISK] Partitioning SATA (GPT)..."
+	@parted -s $(SATA_DISK) mklabel gpt mkpart primary fat32 1MiB 100%
 	@echo "[DISK] Formatting SATA FAT32 partition..."
 	@mformat -i $(SATA_DISK)@@1M -F ::
 	@echo "[DISK] Adding hello.txt to SATA"

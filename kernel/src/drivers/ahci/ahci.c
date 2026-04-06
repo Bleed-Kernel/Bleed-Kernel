@@ -4,6 +4,7 @@
 #include <devices/devices.h>
 #include <devices/type/blk_device.h>
 #include <fs/vfs.h>
+#include <fs/partition.h>
 #include <mm/kalloc.h>
 #include <mm/pmm.h>
 #include <mm/paging.h>
@@ -236,7 +237,7 @@ static bool ahci_identify(ahci_drive_t *drive) {
     uint64_t id_phys = PHYS(id);
     ct->prdt[0].dba  = (uint32_t)(id_phys & 0xFFFFFFFF);
     ct->prdt[0].dbau = (uint32_t)(id_phys >> 32);
-    ct->prdt[0].dbc  = 511;   /* 512 bytes - 1 */
+    ct->prdt[0].dbc  = 511;
 
     ahci_cmd_header_t *hdr = &drive->cmd_list[0];
     hdr->flags = (uint16_t)(sizeof(fis_reg_h2d_t) / 4);
@@ -294,36 +295,11 @@ ahci_drive_t *ahci_get_drive(int index) {
     return ahci_drives[index].present ? &ahci_drives[index] : NULL;
 }
 
-// MBR Parse
-
-static void ahci_read_partitions(ahci_drive_t *drive) {
-    uint8_t sector[AHCI_SECTOR_SIZE];
-    if (ahci_read_sectors(drive, 0, 1, sector) < 0) {
-        serial_printf(LOG_WARN "ahci: failed to read MBR on port %u\n", drive->port);
-        return;
-    }
-
-    mbr_t *mbr = (mbr_t *)sector;
-    if (mbr->signature != MBR_SIGNATURE) {
-        serial_printf(LOG_WARN "ahci: bad MBR signature 0x%04x on port %u\n",
-                      mbr->signature, drive->port);
-        return;
-    }
-
-    for (int i = 0; i < 4; i++) {
-        mbr_partition_entry_t *p = &mbr->partitions[i];
-        if (p->type == 0 || p->sector_count == 0) continue;
-        drive->partitions[i].present      = true;
-        drive->partitions[i].type         = p->type;
-        drive->partitions[i].lba_start    = p->lba_start;
-        drive->partitions[i].sector_count = p->sector_count;
-        serial_printf(LOG_OK "ahci: port %u partition %d type=0x%02x "
-                      "lba=%u sectors=%u\n", drive->port, i + 1,
-                      p->type, p->lba_start, p->sector_count);
-    }
+// Wrapper for partition_probe
+static int ahci_read_sectors_wrapper(void *drive, uint64_t lba, uint16_t count, void *buf) {
+    return ahci_read_sectors((ahci_drive_t *)drive, lba, count, buf);
 }
 
-// device logic
 typedef struct {
     ahci_drive_t *drive;
     uint64_t      lba_start;
@@ -432,41 +408,38 @@ static void ahci_register_drive(int drive_idx, ahci_drive_t *drive) {
     }
     serial_printf(LOG_OK "ahci: /dev/%s - %s (%llu sectors)\n",
                   dev_name, drive->model, drive->sector_count);
+}
 
-    for (int p = 0; p < AHCI_MAX_PARTITIONS; p++) {
-        if (!drive->partitions[p].present) continue;
+// Callback invoked by partition_probe for each partition found
+static void ahci_register_part_cb(void *drive_obj, int drive_idx, int part_idx, uint64_t start, uint64_t count, uint8_t type) {
+    ahci_drive_t *drive = (ahci_drive_t *)drive_obj;
+    char part_name[16];
+    snprintf(part_name, sizeof(part_name), "sd%c%d", 'a' + drive_idx, part_idx + 1);
 
-        char part_name[12];
-        snprintf(part_name, sizeof(part_name), "sd%c%d", 'a' + drive_idx, p + 1);
+    ahci_blk_t *pblk = kmalloc(sizeof(*pblk));
+    if (!pblk) return;
+    memset(pblk, 0, sizeof(*pblk));
+    pblk->drive        = drive;
+    pblk->lba_start    = start;
+    pblk->sector_count = count;
 
-        ahci_blk_t *pblk = kmalloc(sizeof(*pblk));
-        if (!pblk) continue;
-        memset(pblk, 0, sizeof(*pblk));
-        pblk->drive        = drive;
-        pblk->lba_start    = drive->partitions[p].lba_start;
-        pblk->sector_count = drive->partitions[p].sector_count;
+    INode_t *pinode = kmalloc(sizeof(*pinode));
+    if (!pinode) { kfree(pblk, sizeof(*pblk)); return; }
+    memset(pinode, 0, sizeof(*pinode));
+    pinode->type          = INODE_DEVICE;
+    pinode->ops           = &ahci_blk_ops;
+    pinode->internal_data = pblk;
+    pinode->shared        = 1;
+    pblk->inode           = pinode;
 
-        INode_t *pinode = kmalloc(sizeof(*pinode));
-        if (!pinode) { kfree(pblk, sizeof(*pblk)); continue; }
-        memset(pinode, 0, sizeof(*pinode));
-        pinode->type          = INODE_DEVICE;
-        pinode->ops           = &ahci_blk_ops;
-        pinode->internal_data = pblk;
-        pinode->shared        = 1;
-        pblk->inode           = pinode;
-
-        if (device_register(pinode, part_name) < 0) {
-            serial_printf(LOG_WARN "ahci: failed to register /dev/%s\n", part_name);
-            kfree(pinode, sizeof(*pinode));
-            kfree(pblk, sizeof(*pblk));
-            continue;
-        }
-        serial_printf(LOG_OK "ahci: /dev/%s lba=%u sectors=%u type=0x%02x\n",
-                      part_name,
-                      drive->partitions[p].lba_start,
-                      drive->partitions[p].sector_count,
-                      drive->partitions[p].type);
+    if (device_register(pinode, part_name) < 0) {
+        serial_printf(LOG_WARN "ahci: failed to register /dev/%s\n", part_name);
+        kfree(pinode, sizeof(*pinode));
+        kfree(pblk, sizeof(*pblk));
+        return;
     }
+    serial_printf(LOG_OK "ahci: registered /dev/%s (lba=%llu sectors=%llu type=0x%02x)\n",
+                  part_name, start, count, type);
 }
 
 void ahci_init(void) {
@@ -534,11 +507,9 @@ void ahci_init(void) {
     for (int port = 0; port < AHCI_MAX_PORTS && drive_idx < AHCI_MAX_DRIVES; port++) {
         if (!(pi & (1u << port))) continue;
 
-        /* Check SATA status - device present and PHY established? */
         uint32_t ssts = port_read(abar, (uint8_t)port, AHCI_PORT_SSTS);
         if ((ssts & AHCI_SSTS_DET_MASK) != AHCI_SSTS_DET_PRESENT) continue;
 
-        /* Check signature - only handle ATA disks, skip ATAPI */
         uint32_t sig = port_read(abar, (uint8_t)port, AHCI_PORT_SIG);
         if (sig == AHCI_SIG_ATAPI) {
             serial_printf(LOG_INFO "ahci: port %d is ATAPI - skipping\n", port);
@@ -568,8 +539,9 @@ void ahci_init(void) {
         drive->present = true;
         ahci_drive_count++;
 
-        ahci_read_partitions(drive);
+
         ahci_register_drive(drive_idx, drive);
+        partition_probe(drive, drive_idx, ahci_read_sectors_wrapper, ahci_register_part_cb);
         drive_idx++;
     }
 
