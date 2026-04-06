@@ -1,7 +1,7 @@
 #include <fs/fat32/fat32.h>
 #include <fs/vfs.h>
-#include <devices/type/blk_device.h>
-#include <drivers/ide/ide.h>
+
+
 #include <mm/kalloc.h>
 #include <string.h>
 #include <stdio.h>
@@ -9,30 +9,41 @@
 #include <ansii.h>
 #include <status.h>
 #include <stddef.h>
-#include <fs/fat32/fat32.h>
 
-const INodeOps_t fat32_dir_ops;
-const INodeOps_t fat32_file_ops;
+/* Forward declarations */
+static int fat32_lookup(INode_t *dir, const char *name, size_t namelen, INode_t **result);
+static long fat32_read(INode_t *inode, void *buf, size_t count, size_t offset);
+static long fat32_write(INode_t *inode, const void *buf, size_t count, size_t offset);
+static int fat32_readdir(INode_t *dir, size_t index, INode_t **result);
+static int fat32_create(INode_t *parent, const char *name, size_t namelen, INode_t **result, inode_type node_type);
+static int fat32_unlink(INode_t *dir, const char *name, size_t namelen);
+static int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen, const char *newname, size_t newlen);
+static int fat32_truncate(INode_t *inode, size_t new_size);
+static size_t fat32_size(INode_t *inode);
+static void fat32_drop(INode_t *inode);
 
-int fat32_read_bytes(fat32_fs_t *fs, uint32_t lba, size_t off,
+static const INodeOps_t fat32_dir_ops;
+static const INodeOps_t fat32_file_ops;
+
+static int fat32_read_bytes(fat32_fs_t *fs, uint32_t lba, size_t off,
                              void *buf, size_t count) {
     size_t abs_off = (size_t)lba * fs->bytes_per_sector + off;
-    long r = blk_read(fs->blk, buf, count, abs_off);
+    long r = inode_read(fs->dev, buf, count, abs_off);
     return (r < 0) ? -1 : 0;
 }
 
-int fat32_write_bytes(fat32_fs_t *fs, uint32_t lba, size_t off,
+static int fat32_write_bytes(fat32_fs_t *fs, uint32_t lba, size_t off,
                               const void *buf, size_t count) {
     size_t abs_off = (size_t)lba * fs->bytes_per_sector + off;
-    long r = blk_write(fs->blk, buf, count, abs_off);
+    long r = inode_write(fs->dev, buf, count, abs_off);
     return (r < 0) ? -1 : 0;
 }
 
-uint32_t fat32_cluster_to_lba(fat32_fs_t *fs, uint32_t cluster) {
+static uint32_t fat32_cluster_to_lba(fat32_fs_t *fs, uint32_t cluster) {
     return fs->data_start_lba + (cluster - 2) * fs->sectors_per_cluster;
 }
 
-uint32_t fat32_read_fat(fat32_fs_t *fs, uint32_t cluster) {
+static uint32_t fat32_read_fat(fat32_fs_t *fs, uint32_t cluster) {
     uint32_t fat_offset  = cluster * 4;
     uint32_t fat_sector  = fs->fat_start_lba + fat_offset / fs->bytes_per_sector;
     uint32_t fat_off_in  = fat_offset % fs->bytes_per_sector;
@@ -42,7 +53,7 @@ uint32_t fat32_read_fat(fat32_fs_t *fs, uint32_t cluster) {
     return val & FAT32_CLUSTER_MASK;
 }
 
-int fat32_write_fat(fat32_fs_t *fs, uint32_t cluster, uint32_t value) {
+static int fat32_write_fat(fat32_fs_t *fs, uint32_t cluster, uint32_t value) {
     uint32_t fat_offset = cluster * 4;
     uint32_t fat_sector = fat_offset / fs->bytes_per_sector;
     uint32_t fat_off_in = fat_offset % fs->bytes_per_sector;
@@ -56,7 +67,7 @@ int fat32_write_fat(fat32_fs_t *fs, uint32_t cluster, uint32_t value) {
     return 0;
 }
 
-uint32_t fat32_alloc_cluster(fat32_fs_t *fs, uint32_t prev) {
+static uint32_t fat32_alloc_cluster(fat32_fs_t *fs, uint32_t prev) {
     for (uint32_t c = 2; c < fs->total_clusters + 2; c++) {
         if (fat32_read_fat(fs, c) == FAT32_CLUSTER_FREE) {
             if (fat32_write_fat(fs, c, 0x0FFFFFFF) < 0)
@@ -76,7 +87,7 @@ uint32_t fat32_alloc_cluster(fat32_fs_t *fs, uint32_t prev) {
     return 0;
 }
 
-void fat32_free_chain(fat32_fs_t *fs, uint32_t start) {
+static void fat32_free_chain(fat32_fs_t *fs, uint32_t start) {
     uint32_t cur = start;
     while (cur >= 2 && cur < FAT32_CLUSTER_EOC) {
         uint32_t next = fat32_read_fat(fs, cur);
@@ -85,8 +96,8 @@ void fat32_free_chain(fat32_fs_t *fs, uint32_t start) {
     }
 }
 
-// FAT uses their weird naming standard so we can convert it becuase its not the 1990s anymore
-bool fat32_name_to_83(const char *name, size_t len, char *out) {
+// name helper for fat -> normal fucking name
+static bool fat32_name_to_83(const char *name, size_t len, char *out) {
     memset(out, ' ', 11);
     size_t dot = len;
 
@@ -112,7 +123,7 @@ bool fat32_name_to_83(const char *name, size_t len, char *out) {
     return true;
 }
 
-void fat32_83_to_name(const fat32_dirent_t *de, char *out, size_t outsz) {
+static void fat32_83_to_name(const fat32_dirent_t *de, char *out, size_t outsz) {
     char base[9] = {0}, ext[4] = {0};
     int bl = 0, el = 0;
 
@@ -136,7 +147,7 @@ void fat32_83_to_name(const fat32_dirent_t *de, char *out, size_t outsz) {
         snprintf(out, outsz, "%s", base);
 }
 
-bool fat32_name_matches(const fat32_dirent_t *de, const char *name, size_t len) {
+static bool fat32_name_matches(const fat32_dirent_t *de, const char *name, size_t len) {
     char namebuf[13];
     fat32_83_to_name(de, namebuf, sizeof(namebuf));
     size_t bl = strlen(namebuf);
@@ -157,14 +168,14 @@ typedef struct {
     uint32_t    abs_index;
 } fat32_dir_iter_t;
 
-void fat32_iter_init(fat32_dir_iter_t *it, fat32_fs_t *fs, uint32_t first_cluster) {
+static void fat32_iter_init(fat32_dir_iter_t *it, fat32_fs_t *fs, uint32_t first_cluster) {
     it->fs        = fs;
     it->cluster   = first_cluster;
     it->offset    = 0;
     it->abs_index = 0;
 }
 
-bool fat32_iter_next_raw(fat32_dir_iter_t *it, fat32_dirent_t *de,
+static bool fat32_iter_next_raw(fat32_dir_iter_t *it, fat32_dirent_t *de,
                                  uint32_t *out_cluster, uint32_t *out_off) {
     fat32_fs_t *fs = it->fs;
 
@@ -192,7 +203,7 @@ bool fat32_iter_next_raw(fat32_dir_iter_t *it, fat32_dirent_t *de,
     return false;
 }
 
-bool fat32_iter_next(fat32_dir_iter_t *it, fat32_dirent_t *de,
+static bool fat32_iter_next(fat32_dir_iter_t *it, fat32_dirent_t *de,
                              uint32_t *out_cluster, uint32_t *out_off) {
     fat32_dirent_t raw;
     uint32_t rc, ro;
@@ -209,7 +220,8 @@ bool fat32_iter_next(fat32_dir_iter_t *it, fat32_dirent_t *de,
     return false;
 }
 
-INode_t *fat32_make_inode(fat32_fs_t *fs, const fat32_dirent_t *de,
+// build the inode
+static INode_t *fat32_make_inode(fat32_fs_t *fs, const fat32_dirent_t *de,
                                   uint32_t dirent_cluster, uint32_t dirent_off,
                                   INode_t *parent) {
     bool is_dir = (de->attr & FAT32_ATTR_DIRECTORY) != 0;
@@ -234,12 +246,13 @@ INode_t *fat32_make_inode(fat32_fs_t *fs, const fat32_dirent_t *de,
     inode->parent        = parent;
     inode->shared        = 1;
 
+    // populate inode name
     fat32_83_to_name(de, inode->name, sizeof(inode->name));
 
     return inode;
 }
 
-int fat32_lookup(INode_t *dir, const char *name, size_t namelen, INode_t **result) {
+static int fat32_lookup(INode_t *dir, const char *name, size_t namelen, INode_t **result) {
     fat32_inode_t *fi = dir->internal_data;
     fat32_fs_t    *fs = fi->fs;
 
@@ -271,7 +284,7 @@ int fat32_lookup(INode_t *dir, const char *name, size_t namelen, INode_t **resul
     return -FILE_NOT_FOUND;
 }
 
-long fat32_read(INode_t *inode, void *buf, size_t count, size_t offset) {
+static long fat32_read(INode_t *inode, void *buf, size_t count, size_t offset) {
     fat32_inode_t *fi = inode->internal_data;
     fat32_fs_t    *fs = fi->fs;
 
@@ -320,7 +333,7 @@ long fat32_read(INode_t *inode, void *buf, size_t count, size_t offset) {
     return (long)read_total;
 }
 
-long fat32_write(INode_t *inode, const void *buf, size_t count, size_t offset) {
+static long fat32_write(INode_t *inode, const void *buf, size_t count, size_t offset) {
     fat32_inode_t *fi = inode->internal_data;
     fat32_fs_t    *fs = fi->fs;
 
@@ -423,7 +436,7 @@ long fat32_write(INode_t *inode, const void *buf, size_t count, size_t offset) {
     return (long)written_total;
 }
 
-int fat32_truncate(INode_t *inode, size_t new_size) {
+static int fat32_truncate(INode_t *inode, size_t new_size) {
     fat32_inode_t *fi = inode->internal_data;
     fat32_fs_t    *fs = fi->fs;
 
@@ -462,18 +475,18 @@ int fat32_truncate(INode_t *inode, size_t new_size) {
     return 0;
 }
 
-size_t fat32_size(INode_t *inode) {
+static size_t fat32_size(INode_t *inode) {
     fat32_inode_t *fi = inode->internal_data;
     return fi ? fi->file_size : 0;
 }
 
-void fat32_drop(INode_t *inode) {
+static void fat32_drop(INode_t *inode) {
     if (!inode || !inode->internal_data) return;
     kfree(inode->internal_data, sizeof(fat32_inode_t));
     inode->internal_data = NULL;
 }
 
-int fat32_readdir(INode_t *dir, size_t index, INode_t **result) {
+static int fat32_readdir(INode_t *dir, size_t index, INode_t **result) {
     fat32_inode_t *fi = dir->internal_data;
     fat32_fs_t    *fs = fi->fs;
 
@@ -499,11 +512,12 @@ int fat32_readdir(INode_t *dir, size_t index, INode_t **result) {
     return -FILE_NOT_FOUND;
 }
 
-int fat32_create(INode_t *parent, const char *name, size_t namelen,
+static int fat32_create(INode_t *parent, const char *name, size_t namelen,
                          INode_t **result, inode_type node_type) {
     fat32_inode_t *pfi = parent->internal_data;
     fat32_fs_t    *fs  = pfi->fs;
 
+    /* Buffer padded to 16 to prevent compiler stringop-overflow warnings */
     char name83[16];
     if (!fat32_name_to_83(name, namelen, name83))
         return status_print_error(NAME_LIMITS);
@@ -596,7 +610,7 @@ int fat32_create(INode_t *parent, const char *name, size_t namelen,
     return 0;
 }
 
-int fat32_unlink(INode_t *dir, const char *name, size_t namelen) {
+static int fat32_unlink(INode_t *dir, const char *name, size_t namelen) {
     fat32_inode_t *fi = dir->internal_data;
     fat32_fs_t    *fs = fi->fs;
 
@@ -636,12 +650,12 @@ int fat32_unlink(INode_t *dir, const char *name, size_t namelen) {
     return -FILE_NOT_FOUND;
 }
 
-int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen,
+static int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen,
                          const char *newname, size_t newlen) {
     fat32_inode_t *fi = dir->internal_data;
     fat32_fs_t    *fs = fi->fs;
 
-    // the compiler bitches and moans if its not aligned
+    /* Buffer padded to 16 to prevent compiler stringop-overflow warnings */
     char new83[16];
     if (!fat32_name_to_83(newname, newlen, new83))
         return status_print_error(NAME_LIMITS);
@@ -665,7 +679,7 @@ int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen,
     return -FILE_NOT_FOUND;
 }
 
-const INodeOps_t fat32_dir_ops = {
+static const INodeOps_t fat32_dir_ops = {
     .lookup  = fat32_lookup,
     .readdir = fat32_readdir,
     .create  = fat32_create,
@@ -674,7 +688,7 @@ const INodeOps_t fat32_dir_ops = {
     .drop    = fat32_drop,
 };
 
-const INodeOps_t fat32_file_ops = {
+static const INodeOps_t fat32_file_ops = {
     .read     = fat32_read,
     .write    = fat32_write,
     .truncate = fat32_truncate,
@@ -682,31 +696,29 @@ const INodeOps_t fat32_file_ops = {
     .drop     = fat32_drop,
 };
 
-int fat32_mount(blk_device_t *blk, INode_t **root) {
-    if (!blk || !blk->drive) {
-        serial_printf(LOG_ERROR "fat32: null blk_device or drive pointer\n");
+int fat32_mount(INode_t *dev_inode, INode_t **root) {
+    if (!dev_inode || !dev_inode->ops) {
+        serial_printf(LOG_ERROR "fat32: null device inode\n");
         return -1;
     }
-    if (!blk->drive->present) {
-        serial_printf(LOG_ERROR "fat32: drive not present\n");
-        return -1;
-    }
-    if (blk->sector_count == 0) {
-        serial_printf(LOG_ERROR "fat32: partition has zero sectors\n");
+    if (!dev_inode->ops->read) {
+        serial_printf(LOG_ERROR "fat32: device inode has no read op\n");
         return -1;
     }
 
+    serial_printf(LOG_INFO "fat32: attempting mount via device inode\n");
+
+    //Read the first 512 bytes (BPB sector) directly through the device
     uint8_t raw_sector[512];
-    if (ide_read_sectors(blk->drive, blk->lba_start, 1, raw_sector) < 0) {
-        serial_printf(LOG_ERROR "fat32: failed to read sector %u from drive\n", blk->lba_start);
+    long r = inode_read(dev_inode, raw_sector, 512, 0);
+    if (r < 512) {
+        serial_printf(LOG_ERROR "fat32: failed to read BPB (got %ld bytes)\n", r);
         return -1;
     }
 
     fat32_bpb_t bpb;
     memcpy(&bpb, raw_sector, sizeof(bpb));
 
-    // Dump key BPB fields incase we have a bad image
-    // maybe one day we can have some sort of error reporting kernel side too?
     serial_printf(LOG_INFO "fat32: BPB bytes_per_sector=%u secs_per_cluster=%u "
                   "reserved=%u num_fats=%u fat_size32=%u root_cluster=%u "
                   "root_entry_count=%u total32=%u\n",
@@ -715,7 +727,6 @@ int fat32_mount(blk_device_t *blk, INode_t **root) {
                   bpb.fat_size_32, bpb.root_cluster,
                   bpb.root_entry_count, bpb.total_sectors_32);
 
-    // Validate the boot sector signature
     if (raw_sector[510] != 0x55 || raw_sector[511] != 0xAA) {
         serial_printf(LOG_ERROR "fat32: missing boot signature (got %02x %02x)\n",
                       raw_sector[510], raw_sector[511]);
@@ -737,7 +748,7 @@ int fat32_mount(blk_device_t *blk, INode_t **root) {
     if (!fs) return -1;
     memset(fs, 0, sizeof(*fs));
 
-    fs->blk                 = blk;
+    fs->dev                 = dev_inode;
     fs->bytes_per_sector    = bpb.bytes_per_sector;
     fs->sectors_per_cluster = bpb.sectors_per_cluster;
     fs->bytes_per_cluster   = bpb.bytes_per_sector * bpb.sectors_per_cluster;
@@ -755,8 +766,11 @@ int fat32_mount(blk_device_t *blk, INode_t **root) {
         kfree(fs, sizeof(*fs));
         return -1;
     }
-    uint32_t data_sectors  = total_sectors - fs->data_start_lba;
-    fs->total_clusters     = data_sectors / bpb.sectors_per_cluster;
+    uint32_t data_sectors = total_sectors - fs->data_start_lba;
+    fs->total_clusters    = data_sectors / bpb.sectors_per_cluster;
+
+    serial_printf(LOG_OK "fat32: mounted - %u clusters, %u B/cluster, root@cluster %u\n",
+                  fs->total_clusters, fs->bytes_per_cluster, fs->root_cluster);
 
     fat32_dirent_t root_de;
     memset(&root_de, 0, sizeof(root_de));

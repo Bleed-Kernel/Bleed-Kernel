@@ -7,6 +7,8 @@
 #include <status.h>
 #include <stdbool.h>
 #include <mm/kalloc.h>
+#include <mm/paging.h>
+#include <mm/smap.h>
 #include <drivers/serial/serial.h>
 #include <sched/scheduler.h>
 #include <sched/signal.h>
@@ -78,8 +80,9 @@ void vfs_fd_table_drop(fd_table_t *table) {
         if (f->shared <= 0) {
             if (f->type == FD_TYPE_PIPE)
                 pipe_file_release(f);
-            else
+            else if (f->inode) {
                 vfs_drop(f->inode);
+            }
             kfree(f, sizeof(*f));
         }
     }
@@ -118,7 +121,7 @@ int vfs_mount_root(){
 
 void vfs_drop(INode_t* inode){
     if (!inode) return;
-    /* Root is permanently pinned — never freed via drop */
+    /* Root is permanently pinned - never freed via drop */
     if (inode == vfs_root) return;
     if (inode->shared <= 0) return;
     inode->shared--;
@@ -160,7 +163,7 @@ int vfs_lookup(const path_t* path, INode_t** out_inode){
         if (r < 0){
             return -FILE_NOT_FOUND;
         }
-
+        
         // apply the component name this was my fix for the weird fs issues
         if (next && next->name[0] == '\0') {
             size_t copy_len = comp_len < sizeof(next->name) - 1
@@ -230,7 +233,7 @@ int vfs_create(const path_t* path, INode_t** out_result, inode_type node_type){
     if (e == 0 && *out_result) {
         (*out_result)->parent = parent_inode;
         (*out_result)->shared++;    // bump ref because it starts with 1, the tree ref but this should also have one
-        
+
         // Store the component name so getcwd can walk up the tree
         size_t copy_len = namelen < sizeof((*out_result)->name) - 1
                           ? namelen : sizeof((*out_result)->name) - 1;
@@ -489,7 +492,16 @@ long vfs_read(int fd, void *buf, size_t count) {
         return -1;
 
     file_t *f = fd_table->fds[fd];
-    if (!f || !f->inode)
+    if (!f || !f->inode || !f->inode->ops)
+        return -2;
+
+    // guard agianst dangling nodes
+    if (f->type == FD_TYPE_FS && !f->inode->internal_data)
+        return -2;
+
+    uintptr_t inode_addr = (uintptr_t)f->inode;
+    uintptr_t ops_addr   = (uintptr_t)f->inode->ops;
+    if (inode_addr < 0xFFFF800000000000ULL || ops_addr < 0xFFFF800000000000ULL)
         return -2;
 
     int mode = f->flags & O_MODE;
@@ -555,7 +567,13 @@ long vfs_write(int fd, const void *buf, size_t count){
         return -1;
 
     file_t *f = fd_table->fds[fd];
-    if (!f) return -1;
+    if (!f || !f->inode || !f->inode->ops)
+        return -1;
+
+    uintptr_t inode_addr = (uintptr_t)f->inode;
+    uintptr_t ops_addr   = (uintptr_t)f->inode->ops;
+    if (inode_addr < 0xFFFF800000000000ULL || ops_addr < 0xFFFF800000000000ULL)
+        return -1;
 
     int mode = f->flags & O_MODE;
     if (mode != O_WRONLY && mode != O_RDWR)

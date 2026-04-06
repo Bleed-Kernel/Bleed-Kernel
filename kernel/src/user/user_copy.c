@@ -1,4 +1,5 @@
 #include <mm/paging.h>
+#include <mm/cow.h>
 #include <sched/scheduler.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -35,6 +36,17 @@ int copy_to_user(task_t *user_task, void *udst, const void *src, size_t len) {
     if (!user_task || !udst || !src || len == 0) return -1;
     if (!user_range_mapped(user_task, (uintptr_t)udst, len))
         return -1;
+
+    // Resolve any COW pages in the destination range before switching address spaces and writing
+    // or we end up faulting because we write with bad access to somewhere we didnt want to
+    uintptr_t dst_start = (uintptr_t)udst & ~(PAGE_SIZE - 1);
+    uintptr_t dst_end   = ((uintptr_t)udst + len - 1) & ~(PAGE_SIZE - 1);
+    for (uintptr_t p = dst_start; p <= dst_end; p += PAGE_SIZE) {
+        uint64_t *pte = paging_get_page(user_task->page_map, p, 0);
+        if (pte && (*pte & PTE_PRESENT) && !(*pte & PTE_WRITABLE)) {
+            paging_handle_cow_fault(user_task, p, 0x7);
+        }
+    }
 
     paddr_t old_cr3 = read_cr3();
     paging_switch_address_space(user_task->page_map);

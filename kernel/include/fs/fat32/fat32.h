@@ -4,7 +4,6 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <fs/vfs.h>
-#include <devices/type/blk_device.h>
 
 // bios params block
 typedef struct __attribute__((packed)) fat32_bpb {
@@ -22,7 +21,6 @@ typedef struct __attribute__((packed)) fat32_bpb {
     uint16_t num_heads;
     uint32_t hidden_sectors;
     uint32_t total_sectors_32;
-
     uint32_t fat_size_32;
     uint16_t ext_flags;
     uint16_t fs_version;
@@ -85,7 +83,7 @@ typedef struct __attribute__((packed)) fat32_lfn {
 
 // fs state
 typedef struct fat32_fs {
-    blk_device_t *blk;
+    INode_t *dev;
 
     // basically just a compounded bpb
     uint32_t bytes_per_sector;
@@ -100,27 +98,11 @@ typedef struct fat32_fs {
 
 // fat32 inode intenal data section
 typedef struct fat32_inode {
-    fat32_fs_t  *fs;
-    uint32_t     first_cluster;
-    uint32_t     file_size;
-
-    uint32_t     dirent_cluster;
-    uint32_t     dirent_offset;
+    fat32_fs_t *fs;
+    uint32_t    first_cluster;
+    uint32_t    file_size;
+    uint32_t    dirent_cluster;
+    uint32_t    dirent_offset;
 } fat32_inode_t;
 
-int fat32_lookup(INode_t *dir, const char *name, size_t namelen, INode_t **result);
-long fat32_read(INode_t *inode, void *buf, size_t count, size_t offset);
-long fat32_write(INode_t *inode, const void *buf, size_t count, size_t offset);
-int fat32_readdir(INode_t *dir, size_t index, INode_t **result);
-int fat32_create(INode_t *parent, const char *name, size_t namelen, INode_t **result, inode_type node_type);
-int fat32_unlink(INode_t *dir, const char *name, size_t namelen);
-int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen, const char *newname, size_t newlen);
-int fat32_truncate(INode_t *inode, size_t new_size);
-size_t fat32_size(INode_t *inode);
-void fat32_drop(INode_t *inode);
-
-// mount fat32 file system from block device
-int fat32_mount(blk_device_t *blk, INode_t **root);
-
-// fs descriptor
-extern const filesystem fat32_filesystem;
+int fat32_mount(INode_t *dev_inode, INode_t **root);

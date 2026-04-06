@@ -11,7 +11,8 @@ BUILD_GIT_COUNT := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
 BUILD_GIT_DIRTY := $(shell if git diff --quiet --ignore-submodules HEAD >/dev/null 2>&1; then echo ""; else echo "-dirty"; fi)
 BUILD_VERSION := r$(BUILD_GIT_COUNT)-g$(BUILD_GIT_HASH)$(BUILD_GIT_DIRTY)
 
-DISK_IMG := disk.img
+IDE_DISK := idedisk.img
+SATA_DISK := satadisk.img
 DISK_SIZE_MB := 128
 
 CC := cc
@@ -45,17 +46,17 @@ KERNEL_SYM := initrd/etc/kernel.sym
 
 USER_REPOS := \
     "https://codeberg.org/Bleed-Kernel/Verdict-Shell verdict" \
-	"https://codeberg.org/Bleed-Kernel/Bleed-Doom doom" \
-	"https://codeberg.org/Bleed-Kernel/Bleed-Taskman taskman" \
-	"https://codeberg.org/Bleed-Kernel/Bleed-tvi tvi" \
-	"https://codeberg.org/Bleed-Kernel/Bleed-Coreutils cat" \
-	"https://codeberg.org/Bleed-Kernel/Bleed-Coreutils echo" \
+    "https://codeberg.org/Bleed-Kernel/Bleed-Doom doom" \
+    "https://codeberg.org/Bleed-Kernel/Bleed-Taskman taskman" \
+    "https://codeberg.org/Bleed-Kernel/Bleed-tvi tvi" \
+    "https://codeberg.org/Bleed-Kernel/Bleed-Coreutils cat" \
+    "https://codeberg.org/Bleed-Kernel/Bleed-Coreutils echo" \
 
 USER_BIN_DIR := external/
 INITRD_BIN := initrd/bin
 
 .PHONY: all
-all: $(IMAGE_NAME).iso $(DISK_IMG)
+all: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK)
 
 $(PROC_VERSION_FILE): FORCE
 	@mkdir -p $(dir $@)
@@ -150,7 +151,7 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 	rm -rf iso_root
 
 .PHONY: run
-run: $(IMAGE_NAME).iso $(DISK_IMG)
+run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK)
 	qemu-system-x86_64 \
 		--cdrom $(IMAGE_NAME).iso \
 		--enable-kvm \
@@ -159,10 +160,13 @@ run: $(IMAGE_NAME).iso $(DISK_IMG)
 		-m $(MEMSZ) \
 		-serial stdio \
 		-display sdl \
-		-drive format=raw,file=disk.img
+		-drive format=raw,file=$(IDE_DISK) \
+		-device ich9-ahci,id=ahci \
+		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
+		-device ide-hd,drive=sata0,bus=ahci.0
 
 .PHONY: run-uefi
-run-uefi: $(IMAGE_NAME).iso $(DISK_IMG)
+run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK)
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		--cdrom $(IMAGE_NAME).iso \
@@ -172,23 +176,38 @@ run-uefi: $(IMAGE_NAME).iso $(DISK_IMG)
 		-m $(MEMSZ) \
 		-serial stdio \
 		-display sdl \
-		-drive format=raw,file=disk.img
+		-drive format=raw,file=$(IDE_DISK) \
+		-device ich9-ahci,id=ahci \
+		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
+		-device ide-hd,drive=sata0,bus=ahci.0
 
-$(DISK_IMG):
-	@echo "[DISK] Creating $(DISK_IMG) ($(DISK_SIZE_MB)MB)"
-	@dd if=/dev/zero of=$(DISK_IMG) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
-	@echo "[DISK] Partitioning..."
-	@parted -s $(DISK_IMG) mklabel msdos mkpart primary fat32 1MiB 100%
-	@echo "[DISK] Formatting FAT32 partition..."
-	@mformat -i $(DISK_IMG)@@1M -F ::
-	@echo "[DISK] Adding hello.txt"
-	@echo "hello from bleed :)" > .hello.txt
-	@mcopy -i $(DISK_IMG)@@1M .hello.txt ::/hello.txt
-	@rm .hello.txt
+$(IDE_DISK):
+	@echo "[DISK] Creating $(IDE_DISK) ($(DISK_SIZE_MB)MB)"
+	@dd if=/dev/zero of=$(IDE_DISK) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
+	@echo "[DISK] Partitioning IDE..."
+	@parted -s $(IDE_DISK) mklabel msdos mkpart primary fat32 1MiB 100%
+	@echo "[DISK] Formatting IDE FAT32 partition..."
+	@mformat -i $(IDE_DISK)@@1M -F ::
+	@echo "[DISK] Adding hello.txt to IDE"
+	@echo "if your seeing this, the ide driver works, which is awesome" > .hello_ide.txt
+	@mcopy -i $(IDE_DISK)@@1M .hello_ide.txt ::/hello.txt
+	@rm .hello_ide.txt
+
+$(SATA_DISK):
+	@echo "[DISK] Creating $(SATA_DISK) ($(DISK_SIZE_MB)MB)"
+	@dd if=/dev/zero of=$(SATA_DISK) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
+	@echo "[DISK] Partitioning SATA..."
+	@parted -s $(SATA_DISK) mklabel msdos mkpart primary fat32 1MiB 100%
+	@echo "[DISK] Formatting SATA FAT32 partition..."
+	@mformat -i $(SATA_DISK)@@1M -F ::
+	@echo "[DISK] Adding hello.txt to SATA"
+	@echo "if your seeing this, the sata driver works, which is even more awesome" > .hello_sata.txt
+	@mcopy -i $(SATA_DISK)@@1M .hello_sata.txt ::/hello.txt
+	@rm .hello_sata.txt
 
 .PHONY: clean
 clean:
-	rm -rf bin $(IMAGE_NAME).iso iso_root
+	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK)
 	rm -f $(PROC_VERSION_FILE)
 	rm -f $(KERNEL_SYM)
 	find kernel klibc -name '*.o' -delete
@@ -200,7 +219,7 @@ clean:
 FORCE:
 
 distclean:
-	rm -rf bin $(IMAGE_NAME).iso iso_root
+	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK)
 	rm -f $(PROC_VERSION_FILE)
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete

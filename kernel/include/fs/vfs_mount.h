@@ -6,7 +6,7 @@
 #define VFS_MAX_MOUNTS 16
 
 // mount block device at path, creates it if it doesnt exist
-int vfs_mount(const char *path, blk_device_t *blk);
+int vfs_mount(const char *path, INode_t *dev_inode);
 
 // unmount whatever is at path, will drop it too
 int vfs_umount(const char *path);

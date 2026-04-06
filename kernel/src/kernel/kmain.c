@@ -46,6 +46,7 @@
 #include <fs/fat32/fat32.h>
 #include <devices/type/blk_device.h>
 #include <fs/vfs_mount.h>
+#include <drivers/ahci/ahci.h>
 
 #define KERNEL_BOOT_TTY_COUNT 4
 #define KERNEL_MAX_LAZY_TTYS 12
@@ -83,7 +84,9 @@ static int kernel_bind_stdio_to_tty(uint32_t tty_index) {
     f->inode = tty_inode;
     f->flags = O_RDWR;
     f->offset = 0;
-    f->shared = 2;
+
+    // fd[1] + fd[2] share the same file_t plus 1 permanent pin
+    f->shared = 3;
 
     boot_fds->fds[1] = f;
     boot_fds->fds[2] = f;
@@ -274,19 +277,14 @@ void kmain() {
     - mount and unmount programs so we can do it manually
     - some sort of file system table?
 */
+    vfs_mkdir("/mnt");
     ide_init();
+    INode_t *hda1 = device_get_by_name("hda1");
+    if (hda1) vfs_mount("/mnt/ide", hda1);
 
-    INode_t *partition_node = device_get_by_name("hda1");
-
-    if (partition_node) {
-        blk_device_t *blk = (blk_device_t *)partition_node->internal_data;
-        vfs_mkdir("/mnt"); 
-
-        
-        if (vfs_mount("/mnt", blk) == 0) {
-            serial_printf(LOG_OK "fat32: Mounted to /mnt\n");
-        }
-    }
+    ahci_init();
+    INode_t *sda1 = device_get_by_name("sda1");
+    if (sda1) vfs_mount("/mnt/sata", sda1);
 
     scheduler_start();
 
