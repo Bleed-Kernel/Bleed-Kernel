@@ -182,45 +182,30 @@ run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
-		-device ide-hd,drive=sata0,bus=ahci.0
+		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0
 
+define create_ext2_disk
+	@echo "[DISK] Creating $(1) ($(2))"
+	@dd if=/dev/zero of=$(1) bs=1M count=$(DISK_SIZE_MB) status=none
+	@parted -s $(1) mklabel $(2) mkpart primary ext2 1MiB 100%
+	@mkdir -p .$(1)_dir
+	@echo "$(3)" > .$(1)_dir/hello.txt
+	@truncate -s $$(($(DISK_SIZE_MB) - 1))M .$(1).tmp
+	@mkfs.ext2 -F -d .$(1)_dir .$(1).tmp > /dev/null 2>&1
+	@dd if=.$(1).tmp of=$(1) bs=1M seek=1 conv=notrunc status=none
+	@rm -rf .$(1).tmp .$(1)_dir
+endef
+
 $(IDE_DISK):
-	@echo "[DISK] Creating $(IDE_DISK) ($(DISK_SIZE_MB)MB)"
-	@dd if=/dev/zero of=$(IDE_DISK) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
-	@echo "[DISK] Partitioning IDE (MBR)..."
-	@parted -s $(IDE_DISK) mklabel msdos mkpart primary fat32 1MiB 100%
-	@echo "[DISK] Formatting IDE FAT32 partition..."
-	@mformat -i $(IDE_DISK)@@1M -F ::
-	@echo "[DISK] Adding hello.txt to IDE"
-	@echo "if your seeing this, the ide driver works, which is awesome" > .hello_ide.txt
-	@mcopy -i $(IDE_DISK)@@1M .hello_ide.txt ::/hello.txt
-	@rm .hello_ide.txt
+	$(call create_ext2_disk,$@,msdos,if your seeing this, the ide driver works, which is awesome)
 
 $(SATA_DISK):
-	@echo "[DISK] Creating $(SATA_DISK) ($(DISK_SIZE_MB)MB)"
-	@dd if=/dev/zero of=$(SATA_DISK) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
-	@echo "[DISK] Partitioning SATA (GPT)..."
-	@parted -s $(SATA_DISK) mklabel gpt mkpart primary fat32 1MiB 100%
-	@echo "[DISK] Formatting SATA FAT32 partition..."
-	@mformat -i $(SATA_DISK)@@1M -F ::
-	@echo "[DISK] Adding hello.txt to SATA"
-	@echo "if your seeing this, the sata driver works, which is even more awesome" > .hello_sata.txt
-	@mcopy -i $(SATA_DISK)@@1M .hello_sata.txt ::/hello.txt
-	@rm .hello_sata.txt
+	$(call create_ext2_disk,$@,gpt,if your seeing this, the sata driver works, which is even more awesome)
 
 $(NVME_DISK):
-	@echo "[DISK] Creating $(NVME_DISK) ($(DISK_SIZE_MB)MB)"
-	@dd if=/dev/zero of=$(NVME_DISK) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
-	@echo "[DISK] Partitioning NVMe (GPT)..."
-	@parted -s $(NVME_DISK) mklabel gpt mkpart primary fat32 1MiB 100%
-	@echo "[DISK] Formatting NVMe FAT32 partition..."
-	@mformat -i $(NVME_DISK)@@1M -F ::
-	@echo "[DISK] Adding hello.txt to NVMe"
-	@echo "if your seeing this, the nvme driver works, which is the most awesomest" > .hello_nvme.txt
-	@mcopy -i $(NVME_DISK)@@1M .hello_nvme.txt ::/hello.txt
-	@rm .hello_nvme.txt
+	$(call create_ext2_disk,$@,gpt,if your seeing this, the nvme driver works, which is the most awesomest)
 
 .PHONY: clean
 clean:
