@@ -199,13 +199,13 @@ define create_ext2_disk
 endef
 
 $(IDE_DISK):
-	$(call create_ext2_disk,$@,msdos,if your seeing this, the ide driver works, which is awesome)
+	$(call create_ext2_disk,$@,msdos,if your seeing this the ide driver works which is awesome)
 
 $(SATA_DISK):
-	$(call create_ext2_disk,$@,gpt,if your seeing this, the sata driver works, which is even more awesome)
+	$(call create_ext2_disk,$@,gpt,if your seeing this the sata driver works which is even more awesome)
 
 $(NVME_DISK):
-	$(call create_ext2_disk,$@,gpt,if your seeing this, the nvme driver works, which is the most awesomest)
+	$(call create_ext2_disk,$@,gpt,if your seeing this the nvme driver works which is the most awesomest)
 
 .PHONY: clean
 clean:
