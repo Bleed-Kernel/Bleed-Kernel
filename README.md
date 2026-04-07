@@ -28,9 +28,12 @@ Generally any reasonable hardware should have this.
 - [x] Round Robin Premptive Scheduler for Multitasking + Context Switching
 - [x] ELF (non-relocatable) User Program Execution (yes, it can run doom)
 - [x] Unix-Like Devices and Device Handler
-- [x] FAT32 Support
-- [x] IDE Harddrive Persistant Storage Driver
 - [x] PS/2 Mouse Drivers
+- [x] FAT32 Support
+- [x] Ext2 Support
+- [x] IDE Harddrive Support
+- [x] SATA Support
+- [x] NVMe Support
 - [x] Mount Points for Block Devices
 
 ## Upcomming Features
