@@ -13,6 +13,7 @@ BUILD_VERSION := r$(BUILD_GIT_COUNT)-g$(BUILD_GIT_HASH)$(BUILD_GIT_DIRTY)
 
 IDE_DISK := idedisk.img
 SATA_DISK := satadisk.img
+NVME_DISK := nvmedisk.img
 DISK_SIZE_MB := 128
 
 CC := cc
@@ -56,7 +57,7 @@ USER_BIN_DIR := external/
 INITRD_BIN := initrd/bin
 
 .PHONY: all
-all: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK)
+all: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 
 $(PROC_VERSION_FILE): FORCE
 	@mkdir -p $(dir $@)
@@ -151,7 +152,7 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 	rm -rf iso_root
 
 .PHONY: run
-run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK)
+run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	qemu-system-x86_64 \
 		--cdrom $(IMAGE_NAME).iso \
 		--enable-kvm \
@@ -163,10 +164,12 @@ run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK)
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
-		-device ide-hd,drive=sata0,bus=ahci.0
+		-device ide-hd,drive=sata0,bus=ahci.0 \
+		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
+		-device nvme,serial=bleed-nvme-1,drive=nvm0
 
 .PHONY: run-uefi
-run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK)
+run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		--cdrom $(IMAGE_NAME).iso \
@@ -180,6 +183,8 @@ run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK)
 		-device ich9-ahci,id=ahci \
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
 		-device ide-hd,drive=sata0,bus=ahci.0
+		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
+		-device nvme,serial=bleed-nvme-1,drive=nvm0
 
 $(IDE_DISK):
 	@echo "[DISK] Creating $(IDE_DISK) ($(DISK_SIZE_MB)MB)"
@@ -205,9 +210,21 @@ $(SATA_DISK):
 	@mcopy -i $(SATA_DISK)@@1M .hello_sata.txt ::/hello.txt
 	@rm .hello_sata.txt
 
+$(NVME_DISK):
+	@echo "[DISK] Creating $(NVME_DISK) ($(DISK_SIZE_MB)MB)"
+	@dd if=/dev/zero of=$(NVME_DISK) bs=1M count=$(DISK_SIZE_MB) > /dev/null 2>&1
+	@echo "[DISK] Partitioning NVMe (GPT)..."
+	@parted -s $(NVME_DISK) mklabel gpt mkpart primary fat32 1MiB 100%
+	@echo "[DISK] Formatting NVMe FAT32 partition..."
+	@mformat -i $(NVME_DISK)@@1M -F ::
+	@echo "[DISK] Adding hello.txt to NVMe"
+	@echo "if your seeing this, the nvme driver works, which is the most awesomest" > .hello_nvme.txt
+	@mcopy -i $(NVME_DISK)@@1M .hello_nvme.txt ::/hello.txt
+	@rm .hello_nvme.txt
+
 .PHONY: clean
 clean:
-	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK)
+	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	rm -f $(PROC_VERSION_FILE)
 	rm -f $(KERNEL_SYM)
 	find kernel klibc -name '*.o' -delete

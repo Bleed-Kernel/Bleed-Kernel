@@ -136,6 +136,53 @@ void serial_write_hex(uint64_t value) {
     irq_restore(flags);
 }
 
+static void serial_print_num(uint64_t val, int base, int is_signed, int uppercase, int width, char pad_char) {
+    char buf[32]; 
+    const char *digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+    int i = 0;
+    int negative = 0;
+
+    // Handle signed numbers
+    if (is_signed && (int64_t)val < 0) {
+        negative = 1;
+        val = (uint64_t)(-(int64_t)val);
+    }
+
+    // Convert number to string (in reverse order)
+    if (val == 0) {
+        buf[i++] = '0';
+    } else {
+        while (val > 0) {
+            buf[i++] = digits[val % base];
+            val /= base;
+        }
+    }
+
+    // Calculate how much padding we actually need
+    int pad_len = width - i - negative;
+    if (pad_len < 0) pad_len = 0;
+
+    // Emit space padding BEFORE the minus sign
+    if (pad_char == ' ' && pad_len > 0) {
+        while (pad_len--) serial_emit_char(' ');
+    }
+
+    // Emit minus sign
+    if (negative) {
+        serial_emit_char('-');
+    }
+
+    // Emit zero padding AFTER the minus sign
+    if (pad_char == '0' && pad_len > 0) {
+        while (pad_len--) serial_emit_char('0');
+    }
+
+    // Emit the actual digits
+    while (i > 0) {
+        serial_emit_char(buf[--i]);
+    }
+}
+
 /// @brief Write a formatted string to COM1
 /// @param fmt formatted string
 /// @param  VARDIC
@@ -156,14 +203,46 @@ void serial_printf(const char *fmt, ...) {
         }
 
         fmt++;
-        char *str = NULL;
+        if (!*fmt) break;
 
+        char pad_char = ' ';
+        int width = 0;
+
+        //Parse Zero-Padding Flag
+        if (*fmt == '0') {
+            pad_char = '0';
+            fmt++;
+        }
+
+        // Parse Field Width
+        while (*fmt >= '0' && *fmt <= '9') {
+            width = width * 10 + (*fmt - '0');
+            fmt++;
+        }
+
+        // Parse Length Modifiers
+        int is_long = 0;
+        int is_long_long = 0;
+        int is_size_t = 0;
+
+        while (*fmt == 'l' || *fmt == 'z' || *fmt == 'h') {
+            if (*fmt == 'l') {
+                if (is_long) is_long_long = 1;
+                else is_long = 1;
+            } else if (*fmt == 'z') {
+                is_size_t = 1;
+            }
+            fmt++;
+        }
+
+        // Parse Type Specifier
         switch (*fmt) {
-            case 's':
-                str = (char *)va_arg(args, char *);
+            case 's': {
+                char *str = va_arg(args, char *);
                 if (!str) str = "(null)";
                 serial_emit_str(str);
                 break;
+            }
 
             case 'c': {
                 char c = (char)va_arg(args, int);
@@ -173,38 +252,43 @@ void serial_printf(const char *fmt, ...) {
 
             case 'd':
             case 'i': {
-                int v = va_arg(args, int);
-                str = itoa_signed((int64_t)v);
-                if (str) { serial_emit_str(str); kfree(str, strlen(str)); }
+                int64_t v;
+                if (is_long_long) v = va_arg(args, long long);
+                else if (is_size_t) v = va_arg(args, ssize_t);
+                else if (is_long) v = va_arg(args, long);
+                else v = va_arg(args, int);
+                
+                serial_print_num((uint64_t)v, 10, 1, 0, width, pad_char);
                 break;
             }
 
             case 'u': {
-                unsigned v = va_arg(args, unsigned);
-                str = utoa_base(v, 10, 0);
-                if (str) { serial_emit_str(str); kfree(str, strlen(str)); }
+                uint64_t v;
+                if (is_long_long) v = va_arg(args, unsigned long long);
+                else if (is_size_t) v = va_arg(args, size_t);
+                else if (is_long) v = va_arg(args, unsigned long);
+                else v = va_arg(args, unsigned int);
+                
+                serial_print_num(v, 10, 0, 0, width, pad_char);
                 break;
             }
 
-            case 'x': {
-                unsigned v = va_arg(args, unsigned);
-                str = utoa_base(v, 16, 0);
-                if (str) { serial_emit_str(str); kfree(str, strlen(str)); }
-                break;
-            }
-
+            case 'x':
             case 'X': {
-                unsigned v = va_arg(args, unsigned);
-                str = utoa_base(v, 16, 1);
-                if (str) { serial_emit_str(str); kfree(str, strlen(str)); }
+                uint64_t v;
+                if (is_long_long) v = va_arg(args, unsigned long long);
+                else if (is_size_t) v = va_arg(args, size_t);
+                else if (is_long) v = va_arg(args, unsigned long);
+                else v = va_arg(args, unsigned int);
+                
+                serial_print_num(v, 16, 0, *fmt == 'X', width, pad_char);
                 break;
             }
 
             case 'p': {
                 uintptr_t v = (uintptr_t)va_arg(args, void *);
                 serial_emit_str("0x");
-                str = utoa_base(v, 16, 0);
-                if (str) { serial_emit_str(str); kfree(str, strlen(str)); }
+                serial_print_num(v, 16, 0, 0, 16, '0'); 
                 break;
             }
 
@@ -213,7 +297,6 @@ void serial_printf(const char *fmt, ...) {
                 break;
 
             default:
-                // Unknown specifier, print literally.
                 serial_emit_char('%');
                 serial_emit_char(*fmt);
                 break;

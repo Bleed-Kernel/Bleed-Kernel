@@ -165,8 +165,24 @@ static int ahci_issue_cmd(ahci_drive_t *drive, uint64_t lba, uint16_t count,
     uint64_t abar = drive->abar;
     uint8_t  port = drive->port;
 
+    // must be contiguous
+    size_t   byte_count  = (size_t)count * AHCI_SECTOR_SIZE;
+    uint32_t pages_needed = (uint32_t)((byte_count + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K);
+    paddr_t  bounce_phys  = pmm_alloc_pages(pages_needed);
+    if (!bounce_phys) {
+        serial_printf(LOG_ERROR "ahci: OOM allocating bounce buffer (%u pages)\n", pages_needed);
+        return -1;
+    }
+    void *bounce_virt = (void *)(uintptr_t)MMIO(bounce_phys);
+
+    if (write)
+        memcpy(bounce_virt, buf, byte_count);
+    else
+        memset(bounce_virt, 0, byte_count);
+
     if (ahci_port_wait_idle(abar, port) < 0) {
         serial_printf(LOG_ERROR "ahci: port %u busy before cmd\n", port);
+        pmm_free_pages(bounce_phys, pages_needed);
         return -1;
     }
 
@@ -193,10 +209,9 @@ static int ahci_issue_cmd(ahci_drive_t *drive, uint64_t lba, uint16_t count,
     fis->countl = (uint8_t)(count);
     fis->counth = (uint8_t)(count >> 8);
 
-    uint64_t buf_phys = PHYS(buf);
-    ct->prdt[0].dba  = (uint32_t)(buf_phys & 0xFFFFFFFF);
-    ct->prdt[0].dbau = (uint32_t)(buf_phys >> 32);
-    ct->prdt[0].dbc  = (uint32_t)((uint32_t)count * AHCI_SECTOR_SIZE - 1);
+    ct->prdt[0].dba  = (uint32_t)(bounce_phys & 0xFFFFFFFF);
+    ct->prdt[0].dbau = (uint32_t)(bounce_phys >> 32);
+    ct->prdt[0].dbc  = (uint32_t)(byte_count - 1);
 
     // build the command header
     ahci_cmd_header_t *hdr = &drive->cmd_list[0];
@@ -207,7 +222,13 @@ static int ahci_issue_cmd(ahci_drive_t *drive, uint64_t lba, uint16_t count,
 
     port_write(abar, port, AHCI_PORT_CI, 1u << 0);
 
-    return ahci_port_wait_cmd(abar, port, 1u << 0);
+    int r = ahci_port_wait_cmd(abar, port, 1u << 0);
+
+    if (r == 0 && !write)
+        memcpy(buf, bounce_virt, byte_count);
+
+    pmm_free_pages(bounce_phys, pages_needed);
+    return r;
 }
 
 static bool ahci_identify(ahci_drive_t *drive) {
@@ -220,9 +241,9 @@ static bool ahci_identify(ahci_drive_t *drive) {
     port_write(abar, port, AHCI_PORT_IS,   0xFFFFFFFF);
     port_write(abar, port, AHCI_PORT_SERR, 0xFFFFFFFF);
 
-    // aligned temp buffer
-    uint16_t *id = kmalloc(512);
-    if (!id) return false;
+    paddr_t  id_phys = pmm_alloc_pages(1);
+    if (!id_phys) return false;
+    uint16_t *id = (uint16_t *)(uintptr_t)MMIO(id_phys);
     memset(id, 0, 512);
 
     ahci_cmd_table_t *ct = drive->cmd_table;
@@ -234,7 +255,6 @@ static bool ahci_identify(ahci_drive_t *drive) {
     fis->command  = ATA_CMD_IDENTIFY;
     fis->device   = 0;
 
-    uint64_t id_phys = PHYS(id);
     ct->prdt[0].dba  = (uint32_t)(id_phys & 0xFFFFFFFF);
     ct->prdt[0].dbau = (uint32_t)(id_phys >> 32);
     ct->prdt[0].dbc  = 511;
@@ -247,7 +267,7 @@ static bool ahci_identify(ahci_drive_t *drive) {
     port_write(abar, port, AHCI_PORT_CI, 1u << 0);
 
     if (ahci_port_wait_cmd(abar, port, 1u << 0) < 0) {
-        kfree(id, 512);
+        pmm_free_pages(id_phys, 1);
         return false;
     }
 
@@ -268,7 +288,7 @@ static bool ahci_identify(ahci_drive_t *drive) {
     for (int i = 39; i >= 0 && drive->model[i] == ' '; i--)
         drive->model[i] = '\0';
 
-    kfree(id, 512);
+    pmm_free_pages(id_phys, 1);
     return true;
 }
 

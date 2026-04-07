@@ -47,6 +47,7 @@
 #include <devices/type/blk_device.h>
 #include <fs/vfs_mount.h>
 #include <drivers/ahci/ahci.h>
+#include <drivers/nvme/nvme.h>
 
 #define KERNEL_BOOT_TTY_COUNT 4
 #define KERNEL_MAX_LAZY_TTYS 12
@@ -285,6 +286,10 @@ void kmain() {
     ahci_init();
     INode_t *sda1 = device_get_by_name("sda1");
     if (sda1) vfs_mount("/mnt/sata", sda1);
+
+    nvme_init();
+    INode_t *nvme0p1 = device_get_by_name("nvme0p1");
+    if (nvme0p1) vfs_mount("/mnt/nvme", nvme0p1);
 
     scheduler_start();
 
