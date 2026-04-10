@@ -37,10 +37,10 @@ Generally any reasonable hardware should have this.
 - [x] Mount Points for Block Devices
 
 ## Upcomming Features
-- [ ] Network Drivers
-- [ ] Symetric Multiprocessing (SMP)
 - [ ] xHCI (HID)
 - [ ] Relocatable Executables
+- [ ] Network Drivers
+- [ ] Symetric Multiprocessing (SMP)
 - [ ] Task-Specific Framebuffers
 
 ## Hardware Specifications

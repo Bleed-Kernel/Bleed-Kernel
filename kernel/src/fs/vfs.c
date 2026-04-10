@@ -112,7 +112,15 @@ int vfs_mount_root(){
     if (dr < 0)
         serial_printf("%s vfs_mount_root: failed to create /dev: %d\n", LOG_ERROR, dr);
     else if (devinode)
-        vfs_drop(devinode); // tree holds its own ref so we can drop this one
+        vfs_drop(devinode);
+
+    path_t mntpath = vfs_path_from_abs("/mnt");
+    INode_t *mntinode = NULL;
+    int mr = vfs_create(&mntpath, &mntinode, INODE_DIRECTORY);
+    if (mr < 0)
+        serial_printf("%s vfs_mount_root: failed to create /mnt: %d\n", LOG_ERROR, mr);
+    else if (mntinode)
+        vfs_drop(mntinode);
 
     (void)vfs_get_kernel_table();
 
@@ -121,7 +129,6 @@ int vfs_mount_root(){
 
 void vfs_drop(INode_t* inode){
     if (!inode) return;
-    /* Root is permanently pinned - never freed via drop */
     if (inode == vfs_root) return;
     if (inode->shared <= 0) return;
     inode->shared--;

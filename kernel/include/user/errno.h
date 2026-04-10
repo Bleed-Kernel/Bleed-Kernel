@@ -15,6 +15,7 @@
 #define EACCES   13
 #define EFAULT   14
 #define EBUSY    16
+#define ENOTBLK  15
 #define EEXIST   17
 #define EXDEV    18
 #define ENODEV   19
@@ -33,4 +34,5 @@
 #define EPIPE    32
 #define EDOM     33
 #define ERANGE   34
+#define ENAMETOOLONG 36
 #define ENOSYS   38
