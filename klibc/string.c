@@ -234,3 +234,13 @@ char *strdup(const char *s){
     copy[len] = '\0';
     return copy;
 }
+
+size_t strnlen(const char *s, uint64_t n) {
+    if (s == NULL) return 0;
+
+    size_t len = 0;
+    while (len < n && s[len] != '\0') {
+        len++;
+    }
+    return len;
+}

@@ -9,32 +9,30 @@
 
 int sys_umount2(const char *user_target, int flags) {
     (void)flags;
- 
+
     if (!user_target)
         return -EFAULT;
- 
+
     task_t *caller = get_current_task();
     if (!caller)
         return -ESRCH;
- 
+
     char ktarget[256];
     memset(ktarget, 0, sizeof(ktarget));
     if (copy_from_user(caller, ktarget, user_target, sizeof(ktarget)) != 0)
         return -EFAULT;
     ktarget[sizeof(ktarget) - 1] = '\0';
- 
-    size_t tlen = 0;
-    while (tlen < sizeof(ktarget) && ktarget[tlen] != '\0') tlen++;
+
+    size_t tlen = strnlen(ktarget, sizeof(ktarget));
     if (tlen == sizeof(ktarget))
-        return -E2BIG;
- 
+        return -ENAMETOOLONG;
+
     int r = vfs_umount(ktarget);
- 
     if (r >= 0)
         return 0;
- 
+
     if (r == -FILE_NOT_FOUND)  return -ENOENT;
     if (r == -UNIMPLEMENTED)   return -ENOSYS;
- 
+
     return -EINVAL;
 }

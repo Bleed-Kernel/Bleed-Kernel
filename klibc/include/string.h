@@ -117,5 +117,6 @@ char *strtok(char * s, const char *delim);
 char *strtok_r(char *s, const char *delim, char **save);
 
 char *strdup(const char *s);
+size_t strnlen(const char *s, uint64_t n);
 
 #endif
