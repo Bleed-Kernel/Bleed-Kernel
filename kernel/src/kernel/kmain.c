@@ -31,6 +31,7 @@
 #include <exec/elf_load.h>
 #include <devices/type/fb_device.h>
 #include <devices/type/kbd_device.h>
+#include <boot/earlyboot_console.h>
 #include <devices/type/mouse_device.h>
 #include <ACPI/acpi.h>
 #include <tss/tss.h>
@@ -48,6 +49,7 @@
 #include <fs/vfs_mount.h>
 #include <drivers/ahci/ahci.h>
 #include <drivers/nvme/nvme.h>
+#include <boot/splash_image.h>
 
 #define KERNEL_BOOT_TTY_COUNT 4
 #define KERNEL_MAX_LAZY_TTYS 12
@@ -238,71 +240,74 @@ void shell_start() {
 
 void kmain() {
     asm volatile ("cli");
-    sse_enable();
-    avx_enable();
-    serial_init();
+    early_fb_init();
+    EARLY_OK("Welcome to the Bleed Kernel, this part should go pretty quick."); 
+    gdt_init();         EARLY_OK("GDT");
+    sse_enable();       EARLY_OK("SIMD");
+    serial_init();      EARLY_OK("Serial");
+    idt_init();         EARLY_OK("IDT");
+    pmm_init();         EARLY_OK("Physical Memory Manager");
+    vfs_mount_root();   EARLY_OK("VFS Mount");
+    initrd_load();      EARLY_OK("initrd Ram Disk");
+    display_splash_screen("initrd/boot/splash.bgra", 200, 252);
 
-    pmm_init();
-    vfs_mount_root();
-    initrd_load();
-    psf_init("initrd/fonts/ttyfont.psf");
+    psf_init("initrd/fonts/ttyfont.psf"); EARLY_OK("PSF Font Loaded");
+
     if (stack_trace_load_symbols("initrd/etc/kernel.sym") < 0) {
         kprintf(LOG_WARN "Failed to load kernel symbols from initrd/etc/kernel.sym\n");
     } else {
         kprintf(LOG_OK "Kernel symbols loaded from initrd/etc/kernel.sym\n");
     }
-    reinit_paging();
-    acpi_init();
-    
-    tty0 = kernel_console_init();
 
-    gdt_init();
-    idt_init();
-    tss_init();
-    syscall_init();
-    fb_device_init();
+    reinit_paging();    EARLY_OK("Paging Reinitalized");
+    acpi_init();        EARLY_OK("ACPI Read");
+    tss_init();         EARLY_OK("TSS Done");
+    syscall_init();     EARLY_OK("Syscalls Setup");
+    fb_device_init();   EARLY_OK("FB Device Init");
 
     bootargs_init(cmdline_request.response->cmdline);
-    acpi_init_hpet();
-    hpet_device_init();
+    acpi_init_hpet();   EARLY_OK("HPET Done");
+    hpet_device_init(); EARLY_OK("HPET Device Created");
 
-    kbd_device_init();
-    mouse_device_init();
-    PS2_Keyboard_init();
-    PS2_Mouse_init();
-    serial_device_register();
+    kbd_device_init();       EARLY_OK("KBD Device Done");
+    mouse_device_init();     EARLY_OK("Mouse Device Done");
+    PS2_Keyboard_init();     EARLY_OK("PS2 Keyboard init");
+    PS2_Mouse_init();        EARLY_OK("Mouse init");
+    serial_device_register();EARLY_OK("Serial Device Done");
 
-/*
-    HARDCODED SHITE :/
-    - make mount and unmount a systemcall
-    - mount and unmount programs so we can do it manually
-    - some sort of file system table?
-*/
     vfs_mkdir("/mnt");
     ide_init();
     INode_t *hda1 = device_get_by_name("hda1");
     if (hda1) vfs_mount("/mnt/ide", hda1);
+    EARLY_OK("Mounted ide");
 
     ahci_init();
     INode_t *sda1 = device_get_by_name("sda1");
     if (sda1) vfs_mount("/mnt/sata", sda1);
+    EARLY_OK("Mounted SATA");
 
     nvme_init();
     INode_t *nvme0p1 = device_get_by_name("nvme0p1");
     if (nvme0p1) vfs_mount("/mnt/nvme", nvme0p1);
+    EARLY_OK("Mounted NVME");
 
-    scheduler_start();
+    scheduler_start();  EARLY_OK("Scheduler Started");
 
     INode_t* tty_inode = device_get_by_name("tty0");
-    tty_device_init(tty_inode);
+    tty_device_init(tty_inode); EARLY_OK("TTY Device Setup");
 
-    asm volatile ("sti");
+    asm volatile ("sti"); EARLY_OK("Enabled Interrupts");
 
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
+    EARLY_OK("Reaper Task Started");
 
     supervisor_memory_protection_init();
+    EARLY_OK("SMIP enabled");
     UMIP_init();
+    EARLY_OK("UMIP enabled");
     shell_start();
+
+    tty0 = kernel_console_init();
 
     for (;;) {
         if (kernel_has_shell_spawn_request()) {

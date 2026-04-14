@@ -26,7 +26,7 @@ CFLAGS := -g -O2 -Wall -Werror -Wextra -std=gnu11 \
           -ffunction-sections -fdata-sections -fno-omit-frame-pointer \
           -m64 -march=x86-64 -mabi=sysv -mno-80387 -mno-red-zone \
           -mcmodel=kernel -I kernel/include -I klibc/include \
-          -MMD -MP -mavx2 -fvect-cost-model=dynamic
+          -MMD -MP -msse4.2 -fvect-cost-model=dynamic
 
 LDFLAGS := -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 --gc-sections \
            -T kernel.lds
@@ -221,7 +221,7 @@ clean:
 FORCE:
 
 distclean:
-	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK)
+	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	rm -f $(PROC_VERSION_FILE)
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete
