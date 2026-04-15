@@ -52,6 +52,8 @@ INode_t* tempfs_create_inode(int type, const INodeOps_t* ops){
         memset(inode, 0, sizeof(*inode));   // ensure name is zero'd
         tempfs_INode_t* data = kmalloc(sizeof(*data));
         if (data){
+            memset(data, 0, sizeof(*data));
+
             inode->type = type;
             inode->shared = 1;
             inode->ops = ops;
@@ -152,12 +154,11 @@ tempfs_data_t* tempfs_new_data_chunk(){
 /// @return success
 int tempfs_lookup(INode_t* dir, const char* name, size_t namelen, INode_t** result){
     tempfs_INode_t* tempfs_inode = dir->internal_data;
-    tempfs_data_t*  data = tempfs_inode->data;
+    tempfs_data_t* data = tempfs_inode->data;
 
     size_t remaining = tempfs_inode->capacity;
 
     while(data && remaining > 0){
-        /* Only iterate the entries that are actually populated in this chunk */
         size_t in_chunk = remaining < MAX_ENTRIES_PER_DATA_CHUNK
                           ? remaining : MAX_ENTRIES_PER_DATA_CHUNK;
 
@@ -165,9 +166,8 @@ int tempfs_lookup(INode_t* dir, const char* name, size_t namelen, INode_t** resu
             INode_t* child_node = directory_entries(data)[i];
             if (!child_node) continue;
 
-            tempfs_INode_t* child_tempfs_node = child_node->internal_data;
-            if (strlen(child_tempfs_node->name) == namelen &&
-                memcmp(child_tempfs_node->name, name, namelen) == 0) {
+            if (strlen(child_node->name) == namelen &&
+                memcmp(child_node->name, name, namelen) == 0) {
                 *result = child_node;
                 return 0;
             }
@@ -175,7 +175,7 @@ int tempfs_lookup(INode_t* dir, const char* name, size_t namelen, INode_t** resu
         remaining -= in_chunk;
         data = data->next_chunk;
     }
-    return -1;  // file not found
+    return -1;
 }
 
 /// @brief read an inodes data out to a pointer
@@ -309,11 +309,22 @@ int tempfs_create(INode_t* parent, const char* name, size_t namelen, INode_t** r
         kprintf("tempfs_create: parent inode invalid!\n");
         return status_print_error(FILE_NOT_FOUND);
     }
+    
+    if (namelen > 1 && name[namelen - 1] == '/') {
+        namelen--;
+    }
+
+    if (namelen >= TEMPFS_MAX_NAME_LEN) {
+        return status_print_error(NAME_LIMITS);
+    }
+
     tempfs_INode_t* parent_data = parent->internal_data;
     size_t idx = parent_data->capacity;
 
     tempfs_data_t **prev_next = &parent_data->data, 
                   *chunk = parent_data->data;
+
+    // Navigate to/allocate the correct chunk for the new entry
     while(idx >= MAX_ENTRIES_PER_DATA_CHUNK) {
         if (!chunk) {
             chunk = *prev_next = tempfs_new_data_chunk();
@@ -323,25 +334,30 @@ int tempfs_create(INode_t* parent, const char* name, size_t namelen, INode_t** r
         prev_next = &chunk->next_chunk;
         chunk = chunk->next_chunk;
     }
+
     if(!chunk) {
         *prev_next = chunk = tempfs_new_data_chunk();
         if(!chunk) return status_print_error(OUT_OF_MEMORY);
     }
 
-    INode_t* file = node_type == INODE_DIRECTORY ? tempfs_create_inode(INODE_DIRECTORY, &dir_ops) : tempfs_create_inode(INODE_FILE, &file_ops);
+    // Create the new Inode
+    INode_t* file = (node_type == INODE_DIRECTORY) 
+                    ? tempfs_create_inode(INODE_DIRECTORY, &dir_ops) 
+                    : tempfs_create_inode(INODE_FILE, &file_ops);
+    
     if (!file)
         return status_print_error(OUT_OF_MEMORY);
-    tempfs_INode_t* file_int = file->internal_data;
-    if (namelen >= TEMPFS_MAX_NAME_LEN) {
-        tempfs_drop(file);
-        kfree(file, sizeof(*file));
-        return status_print_error(NAME_LIMITS);
-    }
-    memcpy(file_int->name, name, namelen);
-    file_int->name[namelen] = '\0';
 
+    // Set the name in the VFS Inode (which lookup now uses)
+    memset(file->name, 0, sizeof(file->name));
+    size_t copy_len = namelen < (sizeof(file->name) - 1) ? namelen : (sizeof(file->name) - 1);
+    memcpy(file->name, name, copy_len);
+    file->name[copy_len] = '\0';
+
+    // Store in directory chunk and update parent capacity
     directory_entries(chunk)[idx] = file;
     parent_data->capacity++;
+    
     *result = file;
     return 0;
 }
@@ -440,11 +456,7 @@ static int tempfs_rename(INode_t* dir, const char* oldname, size_t oldlen, const
         if (!slot || !*slot)
             continue;
 
-        tempfs_INode_t *child_data = (*slot)->internal_data;
-        if (!child_data)
-            continue;
-
-        if (strlen(child_data->name) == newlen && memcmp(child_data->name, newname, newlen) == 0)
+        if (strlen((*slot)->name) == newlen && memcmp((*slot)->name, newname, newlen) == 0)
             return status_print_error(OUT_OF_BOUNDS);
     }
 
@@ -453,13 +465,9 @@ static int tempfs_rename(INode_t* dir, const char* oldname, size_t oldlen, const
         if (!slot || !*slot)
             continue;
 
-        tempfs_INode_t *child_data = (*slot)->internal_data;
-        if (!child_data)
-            continue;
-
-        if (strlen(child_data->name) == oldlen && memcmp(child_data->name, oldname, oldlen) == 0) {
-            memcpy(child_data->name, newname, newlen);
-            child_data->name[newlen] = '\0';
+        if (strlen((*slot)->name) == oldlen && memcmp((*slot)->name, oldname, oldlen) == 0) {
+            memcpy((*slot)->name, newname, newlen);
+            (*slot)->name[newlen] = '\0';
             return 0;
         }
     }

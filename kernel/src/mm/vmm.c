@@ -289,3 +289,31 @@ void vmm_free_pages(void* addr, size_t pages) {
 
     (void)vmm_unmap_free_pages(kernel_page_map, (void *)base, pages);
 }
+
+void *vmm_map_mmio(uint64_t phys, size_t size) {
+    if (!size) return NULL;
+    
+    size_t pages = PAGE_ALIGN_UP(size) / PAGE_SIZE;
+
+    vmm_init();
+    unsigned long irq = irq_push();
+    spinlock_acquire(&vmm_lock);
+    uintptr_t base = vmm_reserve_range_locked(pages);
+    spinlock_release(&vmm_lock);
+    irq_restore(irq);
+
+    if (!base) return NULL;
+
+    uint64_t mmio_flags = PTE_PRESENT | PTE_WRITABLE | PTE_NX;
+
+    if (vmm_map_phys_pages(kernel_page_map, (void *)base, phys, pages, mmio_flags) != 0) {
+        irq = irq_push();
+        spinlock_acquire(&vmm_lock);
+        (void)vmm_release_range_locked(base, pages);
+        spinlock_release(&vmm_lock);
+        irq_restore(irq);
+        return NULL;
+    }
+
+    return (void *)base;
+}

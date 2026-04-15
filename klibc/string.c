@@ -244,3 +244,20 @@ size_t strnlen(const char *s, uint64_t n) {
     }
     return len;
 }
+
+char *strncat(char *restrict dest, const char *restrict src, uint64_t n) {
+    char *d = dest;
+
+    while (*d != '\0') {
+        d++;
+    }
+
+    uint64_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        d[i] = src[i];
+    }
+
+    d[i] = '\0';
+
+    return dest;
+}

@@ -119,4 +119,6 @@ char *strtok_r(char *s, const char *delim, char **save);
 char *strdup(const char *s);
 size_t strnlen(const char *s, uint64_t n);
 
+char *strncat(char *restrict dest, const char *restrict src, uint64_t n);
+
 #endif

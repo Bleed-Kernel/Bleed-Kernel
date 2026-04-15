@@ -20,3 +20,4 @@ int vmm_translate(vmm_cr3_t cr3, void *virt, paddr_t *out_paddr);
 
 void* vmm_alloc_pages(size_t pages);
 void vmm_free_pages(void* addr, size_t pages);
+void *vmm_map_mmio(uint64_t phys, size_t size);

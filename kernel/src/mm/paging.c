@@ -146,6 +146,20 @@ void paging_map_page(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags
     paging_map_page_invl(cr3, paddr, vaddr, flags, 1);
 }
 
+void paging_map_pages(paddr_t cr3, uint64_t paddr, uint64_t vaddr, size_t size, uint64_t flags) {
+    uint64_t virt = vaddr & ~(PAGE_SIZE - 1);
+    uint64_t phys = paddr & ~(PAGE_SIZE - 1);
+    
+    size_t num_pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    for (size_t i = 0; i < num_pages; i++) {
+        paging_map_page(cr3, phys, virt, flags);
+        
+        phys += PAGE_SIZE;
+        virt += PAGE_SIZE;
+    }
+}
+
 /// @brief create the kernels page map and save it, key part of multitasking
 void paging_init_kernel_map(void) {
     kernel_page_map = read_cr3() & PADDR_ENTRY_MASK;

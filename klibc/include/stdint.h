@@ -1,6 +1,16 @@
 #ifndef STDINT_H
 #define STDINT_H
 
+#define INT8_C(x)    x
+#define INT16_C(x)   x
+#define INT32_C(x)   x
+#define INT64_C(x)   x##LL
+
+#define UINT8_C(x)   x##U
+#define UINT16_C(x)  x##U
+#define UINT32_C(x)  x##U
+#define UINT64_C(x)  x##ULL
+
 # define INT8_MIN		(-128)
 # define INT16_MIN		(-32767-1)
 # define INT32_MIN		(-2147483647-1)

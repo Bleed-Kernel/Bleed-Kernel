@@ -1,5 +1,5 @@
 #include <drivers/nvme/nvme.h>
-#include <drivers/ahci/pci.h>
+#include <drivers/pci/pci.h>
 #include <devices/devices.h>
 #include <fs/vfs.h>
 #include <fs/partition.h>

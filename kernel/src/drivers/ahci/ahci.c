@@ -1,5 +1,5 @@
 #include <drivers/ahci/ahci.h>
-#include <drivers/ahci/pci.h>
+#include <drivers/pci/pci.h>
 #include <drivers/ide/ide.h>
 #include <devices/devices.h>
 #include <devices/type/blk_device.h>

@@ -1,4 +1,4 @@
-#include <drivers/ahci/pci.h>
+#include <drivers/pci/pci.h>
 #include <cpu/io.h>
 #include <stdbool.h>
 
@@ -53,7 +53,7 @@ bool pci_find_device(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
             if (vendor == PCI_VENDOR_NONE) continue;
 
             uint8_t hdr_type = pci_read8(bus, dev, 0, PCI_HEADER_TYPE);
-            uint8_t max_func = (hdr_type & 0x80) ? 8 : 1; /* multi-function? */
+            uint8_t max_func = (hdr_type & 0x80) ? 8 : 1; // multi-function?
 
             for (uint8_t func = 0; func < max_func; func++) {
                 vendor = pci_read16(bus, dev, func, PCI_VENDOR_ID);
@@ -84,4 +84,36 @@ bool pci_find_device(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
         }
     }
     return false;
+}
+
+void pci_enable_busmaster(pci_device_t *dev) {
+    uint16_t cmd = pci_read16(dev->bus, dev->device, dev->function, 0x04); // Command Register
+    pci_write16(dev->bus, dev->device, dev->function, 0x04, cmd | (1 << 2)); // Set bit 2 (Bus Master)
+}
+
+uint64_t pci_read_bar(pci_device_t *dev, int bar_index) {
+    if (bar_index < 0 || bar_index > 5) return 0;
+    
+    uint32_t bar_lo = dev->bar[bar_index];
+    
+    // Check if it's a 64-bit memory BAR
+    if ((bar_lo & 0x1) == 0 && (bar_lo & 0x6) == 0x4) {
+        if (bar_index + 1 > 5) return 0;
+        uint32_t bar_hi = dev->bar[bar_index + 1];
+        return ((uint64_t)bar_hi << 32) | (bar_lo & ~0xFULL);
+    }
+    
+    // 32-bit Memory or IO BAR
+    return bar_lo & ~0xFULL;
+}
+
+int pci_get_irq(pci_device_t *dev) {
+    uint8_t irq = pci_read8(dev->bus, dev->device, dev->function, 0x3C); // Interrupt Line
+    return (irq == 0xFF || irq == 0) ? -1 : irq;
+}
+
+int pci_alloc_msi_vector(pci_device_t *dev) {
+    (void)dev;
+    // Stub: Return -1 to force future uses to use Interrupts, but should serve a purpose in the future
+    return -1; 
 }

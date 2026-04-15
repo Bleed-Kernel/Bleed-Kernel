@@ -827,11 +827,8 @@ user_file_t *vfs_file_stat(int fd) {
     stat->filesize    = vfs_filesize(f->inode);
     stat->permissions = f->flags & O_MODE;
 
-    // fname -> internal inode name.
-    if (f->inode->internal_data) {
-        const char *name = (const char *)f->inode->internal_data;
-        strncpy(stat->fname, name, sizeof(stat->fname) - 1);
-    }
+    strncpy(stat->fname, f->inode->name, sizeof(stat->fname) - 1);
+    stat->fname[sizeof(stat->fname) - 1] = '\0';
 
     return stat;
 }

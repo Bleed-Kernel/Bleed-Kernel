@@ -33,20 +33,29 @@ static size_t tar_octal_to_size(const char *octal_string, size_t header_size) {
 /// @param prefix header prefix
 /// @param name header name
 static void tar_build_path(char* path_out, size_t path_out_size, const char* header_prefix, const char* header_name){
+    memset(path_out, 0, path_out_size);
     size_t length = 0;
+
     if (header_prefix && header_prefix[0] != '\0'){
         for (size_t i = 0; i < 155 && header_prefix[i] != '\0'; i++){
             if (length < path_out_size - 1) path_out[length++] = header_prefix[i];
         }
-        if (length < path_out_size - 1) path_out[length++] = '/';
+        // Only add slash if prefix didnt end in one and we have room
+        if (length > 0 && path_out[length-1] != '/' && length < path_out_size - 1) {
+            path_out[length++] = '/';
+        }
     }
 
     if (header_name){
         for (size_t i = 0; i < 100 && header_name[i] != '\0'; i++){
-            if (length < path_out_size -1) path_out[length++] = header_name[i];
+            if (length < path_out_size - 1) path_out[length++] = header_name[i];
         }
     }
     path_out[length] = '\0';
+    
+    if (length > 1 && path_out[length - 1] == '/') {
+        path_out[length - 1] = '\0';
+    }
 }
 
 /// @brief extract a tar files contents to the filesystem

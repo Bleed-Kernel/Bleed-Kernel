@@ -54,6 +54,11 @@ uint8_t  pci_read8 (uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset);
 void     pci_write32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint32_t val);
 void     pci_write16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint16_t val);
 
+void pci_enable_busmaster(pci_device_t *dev);
+uint64_t pci_read_bar(pci_device_t *dev, int bar_index);
+int pci_get_irq(pci_device_t *dev);
+int pci_alloc_msi_vector(pci_device_t *dev);
+
 // scans all PCI bussus
 bool pci_find_device(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
                      pci_device_t *out);
