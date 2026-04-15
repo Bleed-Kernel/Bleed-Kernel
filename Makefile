@@ -46,14 +46,14 @@ KERNEL_NM := bin/kernel.nm
 KERNEL_SYM := initrd/etc/kernel.sym
 
 USER_REPOS := \
-    "https://codeberg.org/Bleed-Kernel/Verdict-Shell verdict" \
-    "https://codeberg.org/Bleed-Kernel/Bleed-Doom doom" \
-    "https://codeberg.org/Bleed-Kernel/Bleed-Taskman taskman" \
-    "https://codeberg.org/Bleed-Kernel/Bleed-tvi tvi" \
-    "https://codeberg.org/Bleed-Kernel/Bleed-Coreutils cat" \
-    "https://codeberg.org/Bleed-Kernel/Bleed-Coreutils echo" \
+    "https://github.com/Bleed-Kernel/Verdict-Shell verdict" \
+    "https://github.com/Bleed-Kernel/Bleed-Doom doom" \
+    "https://github.com/Bleed-Kernel/Bleed-Taskman taskman" \
+    "https://github.com/Bleed-Kernel/Bleed-tvi tvi" \
+    "https://github.com/Bleed-Kernel/Bleed-Coreutils cat" \
+    "https://github.com/Bleed-Kernel/Bleed-Coreutils echo" \
 
-USER_BIN_DIR := external/
+USER_BIN_DIR := external
 INITRD_BIN := initrd/bin
 
 .PHONY: all

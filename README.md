@@ -2,7 +2,7 @@
 
 the bleed kernel is an Operating System Kernel written in C and targets the x86_64 platform exclusively.
 
-![Doom running under the bleed kernel](https://cdn.discordapp.com/attachments/1250900206543700138/1473111046397886625/image.png?ex=69950512&is=6993b392&hm=4b7d92854b79d97b8291549d0f2987d8ab7060de777d313befd55dfcc954ec59&)
+![BleedKernel Booting](https://github.com/Bleed-Kernel/Bleed-Resources/blob/main/Bleed-Booting.png?raw=true)
 
 ## Requirements
 Generally any reasonable hardware should have this.
@@ -42,6 +42,8 @@ Generally any reasonable hardware should have this.
 - [ ] Network Drivers
 - [ ] Symetric Multiprocessing (SMP)
 - [ ] Task-Specific Framebuffers
+
+![Verdict Shell Splash](https://github.com/Bleed-Kernel/Bleed-Resources/blob/main/Bleed-Verdict-Shell.png?raw=true)
 
 ## Hardware Specifications
 I use many machines to test bleed on real hardware so I know it works the way it should.
