@@ -208,11 +208,13 @@ int xhci_init(void){
     controller.cap_base = mmio_virt;
 
     // CAPLENGTH is an 8-bit register at CAP+0x00 
-    uint8_t caplength = xhci_read8(mmio_virt, XHCI_CAP_CAPLENGTH);
+    uint32_t cap_reg = xhci_read32(mmio_virt, 0x00);
+    uint8_t caplength = cap_reg & 0xFF;
+    uint16_t hciversion = (cap_reg >> 16) & 0xFFFF;
+
     controller.op_base = mmio_virt + caplength;
 
-    uint16_t hciversion = *(volatile uint16_t *)(mmio_virt + XHCI_CAP_HCIVERSION);
-    uint32_t hcsp1      = xhci_read32(mmio_virt, XHCI_CAP_HCCPARAMS1);
+    uint32_t hcsp1      = xhci_read32(mmio_virt, XHCI_CAP_HCSPARAMS1);
     controller.max_ports = XHCI_HCSP1_MAX_PORTS(hcsp1);
     controller.max_slots = XHCI_HCSP1_MAX_SLOTS(hcsp1);
 
@@ -240,28 +242,28 @@ int xhci_init(void){
         uint32_t portsc = xhci_read32(controller.op_base, XHCI_OP_PORTSC(i));
  
         if (!(portsc & XHCI_PORTSC_PP)) {
-            serial_printf("XHCI port %u: no power (controller-managed power?)\n", i);
+            serial_printf(LOG_INFO "XHCI port %u: no power (controller-managed power?)\n", i);
             continue;
         }
  
         if (!(portsc & XHCI_PORTSC_CCS)) {
-            serial_printf("XHCI port %u: empty\n", i);
+            serial_printf(LOG_INFO "XHCI port %u: empty\n", i);
             continue;
         }
  
-        serial_printf("XHCI port %u: device present, speed=%s - resetting\n",
+        serial_printf(LOG_INFO "XHCI port %u: device present, speed=%s - resetting\n",
                 i, port_speed_str(portsc));
  
         if (xhci_port_reset(&controller, i) == 0) {
             // Read back PORTSC after reset - speed field is now valid
             portsc = xhci_read32(controller.op_base, XHCI_OP_PORTSC(i));
-            serial_printf("XHCI port %u: reset done, speed=%s, PED=%d\n",
+            serial_printf(LOG_INFO "XHCI port %u: reset done, speed=%s, PED=%d\n",
                     i,
                     port_speed_str(portsc),
                     !!(portsc & XHCI_PORTSC_PED));
             connected++;
         } else {
-            serial_printf("XHCI port %u: reset failed. fuck\n", i);
+            serial_printf(LOG_ERROR "XHCI port %u: reset failed. fuck\n", i);
         }
     }
  
