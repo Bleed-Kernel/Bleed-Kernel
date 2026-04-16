@@ -91,6 +91,11 @@ void pci_enable_busmaster(pci_device_t *dev) {
     pci_write16(dev->bus, dev->device, dev->function, 0x04, cmd | (1 << 2)); // Set bit 2 (Bus Master)
 }
 
+void pci_enable_mmio(pci_device_t *dev) {
+    uint16_t cmd = pci_read16(dev->bus, dev->device, dev->function, 0x04); 
+    pci_write16(dev->bus, dev->device, dev->function, 0x04, cmd | (1 << 1)); 
+}
+
 uint64_t pci_read_bar(pci_device_t *dev, int bar_index) {
     if (bar_index < 0 || bar_index > 5) return 0;
     

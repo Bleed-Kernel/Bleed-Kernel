@@ -166,7 +166,9 @@ run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
 		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
-		-device nvme,serial=bleed-nvme-1,drive=nvm0
+		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
+		-device qemu-xhci,id=xhci \
+		-device usb-kbd,bus=xhci.0,port=1
 
 .PHONY: run-uefi
 run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)

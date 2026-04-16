@@ -55,6 +55,8 @@ void     pci_write32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uin
 void     pci_write16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint16_t val);
 
 void pci_enable_busmaster(pci_device_t *dev);
+void pci_enable_mmio(pci_device_t *dev);
+
 uint64_t pci_read_bar(pci_device_t *dev, int bar_index);
 int pci_get_irq(pci_device_t *dev);
 int pci_alloc_msi_vector(pci_device_t *dev);

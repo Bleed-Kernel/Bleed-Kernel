@@ -48,6 +48,7 @@
 #include <devices/type/blk_device.h>
 #include <fs/vfs_mount.h>
 #include <drivers/ahci/ahci.h>
+#include <drivers/xhci/xhci.h>
 #include <drivers/nvme/nvme.h>
 #include <boot/splash_image.h>
 
@@ -274,6 +275,8 @@ void kmain() {
     PS2_Keyboard_init();     EARLY_OK("PS2 Keyboard init");
     PS2_Mouse_init();        EARLY_OK("Mouse init");
     serial_device_register();EARLY_OK("Serial Device Done");
+
+    xhci_init();
 
     vfs_mkdir("/mnt");
     ide_init();

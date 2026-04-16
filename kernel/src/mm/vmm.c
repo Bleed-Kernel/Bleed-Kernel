@@ -290,8 +290,8 @@ void vmm_free_pages(void* addr, size_t pages) {
     (void)vmm_unmap_free_pages(kernel_page_map, (void *)base, pages);
 }
 
-void *vmm_map_mmio(uint64_t phys, size_t size) {
-    if (!size) return NULL;
+uintptr_t vmm_map_mmio(uint64_t phys, size_t size) {
+    if (!size) return 0;
     
     size_t pages = PAGE_ALIGN_UP(size) / PAGE_SIZE;
 
@@ -302,7 +302,7 @@ void *vmm_map_mmio(uint64_t phys, size_t size) {
     spinlock_release(&vmm_lock);
     irq_restore(irq);
 
-    if (!base) return NULL;
+    if (!base) return 0;
 
     uint64_t mmio_flags = PTE_PRESENT | PTE_WRITABLE | PTE_NX;
 
@@ -312,8 +312,8 @@ void *vmm_map_mmio(uint64_t phys, size_t size) {
         (void)vmm_release_range_locked(base, pages);
         spinlock_release(&vmm_lock);
         irq_restore(irq);
-        return NULL;
+        return 0;
     }
 
-    return (void *)base;
+    return base;
 }
