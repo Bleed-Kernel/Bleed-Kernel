@@ -12,6 +12,7 @@ The System Requirements for Bleed are Rather Slim, it's a simple operating syste
 - ACPI-Compliant firmware with HPET
 - IOAPIC Support
 - SSE4.2 Support
+  
 **Recommended** not required but Bleed Will Use It:
 - User-Mode Instruction Prevention (UMIP)
 - Supervisor Memory Access Protection (SMAP)
