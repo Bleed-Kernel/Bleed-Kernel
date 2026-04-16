@@ -5,18 +5,16 @@ the bleed kernel is an Operating System Kernel written in C and targets the x86_
 ![BleedKernel Booting](https://github.com/Bleed-Kernel/Bleed-Resources/blob/main/Bleed-Booting.png?raw=true)
 
 ## Requirements
-Generally any reasonable hardware should have this.
-- CPU - 64-bit Processor*
-- RAM - <128MiB
-- IOAPIC
-- HPET
-
-*your processor must support
-- AVX2 (XSAVE, XGETBV, XSETBV)
-- SMAP (clac, stac)
-- APIC
-- PAT
-- UMIP (optional, the kernel will use it if it's there)
+The System Requirements for Bleed are Rather Slim, it's a simple operating system.
+**Your Must have**
+- An x86_64 Processor (No 32-Bit Support)
+- At Minimum 512MiB of Memory
+- ACPI-Compliant firmware with HPET
+- IOAPIC Support
+- SSE4.2 Support
+**Recommended** not required but Bleed Will Use It:
+- User-Mode Instruction Prevention (UMIP)
+- Supervisor Memory Access Protection (SMAP)
 
 ## Bleed Features and why its so cool
 - [x] General Hardware Security Featuees (UMIP, NX, WP)
