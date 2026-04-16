@@ -304,13 +304,17 @@ size_t vfs_filesize(INode_t* inode) {
 
     size_t total = 0;
     size_t offset = 0;
-    char buffer[4096];
-    long r;
+    
+    char *buffer = kmalloc(4096);
+    if (!buffer) return 0; // Better to return 0 than crash
 
-    while ((r = inode_read(inode, buffer, sizeof(buffer), offset)) > 0) {
+    long r;
+    while ((r = inode_read(inode, buffer, 4096, offset)) > 0) {
         total += (size_t)r;
         offset += (size_t)r;
     }
+
+    kfree(buffer, 4096);
 
     return total;
 }

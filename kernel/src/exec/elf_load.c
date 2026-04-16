@@ -113,7 +113,6 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
             goto out_phdr;
         }
 
-
         uint64_t pflags = PTE_USER | PTE_PRESENT;
         if (phdr[i].p_flags & PF_W) pflags |= PTE_WRITABLE;
 
@@ -125,41 +124,46 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
         uintptr_t segment_bytes = seg_end - seg_start;
         if (segment_bytes == 0) continue;
 
-        char *load_buffer = kmalloc(segment_bytes);
-        if (!load_buffer) { r = -OUT_OF_MEMORY; goto out_phdr; }
-
-        memset(load_buffer, 0, segment_bytes);
-
-        uintptr_t vert_offset = phdr[i].p_vaddr - seg_start;
-        if (phdr[i].p_filesz > segment_bytes - vert_offset) { r = -INVALID_MAGIC; goto out_buf; }
-
-        r = vfs_read_exact(elf_file,
-                           load_buffer + vert_offset,
-                           phdr[i].p_filesz,
-                           phdr[i].p_offset);
-        if (r != 0) goto out_buf;
-
-        for (uintptr_t off = 0; off < segment_bytes; off += PAGE_SIZE){
+        for (uintptr_t off = 0; off < segment_bytes; off += PAGE_SIZE) {
             paddr_t phys = pmm_alloc_pages(1);
-            if (!phys) { r = -OUT_OF_MEMORY; goto out_buf; }
+            if (!phys) { r = -OUT_OF_MEMORY; goto out_phdr; }
 
             paging_map_page_invl(cr3, phys, seg_start + off, pflags, 0);
 
-            size_t copy_size = PAGE_SIZE;
-            if (off + copy_size > segment_bytes)
-                copy_size = segment_bytes - off;
+            void *kvaddr = (void*)paddr_to_vaddr(phys);
+            memset(kvaddr, 0, PAGE_SIZE);
 
-            memcpy((void*)paddr_to_vaddr(phys),
-                   load_buffer + off,
-                   copy_size);
+            uintptr_t current_page_vaddr = seg_start + off;
+            uintptr_t file_data_start = phdr[i].p_vaddr;
+            uintptr_t file_data_end = phdr[i].p_vaddr + phdr[i].p_filesz;
+
+            if (current_page_vaddr < file_data_end && (current_page_vaddr + PAGE_SIZE) > file_data_start) {
+                uintptr_t read_start_in_page = 0;
+                uintptr_t file_offset = phdr[i].p_offset;
+
+                if (current_page_vaddr < file_data_start) {
+                    read_start_in_page = file_data_start - current_page_vaddr;
+                } else {
+                    file_offset += (current_page_vaddr - file_data_start);
+                }
+
+                uintptr_t read_end_in_page = PAGE_SIZE;
+                if ((current_page_vaddr + PAGE_SIZE) > file_data_end) {
+                    read_end_in_page = file_data_end - current_page_vaddr;
+                }
+
+                size_t read_size = read_end_in_page - read_start_in_page;
+
+                r = vfs_read_exact(elf_file, 
+                                   (char*)kvaddr + read_start_in_page, 
+                                   read_size, 
+                                   file_offset);
+                                   
+                if (r != 0) goto out_phdr;
+            }
         }
-
-        kfree(load_buffer, segment_bytes);
+        
         continue;
-
-out_buf:
-        kfree(load_buffer, segment_bytes);
-        goto out_phdr;
     }
 
     *entry = ehdr.e_entry;

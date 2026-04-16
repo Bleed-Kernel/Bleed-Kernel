@@ -426,11 +426,23 @@ static int tempfs_unlink(INode_t* dir, const char* name, size_t namelen) {
 
             dir_data->capacity--;
 
-            /*
-             * Drop the tree's ref. If no fds are open (shared==1), vfs_drop
-             * will free the inode. If fds are still open (shared==2+), it
-             * stays alive until the last fd is closed.
-             */
+            // Free chunks if they are now completely empty
+            if (dir_data->capacity == 0 && dir_data->data) {
+                kfree(dir_data->data, TEMPFS_DATA_CHUNK_SIZE);
+                dir_data->data = NULL;
+            } else if (dir_data->capacity > 0 && (dir_data->capacity % MAX_ENTRIES_PER_DATA_CHUNK) == 0) {
+                // We just emptied a chunk at the tail
+                size_t chunks_needed = dir_data->capacity / MAX_ENTRIES_PER_DATA_CHUNK;
+                tempfs_data_t *c = dir_data->data;
+                for (size_t k = 1; k < chunks_needed && c; k++) {
+                    c = c->next_chunk;
+                }
+                if (c && c->next_chunk) {
+                    kfree(c->next_chunk, TEMPFS_DATA_CHUNK_SIZE);
+                    c->next_chunk = NULL;
+                }
+            }
+
             extern void vfs_drop(INode_t*);
             vfs_drop(child);
 

@@ -4,7 +4,7 @@ IMAGE_NAME := bleed-kernel
 OBJDIR := bin/obj
 KERNEL_BIN := bin/bleed-kernel
 OVMF_FW := edk2-ovmf/OVMF-pure-efi.fd
-MEMSZ := 3G
+MEMSZ := 1G
 PROC_VERSION_FILE := initrd/proc/version
 BUILD_GIT_HASH := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_GIT_COUNT := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
