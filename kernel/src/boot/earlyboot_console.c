@@ -2,6 +2,7 @@
 #include <vendor/limine_bootloader/limine.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 /*
     the purpose of this is quite unclear so it may look silly or entirely lazy
@@ -88,6 +89,17 @@ void early_fb_write_string(const char *str, uint32_t col, uint32_t row) {
     }
 }
 
+static void early_fb_scroll(void) {
+    uint32_t move_words = (fb_height - 16) * fb_pitch_u32;
+    memmove((void *)fb_addr, (void *)(fb_addr + 16 * fb_pitch_u32), move_words * sizeof(uint32_t));
+    
+    uint32_t clear_start = (fb_height - 16) * fb_pitch_u32;
+    uint32_t clear_words = 16 * fb_pitch_u32;
+    for (uint32_t i = 0; i < clear_words; i++) {
+        fb_addr[clear_start + i] = BG_COLOR;
+    }
+}
+
 void early_fb_puts(const char *str) {
     if (!fb_initialized) early_fb_init();
     if (!fb_addr || !str) return;
@@ -98,12 +110,18 @@ void early_fb_puts(const char *str) {
     while (*str) {
         if (*str == '\n') {
             cur_col = 0;
-            if (++cur_row >= rows) cur_row = 0;
+            if (++cur_row >= rows) {
+                early_fb_scroll();
+                cur_row = rows - 1;
+            }
         } else {
             draw_char((uint8_t)*str, cur_col * 8, cur_row * 16);
             if (++cur_col >= cols) {
                 cur_col = 0;
-                if (++cur_row >= rows) cur_row = 0;
+                if (++cur_row >= rows) {
+                    early_fb_scroll();
+                    cur_row = rows - 1;
+                }
             }
         }
         str++;

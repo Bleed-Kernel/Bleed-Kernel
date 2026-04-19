@@ -16,6 +16,8 @@
 // Write Protect
 #define CR0_WP (1ULL << 16)
 
+void enable_sse();
+
 static inline void UMIP_init(void){
     uint32_t eax, ebx, ecx, edx;
 
@@ -45,20 +47,3 @@ static inline void wp_enable(void){
     cr0 |= CR0_WP;
     write_cr0(cr0);
 }
-
-static inline bool cpu_has_avx512(void) {
-    uint32_t eax, ebx, ecx, edx;
-
-    if (!cpuid(1, &eax, &ebx, &ecx, &edx))
-        return false;
-
-    if (!(ecx & (1 << 27)) || !(ecx & (1 << 28)))
-        return false;
-
-    if (!cpuid_count(7, 0, &eax, &ebx, &ecx, &edx))
-        return false;
-
-    return (ebx & (1 << 16)) != 0;
-}
-
-void avx_enable(void);

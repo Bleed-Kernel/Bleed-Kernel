@@ -59,8 +59,6 @@ extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
 extern volatile struct limine_executable_cmdline_request cmdline_request;
 
-extern void avx_enable(void);
-extern void sse_enable(void);
 tty_t tty0;
 
 static INode_t *g_shell_elf = NULL;
@@ -244,7 +242,7 @@ void kmain() {
     early_fb_init();
     EARLY_OK("Welcome to the Bleed Kernel, this part should go pretty quick."); 
     gdt_init();         EARLY_OK("GDT");
-    sse_enable();       EARLY_OK("SIMD");
+    enable_sse();       EARLY_OK("SIMD");
     serial_init();      EARLY_OK("Serial");
     idt_init();         EARLY_OK("IDT");
     pmm_init();         EARLY_OK("Physical Memory Manager");
@@ -275,9 +273,10 @@ void kmain() {
     PS2_Keyboard_init();     EARLY_OK("PS2 Keyboard init");
     PS2_Mouse_init();        EARLY_OK("Mouse init");
     serial_device_register();EARLY_OK("Serial Device Done");
-
+    
+    EARLY_OK("XHCI Init");
     xhci_init();
-
+    
     vfs_mkdir("/mnt");
     ide_init();
     INode_t *hda1 = device_get_by_name("hda1");
