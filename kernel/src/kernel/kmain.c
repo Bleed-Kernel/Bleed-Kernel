@@ -232,6 +232,7 @@ void shell_start() {
         (void)tty_set_active_index(0);
         (void)kernel_bind_stdio_to_tty(0);
     } else {
+        serial_printf("shellpath %s\n", path_buffer);
         kprintf(LOG_ERROR "No valid shell path provided.\n");
     }
 }
@@ -239,14 +240,21 @@ void shell_start() {
 void kmain() {
     asm volatile ("cli");
     early_fb_init();
-    EARLY_OK("Welcome to the Bleed Kernel, this part should go pretty quick."); 
+
+    EARLY_OK("Welcome to the Bleed Kernel");
+    EARLY_OK("The kernel will now prepare the computer.");
     gdt_init();         EARLY_OK("GDT");
     enable_sse();       EARLY_OK("SIMD");
     serial_init();      EARLY_OK("Serial");
     idt_init();         EARLY_OK("IDT");
+
     pmm_init();         EARLY_OK("Physical Memory Manager");
     vfs_mount_root();   EARLY_OK("VFS Mount");
-    initrd_load();      EARLY_OK("initrd Ram Disk");
+    initrd_load();      EARLY_OK("Initramfs");
+
+    reinit_paging();    EARLY_OK("Paging Reinitalized");
+    bootargs_init(cmdline_request.response->cmdline);
+    acpi_init();        EARLY_OK("ACPI Read");
     display_splash_screen("initrd/boot/splash.bgra", 200, 252);
 
     psf_init("initrd/fonts/ttyfont.psf"); EARLY_OK("PSF Font Loaded");
@@ -257,15 +265,12 @@ void kmain() {
         kprintf(LOG_OK "Kernel symbols loaded from initrd/etc/kernel.sym\n");
     }
 
-    reinit_paging();    EARLY_OK("Paging Reinitalized");
-    acpi_init();        EARLY_OK("ACPI Read");
-    tss_init();         EARLY_OK("TSS Done");
-    syscall_init();     EARLY_OK("Syscalls Setup");
-    fb_device_init();   EARLY_OK("FB Device Init");
+    tss_init();             EARLY_OK("TSS Done");
+    syscall_init();         EARLY_OK("Syscalls Setup");
+    fb_device_init();       EARLY_OK("FB Device Init");
 
-    bootargs_init(cmdline_request.response->cmdline);
-    acpi_init_hpet();   EARLY_OK("HPET Done");
-    hpet_device_init(); EARLY_OK("HPET Device Created");
+    acpi_init_hpet();       EARLY_OK("HPET Done");
+    hpet_device_init();     EARLY_OK("HPET Device Created");
 
     kbd_device_init();       EARLY_OK("KBD Device Done");
     mouse_device_init();     EARLY_OK("Mouse Device Done");

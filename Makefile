@@ -151,8 +151,8 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 		iso_root -o $(IMAGE_NAME).iso
 	rm -rf iso_root
 
-.PHONY: run
-run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+.PHONY: run-bios
+run-bios: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	qemu-system-x86_64 \
 		--cdrom $(IMAGE_NAME).iso \
 		--enable-kvm \
@@ -167,11 +167,9 @@ run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
-		-device qemu-xhci,id=xhci \
-		-device usb-kbd,bus=xhci.0,port=1
 
-.PHONY: run-uefi
-run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+.PHONY: run
+run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		--cdrom $(IMAGE_NAME).iso \

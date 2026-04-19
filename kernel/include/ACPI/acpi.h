@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <ACPI/acpi_time.h>
+#include <media/bmp/bmp.h>
 
 struct acpi_sdt {
     char     signature[4];
@@ -37,6 +38,16 @@ void acpi_init(void);
 void rtc_get_time(struct rtc_time *t);
 
 struct acpi_sdt *acpi_find_sdt(const char sig[4]);
+
+struct acpi_bgrt{
+    struct acpi_sdt sdt_header;
+    uint16_t    version;
+    uint8_t     status;
+    uint8_t     type;
+    uint64_t    image_address;
+    uint32_t    x_off;
+    uint32_t    y_off; 
+}__attribute__((packed));
 
 __attribute__((noreturn)) void acpi_shutdown(void);
 __attribute__((noreturn)) void acpi_reboot(void);
