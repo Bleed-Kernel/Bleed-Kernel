@@ -274,9 +274,6 @@ void kmain() {
     PS2_Mouse_init();        EARLY_OK("Mouse init");
     serial_device_register();EARLY_OK("Serial Device Done");
     
-    EARLY_OK("XHCI Init");
-    xhci_init();
-    
     vfs_mkdir("/mnt");
     ide_init();
     INode_t *hda1 = device_get_by_name("hda1");
