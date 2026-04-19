@@ -48,7 +48,6 @@
 #include <devices/type/blk_device.h>
 #include <fs/vfs_mount.h>
 #include <drivers/ahci/ahci.h>
-#include <drivers/xhci/xhci.h>
 #include <drivers/nvme/nvme.h>
 #include <boot/splash_image.h>
 
