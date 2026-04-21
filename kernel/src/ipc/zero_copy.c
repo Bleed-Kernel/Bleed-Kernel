@@ -11,13 +11,12 @@
 #include <user/user_ipc.h>
 
 static spinlock_t ipc_lock;
-static int ipc_lock_init_done;
-
-static void ipc_init_lock(void) {
-    if (ipc_lock_init_done)
+static void ipc_ensure_lock_init(void) {
+    static int done = 0;
+    if (__atomic_load_n(&done, __ATOMIC_ACQUIRE))
         return;
     spinlock_init(&ipc_lock);
-    ipc_lock_init_done = 1;
+    __atomic_store_n(&done, 1, __ATOMIC_RELEASE);
 }
 
 static int ipc_range_in_alloc_list(task_t *task, uintptr_t addr, size_t pages) {
@@ -48,6 +47,7 @@ static int ipc_detach_alloc_range(task_t *task, uintptr_t addr, size_t pages) {
 
     user_alloc_t *prev = NULL;
     user_alloc_t *cur = task->alloc_list;
+    
     while (cur) {
         uintptr_t alloc_start = (uintptr_t)cur->vaddr;
         uintptr_t alloc_end = alloc_start + cur->pages * PAGE_SIZE;
@@ -196,7 +196,7 @@ long ipc_send_pages(task_t *sender, uint64_t target_pid, uint64_t src_addr, uint
     msg->flags = 0;
     msg->phys_pages = phys_pages;
 
-    ipc_init_lock();
+    ipc_ensure_lock_init();
     unsigned long irq_flags = irq_push();
     spinlock_acquire(&ipc_lock);
     ipc_queue_push(target, msg);
@@ -212,7 +212,7 @@ long ipc_recv(task_t *receiver, uint64_t user_msg_ptr) {
     if (!user_msg_ptr || !user_ptr_valid(user_msg_ptr))
         return -EFAULT;
 
-    ipc_init_lock();
+    ipc_ensure_lock_init();
     unsigned long irq_flags = irq_push();
     spinlock_acquire(&ipc_lock);
     ipc_message_t *msg = ipc_queue_pop(receiver);
@@ -260,7 +260,7 @@ void ipc_task_cleanup(task_t *task) {
     if (!task)
         return;
 
-    ipc_init_lock();
+    ipc_ensure_lock_init();
     unsigned long irq_flags = irq_push();
     spinlock_acquire(&ipc_lock);
     ipc_message_t *msg = task->ipc_head;
