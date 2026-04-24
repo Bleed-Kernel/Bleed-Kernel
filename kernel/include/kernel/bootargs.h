@@ -12,4 +12,3 @@ typedef struct {
 void        bootargs_init(const char* cmdline);
 const char* bootargs_get(const char* key);
 bool        bootargs_is(const char* key, const char* expected_value);
-bool        bootargs_has(const char* key);

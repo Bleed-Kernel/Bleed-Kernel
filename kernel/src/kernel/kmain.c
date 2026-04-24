@@ -174,7 +174,7 @@ void shell_start() {
     const char* target_path = NULL;
     char path_buffer[256];
 
-    if (bootargs_is("shell-path", "default")) {
+    if (bootargs_is("init", "default")) {
         kprintf(LOG_INFO "Loading default shell path from initrd/etc/shell...\n");
         
         int sfd = vfs_open("initrd/etc/shell", O_RDONLY);
@@ -201,7 +201,7 @@ void shell_start() {
         
         target_path = path_buffer;
     } else {
-        target_path = bootargs_get("shell-path");
+        target_path = bootargs_get("init");
     }
 
     if (target_path && target_path[0] != '\0') {
@@ -257,7 +257,13 @@ void kmain() {
     acpi_init();        EARLY_OK("ACPI Read");
     display_splash_screen("initrd/boot/splash.bgra", 200, 252);
 
-    psf_init("initrd/fonts/ttyfont.psf"); EARLY_OK("PSF Font Loaded");
+    if (bootargs_get("ttyfont")){
+        psf_init(bootargs_get("ttyfont"));
+    }else{
+        psf_init("initrd/fonts/ttyfont.psf");
+    }
+
+    EARLY_OK("PSF Font Loaded");
 
     if (stack_trace_load_symbols("initrd/etc/kernel.sym") < 0) {
         kprintf(LOG_WARN "Failed to load kernel symbols from initrd/etc/kernel.sym\n");
@@ -304,10 +310,16 @@ void kmain() {
     sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
     EARLY_OK("Reaper Task Started");
 
-    supervisor_memory_protection_init();
-    EARLY_OK("SMIP enabled");
-    UMIP_init();
-    EARLY_OK("UMIP enabled");
+    if (!bootargs_is("smap", "no")){
+        supervisor_memory_protection_init();
+        EARLY_OK("SMAP enabled");
+    }
+
+    if (!bootargs_is("umip", "no")){
+        UMIP_init();
+        EARLY_OK("UMIP enabled");
+    }
+
     shell_start();
 
     tty0 = kernel_console_init();

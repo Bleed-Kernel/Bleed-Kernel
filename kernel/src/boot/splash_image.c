@@ -62,10 +62,16 @@ static void draw_uefi_bmp(void* bmp_data) {
 /// @param img_height y
 void display_splash_screen(const char* image_path, uint32_t img_width, uint32_t img_height) {
 
+    if (bootargs_is("splash", "off")) return;
+
     bmp_file_t* bootloader_image = ACPI_get_boot_logo();
-    if (bootloader_image != NULL && !bootargs_is("preferred-splash", "bleed")) {
+    if (bootloader_image != NULL && !bootargs_is("splash", "bleed")) {
         draw_uefi_bmp((void*)bootloader_image);
         return;
+    }
+
+    if (bootargs_is("splash", "bgra")){
+        return; // whatever vro, couldnt find a BGRA image and the user didnt wanna see boos face.
     }
 
     int fd = vfs_open(image_path, O_RDONLY);
