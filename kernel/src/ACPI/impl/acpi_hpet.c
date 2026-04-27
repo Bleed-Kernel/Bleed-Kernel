@@ -11,9 +11,15 @@
 #define HPET_FREQUENCY          1000
 
 struct acpi_hpet *hpet = NULL;
-volatile void* address = NULL;
+void* address = NULL;
 
-uint64_t femtosecondsPerTick = 0;
+static uint64_t femtosecondsPerTick = 0;
+static uint64_t millisecondsPerTick = 0;
+
+uint64_t getFemtosecondsPerTick() { return femtosecondsPerTick; }
+uint64_t getMillisecondsPerTick() { return millisecondsPerTick; }
+void* getHpetAddress() { return address; }
+
 
 void acpi_init_hpet(void){
     hpet = (struct acpi_hpet *)acpi_find_sdt("HPET");
@@ -32,6 +38,7 @@ void acpi_init_hpet(void){
     *(uint32_t*)(address + 0x100)   |= HPET_TIMER_INTERUPTS     |   HPET_TIMER_PERIODIC;
 
     femtosecondsPerTick = *(uint64_t*)address >> 32;
+    millisecondsPerTick = femtosecondsPerMillisecond / femtosecondsPerTick;
     serial_printf(LOG_OK "HPET is at %u femtoseconds per tick\n", femtosecondsPerTick);
 
     *(uint64_t*)(address + 0x108) = (femtosecondsPerSecond / femtosecondsPerTick) / HPET_FREQUENCY;

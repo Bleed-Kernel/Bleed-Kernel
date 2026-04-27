@@ -34,7 +34,8 @@ typedef enum {
 typedef enum {
     FD_TYPE_FS,
     FD_TYPE_DEV,
-    FD_TYPE_PIPE
+    FD_TYPE_PIPE,
+    FD_TYPE_EPOLL
 } fd_type_t;
 
 typedef struct INodeOps{

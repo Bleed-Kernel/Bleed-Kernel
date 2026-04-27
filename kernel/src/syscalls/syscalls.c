@@ -20,7 +20,7 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_OPEN, sys_open),
     SYSCALL(SYS_CLOSE, sys_close),
     SYSCALL(SYS_IOCTL, sys_ioctl),
-    SYSCALL(SYS_YEILD, sys_yield),
+    SYSCALL(SYS_YIELD, sys_yield),
     SYSCALL(SYS_SPAWN, sys_spawn),
     SYSCALL(SYS_SHUTDOWN, sys_shutdown),
     SYSCALL(SYS_REBOOT, sys_reboot),
@@ -51,7 +51,11 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_DUP2, sys_dup2),
     SYSCALL(SYS_UNLINK, sys_unlink),
     SYSCALL(SYS_RENAME, sys_rename),
-    SYSCALL(SYS_MKDIR, sys_mkdir)
+    SYSCALL(SYS_MKDIR, sys_mkdir),
+    SYSCALL(SYS_EPOLL_CREATE1, sys_epoll_create1),
+    SYSCALL(SYS_EPOLL_CTL, sys_epoll_ctl),
+    SYSCALL(SYS_EPOLL_WAIT, sys_epoll_wait),
+    SYSCALL(SYS_EPOLL_PWAIT, sys_epoll_pwait),
 };
 #pragma GCC diagnostic pop
 

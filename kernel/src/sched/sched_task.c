@@ -7,6 +7,7 @@
 #include <ansii.h>
 #include <mm/spinlock.h>
 #include <user/errno.h>
+#include <ipc/epoll.h>
 
 #include "priv_scheduler.h"
 
@@ -187,6 +188,8 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     if (!task->fd_table)
         ke_panic("Failed to allocate task fd table");
 
+    poll_table_init(&task->ipc_poll);
+
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
     queue_task(task);
@@ -233,6 +236,18 @@ uint64_t get_task_count(void) {
     spinlock_release(&sched_lock);
     irq_restore(flags);
     return count;
+}
+
+void sched_wake(task_t *task) {
+    if (!task) return;
+    unsigned long irq = irq_push();
+
+    if (task->state == TASK_BLOCKED || task->state == TASK_STOPPED){
+        task->state = TASK_READY;
+        ready_enqueue(task);
+    }
+
+    irq_restore(irq);
 }
 
 void sched_init_task_heap(task_t* task) {
@@ -350,6 +365,8 @@ task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
     child->current_directory = parent->current_directory ? parent->current_directory : vfs_get_root();
     if (child->current_directory)
         child->current_directory->shared++;
+
+    poll_table_init(&child->ipc_poll);
 
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);

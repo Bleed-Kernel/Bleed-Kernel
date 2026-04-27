@@ -6,6 +6,7 @@
 #include <mm/userspace/mmap.h>
 #include <fs/vfs.h>
 #include <user/signal.h>
+#include <ipc/epoll.h>
 
 #define KERNEL_STACK_SIZE   8196
 
@@ -106,6 +107,8 @@ typedef struct task {
     uintptr_t       sig_restorers[NSIG];
     uintptr_t       sig_active_frame;
 
+    poll_table_t    ipc_poll;
+
     int             exit_signal;
     int             exit_code;
 
@@ -130,6 +133,7 @@ uint64_t get_task_count();
 task_t *get_current_task();
 void sched_yield(task_t *task);
 void sched_block(task_t *task);
+void sched_wake(task_t *task);
 
 void itterate_each_task(task_itteration_fn fn, void *userdata);
 

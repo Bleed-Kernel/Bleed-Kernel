@@ -7,45 +7,52 @@
 #include <user/user_task.h>
 #include <fs/vfs.h>
 #include <user/signal.h>
+#include <ipc/epoll.h>
 
 enum {
-    SYS_READ,
-    SYS_WRITE,
-    SYS_OPEN,
-    SYS_CLOSE,
-    SYS_IOCTL,
-    SYS_YEILD,
-    SYS_SPAWN,
-    SYS_SHUTDOWN,
-    SYS_REBOOT,
-    SYS_EXIT,
-    SYS_WAITPID,
-    SYS_KILL,
-    SYS_MEMINFO,
-    SYS_TIME,
-    SYS_CHDIR,
-    SYS_GETCWD,
-    SYS_READDIR,
-    SYS_STAT,
-    SYS_MMAP,
-    SYS_MUNMAP,
-    SYS_TASKCOUNT,
-    SYS_TASKINFO,
-    SYS_MAPFB,
-    SYS_SEEK,
-    SYS_SIGACTION,
-    SYS_SIGPROCMASK,
-    SYS_SIGRETURN,
-    SYS_GETPID,
-    SYS_FORK,
-    SYS_EXEC,
-    SYS_IPC_SEND,
-    SYS_IPC_RECV,
-    SYS_PIPE,
-    SYS_DUP2,
-    SYS_UNLINK,
-    SYS_RENAME,
-    SYS_MKDIR
+    SYS_READ            = 0,
+    SYS_WRITE           = 1,
+    SYS_OPEN            = 2,
+    SYS_CLOSE           = 3,
+    SYS_STAT            = 4,
+    SYS_SEEK            = 8,
+    SYS_MMAP            = 9,
+    SYS_MUNMAP          = 11,
+    SYS_IOCTL           = 16,
+    SYS_DUP2            = 33,
+    SYS_FORK            = 57,
+    SYS_EXEC            = 59,
+    SYS_EXIT            = 60,
+    SYS_WAITPID         = 61,
+    SYS_KILL            = 62,
+    SYS_MKDIR           = 83,
+    SYS_UNLINK          = 87,
+    SYS_RENAME          = 82,
+    SYS_GETCWD          = 79,
+    SYS_CHDIR           = 80,
+    SYS_READDIR         = 89,
+    SYS_PIPE            = 293,
+    SYS_GETPID          = 39,
+    SYS_SIGACTION       = 13,
+    SYS_SIGPROCMASK     = 14,
+    SYS_SIGRETURN       = 15,
+    SYS_TIME            = 201,
+    SYS_EPOLL_CREATE1   = 291,
+    SYS_EPOLL_CTL       = 233,
+    SYS_EPOLL_WAIT      = 232,
+    SYS_EPOLL_PWAIT     = 281,
+
+    // bleed kernel specific system calls
+    SYS_YIELD           = 512,
+    SYS_SPAWN           = 513,
+    SYS_SHUTDOWN        = 514,
+    SYS_REBOOT          = 515,
+    SYS_MEMINFO         = 516,
+    SYS_TASKCOUNT       = 517,
+    SYS_TASKINFO        = 518,
+    SYS_MAPFB           = 519,
+    SYS_IPC_SEND        = 520,
+    SYS_IPC_RECV        = 521,
 };
 
 int sys_open(char *path_str, int flags);
@@ -79,7 +86,7 @@ long sys_sigreturn(void);
 long sys_getpid(void);
 
 system_memory_info_t *sys_meminfo();
-int sys_time(struct rtc_time* user_buf);
+int sys_time(struct rtc_time *user_buf);
 
 uintptr_t sys_alloc(uint64_t pages);
 uintptr_t sys_free(uint64_t addr, uint64_t pages);
@@ -96,12 +103,19 @@ void *sys_mmap(size_t pages);
 void sys_munmap(void *addr);
 
 int sys_test_usercopy(uint64_t user_buf_ptr, uint64_t len);
-void* sys_mapfb(task_t *task, size_t *out_pages);
+void *sys_mapfb(task_t *task, size_t *out_pages);
 
 long sys_seek(int fd, long offset, int whence);
 uint64_t sys_femtoseconds();
 
 long sys_ipc_send(uint64_t target_pid, uint64_t src_addr, uint64_t pages);
 long sys_ipc_recv(uint64_t user_msg_ptr);
+
+long sys_epoll_create1(int flags);
+long sys_epoll_ctl(int epfd, int op, int fd, epoll_event_t *user_ev);
+long sys_epoll_wait(int epfd, epoll_event_t *user_events, int maxevents, int timeout_ms);
+long sys_epoll_pwait(int epfd, epoll_event_t *user_events, int maxevents, int timeout_ms,
+                     const uint64_t *user_sigmask, size_t sigsetsize);
+void epoll_fd_close(task_t *task, int fd);
 
 void syscall_init(void);

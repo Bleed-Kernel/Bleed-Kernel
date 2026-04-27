@@ -1,5 +1,4 @@
 #include <ipc/zero_copy.h>
-
 #include <mm/kalloc.h>
 #include <mm/paging.h>
 #include <mm/pmm.h>
@@ -9,6 +8,7 @@
 #include <user/errno.h>
 #include <user/user_copy.h>
 #include <user/user_ipc.h>
+#include <ipc/epoll.h>
 
 static spinlock_t ipc_lock;
 static void ipc_ensure_lock_init(void) {
@@ -47,7 +47,7 @@ static int ipc_detach_alloc_range(task_t *task, uintptr_t addr, size_t pages) {
 
     user_alloc_t *prev = NULL;
     user_alloc_t *cur = task->alloc_list;
-    
+
     while (cur) {
         uintptr_t alloc_start = (uintptr_t)cur->vaddr;
         uintptr_t alloc_end = alloc_start + cur->pages * PAGE_SIZE;
@@ -102,11 +102,11 @@ static void ipc_queue_push(task_t *task, ipc_message_t *msg) {
     if (!task->ipc_tail) {
         task->ipc_head = msg;
         task->ipc_tail = msg;
-        return;
+    } else {
+        task->ipc_tail->next = msg;
+        task->ipc_tail = msg;
     }
-
-    task->ipc_tail->next = msg;
-    task->ipc_tail = msg;
+    ipc_poll_notify_readable(task);
 }
 
 static ipc_message_t *ipc_queue_pop(task_t *task) {
@@ -139,7 +139,8 @@ static int ipc_validate_send_range(task_t *sender, uintptr_t src_addr, size_t pa
     return 0;
 }
 
-long ipc_send_pages(task_t *sender, uint64_t target_pid, uint64_t src_addr, uint64_t pages) {
+long ipc_send_pages(task_t *sender, uint64_t target_pid, 
+                    uint64_t src_addr, uint64_t pages) {
     if (!sender)
         return -ESRCH;
     if (!target_pid || !src_addr || !pages)
@@ -233,14 +234,15 @@ long ipc_recv(task_t *receiver, uint64_t user_msg_ptr) {
 
     for (size_t i = 0; i < (size_t)msg->pages; i++) {
         uintptr_t dst_page = (uintptr_t)target_addr + i * PAGE_SIZE;
-        paging_map_page_invl(receiver->page_map, msg->phys_pages[i], dst_page, PTE_USER | PTE_WRITABLE, 0);
+        paging_map_page_invl(receiver->page_map, msg->phys_pages[i],
+                             dst_page, PTE_USER | PTE_WRITABLE, 0);
     }
 
     user_ipc_msg_t out = {
         .sender_pid = msg->sender_pid,
-        .addr = (uint64_t)(uintptr_t)target_addr,
-        .pages = msg->pages,
-        .flags = msg->flags
+        .addr       = (uint64_t)(uintptr_t)target_addr,
+        .pages      = msg->pages,
+        .flags      = msg->flags,
     };
 
     if (copy_to_user(receiver, (void *)user_msg_ptr, &out, sizeof(out)) != 0) {

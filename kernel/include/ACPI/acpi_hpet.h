@@ -17,7 +17,7 @@
 #define HPET_ENABLE_CNF   (1 << 0)
 #define HPET_LEGACY_CNF   (1 << 1)
 
-extern volatile void* address;
+extern void* address;
 
 struct acpi_hpet{
     struct acpi_sdt header;
@@ -46,6 +46,9 @@ static inline uint64_t hpet_read_counter(void) {
 }
 
 uint64_t hpet_get_femtoseconds();
+uint64_t getFemtosecondsPerTick();
+uint64_t getMillisecondsPerTick();
+void* getHpetAddress();
 
 void wait_ns(uint64_t ns);
 void wait_us(uint64_t us);
