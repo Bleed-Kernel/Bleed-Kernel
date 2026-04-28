@@ -1,7 +1,7 @@
 #include <fs/vfs.h>
 #include <drivers/framebuffer/framebuffer.h>
 #include <drivers/framebuffer/draw_bgra_image.h>
-#include <ACPI/acpi_boot_logo.h>
+#include <ACPI/acpi_bgrt.h>
 #include <media/bmp/bmp.h>
 #include <mm/kalloc.h>
 #include <kernel/bootargs.h>
