@@ -56,3 +56,4 @@ void wait_ms(uint64_t ms);
 void wait_s(uint64_t s);
 
 void acpi_init_hpet(void);
+void hpet_stop_timer0_interrupts(void);

@@ -37,6 +37,8 @@
 #include <tss/tss.h>
 #include <panic.h>
 #include <ACPI/acpi_hpet.h>
+#include <ACPI/acpi_apic.h>
+#include <ACPI/acpi_lapic.h>
 #include <devices/type/kbd_device.h>
 #include <kernel/kmain.h>
 #include <kernel/bootargs.h>
@@ -277,6 +279,9 @@ void kmain() {
 
     acpi_init_hpet();       EARLY_OK("HPET Done");
     hpet_device_init();     EARLY_OK("HPET Device Created");
+
+    lapic_init();           EARLY_OK("LAPIC timer started");
+    apic_init();            EARLY_OK("APIC started");
 
     kbd_device_init();       EARLY_OK("KBD Device Done");
     mouse_device_init();     EARLY_OK("Mouse Device Done");

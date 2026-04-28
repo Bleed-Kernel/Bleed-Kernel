@@ -10,6 +10,9 @@
 
 #define HPET_FREQUENCY          1000
 
+#define HPET_TIMER0_CONFIG      0x100
+#define HPET_TIMER_INTERRUPTS   (1U << 2)
+
 struct acpi_hpet *hpet = NULL;
 void* address = NULL;
 
@@ -20,6 +23,13 @@ uint64_t getFemtosecondsPerTick() { return femtosecondsPerTick; }
 uint64_t getMillisecondsPerTick() { return millisecondsPerTick; }
 void* getHpetAddress() { return address; }
 
+void hpet_stop_timer0_interrupts(void) {
+    if (!address) return;
+
+    uint32_t config = *(volatile uint32_t*)(address + HPET_TIMER0_CONFIG);
+    config &= ~HPET_TIMER_INTERRUPTS;
+    *(volatile uint32_t*)(address + HPET_TIMER0_CONFIG) = config;
+}
 
 void acpi_init_hpet(void){
     hpet = (struct acpi_hpet *)acpi_find_sdt("HPET");

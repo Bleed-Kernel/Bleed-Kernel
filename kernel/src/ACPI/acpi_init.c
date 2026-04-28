@@ -183,8 +183,6 @@ void acpi_init(void) {
 
     serial_printf(LOG_INFO "ACPI: LAPIC @ 0x%p\n", lapic_base);
     serial_printf(LOG_INFO "ACPI: IOAPIC @ 0x%p (GSI base %u)\n", ioapic_base, ioapic_gsi_base);
-
-    apic_init();
 }
 
 uint64_t acpi_lapic_base(void) {
