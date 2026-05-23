@@ -80,7 +80,22 @@ size_t strlen(const char *string){
 
 #include <stdint.h>
 
-/// @brief copy a string
+/// @brief copy a string with size bound (safe alternative to strcpy)
+/// @param dest destination buffer
+/// @param src source string
+/// @param size total size of destination buffer
+/// @return number of chars in src (allows truncation detection)
+size_t strlcpy(char *restrict dest, const char *restrict src, size_t size) {
+    size_t src_len = strlen(src);
+    if (size > 0) {
+        size_t copy_len = src_len < size - 1 ? src_len : size - 1;
+        memcpy(dest, src, copy_len);
+        dest[copy_len] = '\0';
+    }
+    return src_len;
+}
+
+/// @brief copy a string (unsafe: no bounds checking; prefer strlcpy)
 /// @param dest destination buffer
 /// @param src source string
 /// @return dest
