@@ -139,6 +139,8 @@ void sched_init_task_heap(task_t* task);
 void* sched_switch_task(task_t *next_task, void* old_context);
 void* sched_next_context(void* old_context);
 
+void exit(void);
+
 cpu_context_t *sched_kill_and_switch(task_t *victim);
 
 extern task_t *task_list_head;

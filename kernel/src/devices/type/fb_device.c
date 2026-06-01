@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <user/errno.h>
+#include <user/user_copy.h>
 
 static fb_device_t  *fb0;
 static uint8_t      *fb_backbuffer;
@@ -48,6 +50,12 @@ static size_t fb_size(INode_t *inode) {
 static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
     (void)inode;// oh yeah its big brain time
     fb_device_t *fb = fb0;
+    task_t *task = get_current_task();
+    if (!task)
+        return -ESRCH;
+    if (!arg)
+        return -EFAULT;
+
     if (request == FB_IOC_GET_INFO) {
         struct fb_info info = {
             .width  = fb->width,
@@ -55,17 +63,15 @@ static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
             .pitch  = fb->pitch,
             .bpp    = fb->bpp,
         };
-        umemcpy(arg, &info, sizeof(info));
-        return 0;
+        return copy_to_user(task, arg, &info, sizeof(info)) == 0 ? 0 : -EFAULT;
     }
 
     if (request == FB_IOC_FLIP) {
         size_t size = fb->height * fb->pitch;
-        umemcpy((void*)fb->fb_phys, arg, size);
-        return 0;
+        return copy_from_user(task, (void*)fb->fb_phys, arg, size) == 0 ? 0 : -EFAULT;
     }
 
-    return -1;
+    return -EINVAL;
 }
 
 static struct INodeOps fb_inode_ops = {

@@ -1,5 +1,5 @@
 #include <mm/kalloc.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 #include <mm/paging.h>
 #include <stdio.h>
 #include <drivers/serial/serial.h>
@@ -130,7 +130,7 @@ cpu_context_t *sched_tick(cpu_context_t *context) {
 void sched_bootstrap(void *rsp) {
     task_t *kernel_task = kmalloc(sizeof(task_t));
     if (!kernel_task)
-        ke_panic("Failed to allocate kernel task");
+        ke_panic(NULL, "Failed to allocate kernel task");
 
     memset(kernel_task, 0, sizeof(task_t));
 
@@ -150,7 +150,7 @@ void sched_bootstrap(void *rsp) {
     kernel_task->page_map = kernel_page_map;
     kernel_task->fd_table = vfs_get_kernel_table();
     if (!kernel_task->fd_table)
-        ke_panic("Failed to allocate kernel fd table");
+        ke_panic(NULL, "Failed to allocate kernel fd table");
 
     current_task   = kernel_task;
     task_queue     = kernel_task;

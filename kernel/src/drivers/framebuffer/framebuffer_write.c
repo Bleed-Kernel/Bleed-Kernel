@@ -7,7 +7,7 @@
 #include <mm/spinlock.h>
 #include <fonts/utf-8.h>
 #include <mm/kalloc.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 
 extern volatile struct limine_framebuffer_request framebuffer_request;
 

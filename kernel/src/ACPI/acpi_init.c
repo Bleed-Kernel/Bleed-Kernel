@@ -2,12 +2,11 @@
 #include <stddef.h>
 #include <string.h>
 #include <cpu/io.h>
-#include <panic.h>
 #include <ACPI/acpi.h>
 #include <stdio.h>
 #include <mm/pmm.h>
 #include <ansii.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 #include <drivers/serial/serial.h>
 #include "acpi_priv.h"
 
@@ -42,10 +41,10 @@ static void *acpi_get_rsdp(void) {
     extern volatile struct limine_rsdp_request rsdp_request;
 
     if (!rsdp_request.response) {
-            ke_panic("ACPI: No RSDP response from bootloader");
+            ke_panic(NULL, "ACPI: No RSDP response from bootloader");
         }
     if (!rsdp_request.response->address) {
-            ke_panic("ACPI: Invalid RSDP address from bootloader");
+            ke_panic(NULL, "ACPI: Invalid RSDP address from bootloader");
         }
 
     return rsdp_request.response->address;
@@ -66,7 +65,7 @@ struct acpi_sdt *acpi_find_sdt(const char sig[4]) {
         for (size_t i = 0; i < entries; i++) {
             struct acpi_sdt *tbl = paddr_to_vaddr(xsdt->tables[i]);
             if (!tbl) {
-                ke_panic("ACPI: Invalid table virtual address");
+                ke_panic(NULL, "ACPI: Invalid table virtual address");
             }
             if (!memcmp(tbl->signature, sig, 4))
                 return tbl;
@@ -92,7 +91,7 @@ void acpi_init(void) {
     acpi_rsdp = acpi_get_rsdp();
 
     if (!acpi_rsdp)
-        ke_panic("ACPI: no RSDP");
+        ke_panic(NULL, "ACPI: no RSDP");
 
     if (acpi_rsdp->revision == 0) {
         kprintf(LOG_INFO "ACPI Version: 1.0\n");
@@ -102,14 +101,14 @@ void acpi_init(void) {
 
     size_t rsdp_len = acpi_rsdp->revision >= 2 ? acpi_rsdp->length : 20;
     if (!acpi_checksum(acpi_rsdp, rsdp_len))
-        ke_panic("ACPI: bad RSDP checksum");
+        ke_panic(NULL, "ACPI: bad RSDP checksum");
 
     fadt = (struct acpi_fadt *)acpi_find_sdt("FACP");
     if (!fadt)
-        ke_panic("ACPI: FADT not found");
+        ke_panic(NULL, "ACPI: FADT not found");
 
     if (!acpi_checksum(fadt, fadt->header.length))
-        ke_panic("ACPI: bad FADT checksum");
+        ke_panic(NULL, "ACPI: bad FADT checksum");
 
     if (fadt->smi_cmd && fadt->acpi_enable) {
         serial_printf(LOG_INFO "ACPI: Enabling via SMI_CMD=0x%x\n", fadt->smi_cmd);
@@ -119,16 +118,16 @@ void acpi_init(void) {
         while (!(inw(fadt->pm1a_cnt_blk) & 1) && timeout-- > 0)
             asm("pause");
         if (timeout <= 0) {
-            ke_panic("ACPI: Enable timeout");
+            ke_panic(NULL, "ACPI: Enable timeout");
         }
     }
 
     madt = (struct acpi_madt *)acpi_find_sdt("APIC");
     if (!madt)
-        ke_panic("ACPI: MADT not found");
+        ke_panic(NULL, "ACPI: MADT not found");
 
     if (!acpi_checksum(madt, madt->header.length))
-        ke_panic("ACPI: bad MADT checksum");
+        ke_panic(NULL, "ACPI: bad MADT checksum");
 
     lapic_base = madt->lapic_addr;
 
@@ -176,10 +175,10 @@ void acpi_init(void) {
     }
 
     if (!lapic_base)
-        ke_panic("ACPI: No LAPIC base");
+        ke_panic(NULL, "ACPI: No LAPIC base");
 
     if (!ioapic_base)
-        ke_panic("ACPI: No IOAPIC base");
+        ke_panic(NULL, "ACPI: No IOAPIC base");
 
     serial_printf(LOG_INFO "ACPI: LAPIC @ 0x%p\n", lapic_base);
     serial_printf(LOG_INFO "ACPI: IOAPIC @ 0x%p (GSI base %u)\n", ioapic_base, ioapic_gsi_base);

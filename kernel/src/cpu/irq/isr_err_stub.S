@@ -1,7 +1,7 @@
 .intel_syntax noprefix
 .text
 
-.extern ke_exception_handler
+.extern ke_processor_exception
 .extern irq_handler
 .extern timer_handle
 .extern syscall_dispatch
@@ -30,9 +30,8 @@ isr_\v:
 .globl irq\irq
 .type  irq\irq,@function
 irq\irq:
-    push 0
+    push \irq        /* IRQ number — pushed BEFORE any register clobber */
     push \vector
-    mov  rdi, \irq
     jmp  irq_common
 .size irq\irq, .-irq\irq
 .endm
@@ -89,7 +88,7 @@ isr_common:
     push r15
 
     mov  rdi, rsp
-    call ke_exception_handler
+    call ke_processor_exception
     mov  rsp, rax
 
     pop r15
@@ -200,7 +199,29 @@ irq_common:
     push r14
     push r15
 
-    lea  rsi, [rsp]
+    /*
+     * Stack layout at this point (8 bytes per slot):
+     *   [rsp+  0] r15                              
+     *   [rsp+  8] r14                              
+     *   [rsp+ 16] r13                              
+     *   [rsp+ 24] r12                              
+     *   [rsp+ 32] r11                              
+     *   [rsp+ 40] r10                              
+     *   [rsp+ 48] r9                               
+     *   [rsp+ 56] r8                               
+     *   [rsp+ 64] rbp                              
+     *   [rsp+ 72] rdi  <-- userspace rdi saved here
+     *   [rsp+ 80] rsi                              
+     *   [rsp+ 88] rdx                              
+     *   [rsp+ 96] rcx                              
+     *   [rsp+104] rbx                              
+     *   [rsp+112] rax                              
+     *   [rsp+120] vector  (pushed by stub)         
+     *   [rsp+128] irq num (pushed by stub)         
+     *   [rsp+136] rip     (CPU exception frame)    
+     */
+    mov  rdi, [rsp + 128]   /* irq number from stack — rdi not clobbered pre-save */
+    lea  rsi, [rsp]         /* pointer to register frame */
     call irq_handler
     call apic_eoi
 

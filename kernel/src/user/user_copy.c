@@ -44,7 +44,8 @@ int copy_to_user(task_t *user_task, void *udst, const void *src, size_t len) {
     for (uintptr_t p = dst_start; p <= dst_end; p += PAGE_SIZE) {
         uint64_t *pte = paging_get_page(user_task->page_map, p, 0);
         if (pte && (*pte & PTE_PRESENT) && !(*pte & PTE_WRITABLE)) {
-            paging_handle_cow_fault(user_task, p, 0x7);
+            if (!paging_handle_cow_fault(user_task, p, 0x7))
+                return -1;
         }
     }
 

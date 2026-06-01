@@ -5,7 +5,7 @@
 #include <drivers/serial/serial.h>
 #include <mm/paging.h>
 #include <ansii.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 #include <sched/scheduler.h>
 
 #define HPET_FREQUENCY          1000

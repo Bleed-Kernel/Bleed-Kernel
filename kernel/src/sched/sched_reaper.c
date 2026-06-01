@@ -2,7 +2,7 @@
 #include <mm/kalloc.h>
 #include <ansii.h>
 #include <sched/scheduler.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 #include <stdio.h>
 #include <mm/spinlock.h>
 #include <ipc/zero_copy.h>

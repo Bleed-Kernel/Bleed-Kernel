@@ -6,6 +6,7 @@
 #include <mm/kalloc.h>
 #include <mm/vmm.h>
 #include <user/errno.h>
+#include <user/user_copy.h>
 
 #define USER_MMAP_BASE  0x0000004000000000ULL
 #define USER_MMAP_LIMIT 0x00007fffffe00000ULL
@@ -29,7 +30,8 @@ void* sys_mapfb(size_t *out_pages) {
     size_t fb_size = framebuffer_get_height(0) * framebuffer_get_pitch(0);
     size_t pages = (offset + fb_size + (PAGE_SIZE - 1)) / PAGE_SIZE;
 
-    SMAP_ALLOW{ *out_pages = pages; }
+    if (copy_to_user(task, out_pages, &pages, sizeof(pages)) != 0)
+        return (void *)(uintptr_t)-EFAULT;
 
     uintptr_t base = USER_MMAP_BASE;
     user_alloc_t *prev = NULL;

@@ -9,7 +9,7 @@
 #include <ansii.h>
 #include <vendor/limine_bootloader/limine.h>
 #include <drivers/serial/serial.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 #include <sched/scheduler.h>
 #include <cpu/features/features.h>
 #include <cpu/msrs.h>
@@ -156,7 +156,7 @@ void paging_map_page(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags
 void paging_init_kernel_map(void) {
     kernel_page_map = read_cr3() & PADDR_ENTRY_MASK;
     if (!paddr_to_vaddr(kernel_page_map))
-        ke_panic("Kernel PML4 unmapped");
+        ke_panic(NULL, "Kernel PML4 unmapped");
 }
 
 /// @brief reinitalise paging so we can access a full memory range, not just the

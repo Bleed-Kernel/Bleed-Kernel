@@ -5,7 +5,7 @@
 #include <mm/paging.h>
 #include <cpu/msrs.h>
 #include <cpu/cpuid.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 #include <stdio.h>
 #include <ansii.h>
 #include <cpu/io.h>
@@ -106,15 +106,15 @@ static int cpu_has_apic(void) {
 
 int apic_init(void) {
     if (!cpu_has_apic())
-        ke_panic("Bleed Requires APIC support");
+        ke_panic(NULL, "Bleed Requires APIC support");
 
     uint64_t lapic_phys = acpi_lapic_base();
     if (!lapic_phys)
-        ke_panic("LAPIC timer base not found");
+        ke_panic(NULL, "LAPIC timer base not found");
         
     uint64_t ioapic_phys = acpi_ioapic_base();
     if (!ioapic_phys)
-        ke_panic("IOAPIC base not found");
+        ke_panic(NULL, "IOAPIC base not found");
 
     uint64_t lapic_phys_page = lapic_phys & PADDR_ENTRY_MASK;
     uintptr_t lapic_off = (uintptr_t)(lapic_phys & ~PADDR_ENTRY_MASK);
@@ -124,7 +124,7 @@ int apic_init(void) {
 
     uint64_t apic_msr = rdmsr(IA32_APIC_BASE_MSR);
     if (!(apic_msr & IA32_APIC_BASE_ENABLE))
-        ke_panic("APIC: LAPIC disabled");
+        ke_panic(NULL, "APIC: LAPIC disabled");
 
     apic_msr &= 0xFFFULL;
     apic_msr |= lapic_phys_page;

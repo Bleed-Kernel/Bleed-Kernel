@@ -1,7 +1,7 @@
 #include <ACPI/acpi.h>
 #include <cpu/io.h>
 #include <stddef.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 
 #define PM1A_CNT    fadt->pm1a_cnt_blk
 #define PM1B_CNT    fadt->pm1b_cnt_blk

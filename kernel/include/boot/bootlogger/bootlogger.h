@@ -184,3 +184,5 @@ void bconsole_set_cursor(uint32_t col, uint32_t row);
     bset_color(BCOL_WHITE,  BCOL_BLACK);                  \
     bprintf(fmt "\n", ##__VA_ARGS__);                     \
 } while(0)
+
+void bprintf(const char *fmt, ...);

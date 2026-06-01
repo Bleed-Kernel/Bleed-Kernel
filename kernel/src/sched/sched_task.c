@@ -1,5 +1,5 @@
 #include <sched/scheduler.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 #include <mm/kalloc.h>
 #include <string.h>
 #include <mm/paging.h>
@@ -127,7 +127,7 @@ task_t *sched_get_task(uint64_t pid) {
 
 task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, char *task_name) {
     task_t *task = kmalloc(sizeof(task_t));
-    if (!task) ke_panic("Failed to allocate task");
+    if (!task) ke_panic(NULL, "Failed to allocate task");
     memset(task, 0, sizeof(task_t));
 
     uint64_t pid = alloc_pid();
@@ -159,13 +159,13 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
 
     task->kernel_stack = kmalloc(KERNEL_STACK_SIZE);
     if (!task->kernel_stack)
-        ke_panic("Failed to allocate kernel stack");
+        ke_panic(NULL, "Failed to allocate kernel stack");
     uint64_t kernel_stack_top = (uint64_t)task->kernel_stack + KERNEL_STACK_SIZE;
     kernel_stack_top &= ~0xFULL; // this should ensure we are 16 byte aligned
 
     for (uint64_t page = USER_STACK_TOP - USER_STACK_SIZE; page < USER_STACK_TOP; page += PAGE_SIZE) {
         paddr_t paddr = pmm_alloc_pages(1);
-        if (!paddr) ke_panic("Failed to allocate user stack page");
+        if (!paddr) ke_panic(NULL, "Failed to allocate user stack page");
         paging_map_page_invl(task->page_map, paddr, page, PTE_USER | PTE_WRITABLE, 0);
     }
 
@@ -185,7 +185,7 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
 
     task->fd_table = vfs_fd_table_clone(parent ? parent->fd_table : NULL);
     if (!task->fd_table)
-        ke_panic("Failed to allocate task fd table");
+        ke_panic(NULL, "Failed to allocate task fd table");
 
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);

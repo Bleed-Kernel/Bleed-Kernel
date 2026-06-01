@@ -2,12 +2,11 @@
 #include <stdbool.h>
 #include <mm/paging.h>
 #include <stdio.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 #include <ansii.h>
 #include <drivers/serial/serial.h>
 #include <console/console.h>
 #include <devices/type/tty_device.h>
-#include <panic.h>
 #include <mm/pmm.h>
 #include <cpu/control_registers.h>
 #include "../acpi_priv.h"
@@ -111,7 +110,7 @@ void acpi_reboot(void) {
     bool acpi_reset_valid = false;
 
     if (!fadt)
-        ke_panic("ACPI FADT not present");
+        ke_panic(NULL, "ACPI FADT not present");
 
     // harden ACPI reset so we only try to perform one if its valid
     size_t reset_reg_end = offsetof(struct acpi_fadt, reset_reg) + sizeof(fadt->reset_reg);
@@ -150,7 +149,7 @@ void acpi_reboot(void) {
             void *vpage = NULL;
             paging_alloc_empty_frame(&vpage);
             if (!vpage)
-                ke_panic("Failed to allocate virtual page for ACPI reset MMIO");
+                ke_panic(NULL, "Failed to allocate virtual page for ACPI reset MMIO");
 
             paging_map_page(read_cr3(), phys_page, (paddr_t)vpage, PAGE_KERNEL_RW);
 

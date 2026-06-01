@@ -21,7 +21,7 @@
 #include <fs/archive/tar.h>
 #include <fonts/psf.h>
 #include <boot/splash_image.h>
-#include <cpu/stack_trace.h>
+#include <kernel/exception/stack_trace.h>
 
 #include <ACPI/acpi.h>
 #include <ACPI/acpi_hpet.h>
@@ -46,6 +46,7 @@
 #include <exec/elf_load.h>
 #include <syscalls/syscall.h>
 #include <kernel/kmain.h>
+#include <kernel/exception/panic.h>
 
 extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
@@ -109,7 +110,7 @@ void init_ramdisk(){
 
     BLOG_INFO("Locating initrd from Bootloader");
     if (!module_request.response || module_request.response->module_count == 0){
-        BLOG_FAIL("No Modules Found by booloader\n");
+        ke_panic(NULL, "Bootloader Modules Empty, Initrd is missing");
         return;
     }
     BLOG_OK("Located initrd");
@@ -223,8 +224,7 @@ void init_multitasking(){
     if (reaper != NULL)
         BLOG_OK("Reaper Started");
     else
-        BLOG_FAIL("Task Reaper did not start");
-    
+        ke_panic(NULL, "Task Reaper did not start!");
 }
 
 bool init_userspace(){
@@ -261,7 +261,7 @@ bool init_userspace(){
     if (init != NULL)
         BLOG_OK("Init Task started!");
     else
-        BLOG_FAIL("Failed to start init task!");
+        ke_panic(NULL, "Failure to Start listed init task");
 
     return true;
 }
@@ -291,7 +291,7 @@ Licenced under GPLv3\n");
     init_multitasking();
     asm volatile("sti");
 
-    init_userspace();   // if this fails, kernel panic
+    init_userspace();
     kernel_console_init();
 
     for(;;){}

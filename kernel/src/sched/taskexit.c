@@ -1,5 +1,5 @@
 #include <sched/scheduler.h>
-#include <panic.h>
+#include <kernel/exception/panic.h>
 #include <stdio.h>
 #include <mm/vmm.h>
 #include <mm/kalloc.h>
