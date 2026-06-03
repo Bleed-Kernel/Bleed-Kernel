@@ -69,7 +69,7 @@ void init_processor_state(){
         serial_printf(LOG_OK "Global Descriptor Table Loaded (GDTR=%p)\n", gdt_ptr);
     }else{
         BLOG_FAIL("GDT returned a NULL Pointer, this is unrecoverable. system halted");
-        KERNEL_STOP();
+        KERNEL_STOP(); // it should never make it here **see below
     }
 
     BLOG_INFO("Attempting to initialise IDT");
@@ -79,8 +79,11 @@ void init_processor_state(){
         serial_printf(LOG_OK "Interrupt Descriptor Table Loaded (IDTR=%p)\n", idt_ptr);
     }else{
         BLOG_FAIL("IDT returned a NULL Pointer, this is unrecoverable. system halted");
-        KERNEL_STOP();
+        KERNEL_STOP();  // it should never make it here **see below
     }
+
+    // on most Hypervisors and probably all real hardware it will just triple fault but its really an edge
+    // case, who knows what a rouge hypervisor will do in the future. Virtualbox.
 
     BLOG_INFO("Attempting to initialise TSS");
     tss_init();
@@ -96,6 +99,8 @@ void init_processor_state(){
     init_paging();
     BLOG_OK("Paging Ready");
     serial_printf(LOG_OK "Paging Ready\n");
+
+    bootargs_init(cmdline_request.response->cmdline);
 
     BLOG_INFO("Attempting to enable SIMD");
     simd_level_t sse_level = simd_enable();
@@ -122,13 +127,26 @@ void init_ramdisk(){
 
     BLOG_INFO("Loading Kernel Resources");
 
-    bool splash_display = display_splash_screen("initrd/boot/splash.bgra", 200, 252);
-    if (splash_display)
-        BLOG_OK("\t - BGRA Splash Image");
-    else
-        BLOG_FAIL("\t x BGRA Splash Image");
+    bool splash_display = false;
+
+    if (!bootargs_is("splash", "no")){
+        splash_display = display_splash_screen("initrd/boot/splash.bgra", 200, 252);
+        
+        if (splash_display)
+            BLOG_OK("\t - BGRA Splash Image");
+        else
+            BLOG_FAIL("\t x BGRA Splash Image");
+    }else{
+        splash_display = true;
+    }
     
-    bool font_init = psf_init("initrd/fonts/ttyfont.psf");
+    bool font_init = false;
+    if (bootargs_get("ttyfont") != NULL){
+        font_init = psf_init(bootargs_get("ttyfont"));
+    }else{
+        font_init = psf_init("initrd/fonts/ttyfont.psf");
+    }
+
     if (font_init)
         BLOG_OK("\t - PSF Font");
     else
@@ -232,24 +250,28 @@ bool init_userspace(){
     syscall_init();
     BLOG_OK("SYSCALL enabled");
 
-    BLOG_INFO("Attempting to enable SMAP/SMEP");
-    int smap_status = SMAP_init();
-    if (smap_status == 0){
-        BLOG_OK("SMAP Enabled");
-    }else if (smap_status == -1){
-        BLOG_WARN("SMEP is not Supported");
-    }else if (smap_status == -2){
-        BLOG_WARN("SMAP is not Supported");
-    }else{
-        BLOG_WARN("SMEP & SMEP are not Supported");
+    if (bootargs_is("smap", "no")){
+        BLOG_INFO("Attempting to enable SMAP/SMEP");
+        int smap_status = SMAP_init();
+        if (smap_status == 0){
+            BLOG_OK("SMAP Enabled");
+        }else if (smap_status == -1){
+            BLOG_WARN("SMEP is not Supported");
+        }else if (smap_status == -2){
+            BLOG_WARN("SMAP is not Supported");
+        }else{
+            BLOG_WARN("SMEP & SMEP are not Supported");
+        }
     }
 
-    BLOG_INFO("Attempting to enable UMIP");
-    int umip_status = UMIP_init();
-    if (umip_status == 0){
-        BLOG_OK("UMIP Enabled");
-    }else{
-        BLOG_WARN("UMIP Not Supported");
+    if (bootargs_is("umip", "no")){
+        BLOG_INFO("Attempting to enable UMIP");
+        int umip_status = UMIP_init();
+        if (umip_status == 0){
+            BLOG_OK("UMIP Enabled");
+        }else{
+            BLOG_WARN("UMIP Not Supported");
+        }
     }
 
     BLOG_INFO("Attempting to start init");
@@ -279,10 +301,6 @@ myles@bleedkernel.com\n\t\
 Licenced under GPLv3\n");
 
     init_processor_state();
-
-    // We have to recall this because of the changes to memory
-    // in general, it is NOT wasteful do not remove it
-    bootargs_init(cmdline_request.response->cmdline);
 
     init_ramdisk();
     init_firmware_relationship();

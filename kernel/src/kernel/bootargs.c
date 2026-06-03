@@ -78,3 +78,4 @@ bool bootargs_is(const char* key, const char* expected_value) {
     if (!val || !expected_value) return false;
     return (strcasecmp(val, expected_value) == 0);
 }
+
