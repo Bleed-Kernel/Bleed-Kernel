@@ -31,7 +31,7 @@ static void draw_glyph(uint8_t c, uint32_t px, uint32_t py,
     for (uint32_t row = 0; row < FONT_H; row++) {
         uint8_t bits = g[row];
         uint32_t offset = (py + row) * s_pitch32 + px;
-        
+
         uint32_t *dst_row = &s_backbuffer[offset];
         volatile uint32_t *fb_row = &s_fb[offset];
 
@@ -153,6 +153,42 @@ void bconsole_reset_cursor(void) {
 void bconsole_set_cursor(uint32_t col, uint32_t row) {
     s_cur_col = (col < s_cols) ? col : s_cols - 1;
     s_cur_row = (row < s_rows) ? row : s_rows - 1;
+}
+
+void bconsole_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint32_t *pixels) {
+    if (!s_ready) return;
+    if (!s_fb)    return;
+    if (!pixels)  return;
+
+    for (uint32_t row = 0; row < h; row++) {
+        uint32_t fb_y = y + row;
+        if (fb_y >= s_height) break;
+
+        uint32_t offset = fb_y * s_pitch32 + x;
+        uint32_t *dst_row = &s_backbuffer[offset];
+        volatile uint32_t *fb_row = &s_fb[offset];
+        const uint32_t *src_row = &pixels[row * w];
+
+        uint32_t max_col = w;
+        if (x + max_col > s_width) max_col = s_width - x;
+
+        for (uint32_t col = 0; col < max_col; col++) {
+            dst_row[col] = src_row[col];
+        }
+
+        for (uint32_t col = 0; col < max_col; col++) {
+            fb_row[col] = dst_row[col];
+        }
+    }
+}
+
+void bconsole_reserve_rows(uint32_t pixel_height) {
+    if (!s_ready) return;
+
+    uint32_t rows = (pixel_height + FONT_H - 1) / FONT_H;
+    if (rows > s_rows) rows = s_rows - 1;
+    if (rows > s_cur_row) s_cur_row = rows;
+    s_cur_col = 0;
 }
 
 static void emit_char(char c) {

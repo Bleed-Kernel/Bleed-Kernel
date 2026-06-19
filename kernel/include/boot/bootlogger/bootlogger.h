@@ -186,3 +186,6 @@ void bconsole_set_cursor(uint32_t col, uint32_t row);
 } while(0)
 
 void bprintf(const char *fmt, ...);
+
+void bconsole_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint32_t *pixels);
+void bconsole_reserve_rows(uint32_t pixel_height);

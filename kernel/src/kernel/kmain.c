@@ -69,7 +69,7 @@ void init_processor_state(){
         serial_printf(LOG_OK "Global Descriptor Table Loaded (GDTR=%p)\n", gdt_ptr);
     }else{
         BLOG_FAIL("GDT returned a NULL Pointer, this is unrecoverable. system halted");
-        KERNEL_STOP(); // it should never make it here **see below
+        KERNEL_STOP();
     }
 
     BLOG_INFO("Attempting to initialise IDT");
@@ -79,7 +79,7 @@ void init_processor_state(){
         serial_printf(LOG_OK "Interrupt Descriptor Table Loaded (IDTR=%p)\n", idt_ptr);
     }else{
         BLOG_FAIL("IDT returned a NULL Pointer, this is unrecoverable. system halted");
-        KERNEL_STOP();  // it should never make it here **see below
+        KERNEL_STOP();
     }
 
     // on most Hypervisors and probably all real hardware it will just triple fault but its really an edge
@@ -131,15 +131,17 @@ void init_ramdisk(){
 
     if (!bootargs_is("splash", "no")){
         splash_display = display_splash_screen("initrd/boot/splash.bgra", 200, 252);
-        
-        if (splash_display)
+
+        if (splash_display){
+            bconsole_reserve_rows(252);
             BLOG_OK("\t - BGRA Splash Image");
-        else
+        }else{
             BLOG_FAIL("\t x BGRA Splash Image");
+        }
     }else{
         splash_display = true;
     }
-    
+
     bool font_init = false;
     if (bootargs_get("ttyfont") != NULL){
         font_init = psf_init(bootargs_get("ttyfont"));
@@ -157,7 +159,7 @@ void init_ramdisk(){
         BLOG_OK("\t - Kernel Symbol Table");
     else
         BLOG_FAIL("\t x Kernel Symbol Table");
-    
+
     if (splash_display && font_init && kernel_symtab){
         BLOG_OK("Kernel Resources Ready");
     }
@@ -165,7 +167,7 @@ void init_ramdisk(){
 
 void init_firmware_relationship(){
     BLOG_INFO("Attempting to initialise ACPI");
-    acpi_init();    // dont worry, if this fails we just kepanic lol
+    acpi_init();
     BLOG_OK("ACPI Ready");
 }
 
@@ -292,9 +294,9 @@ __attribute__((noreturn))
 void kmain(void){
     asm volatile("cli");
     serial_init();
-    
+
     bconsole_init();
-    
+
     BLOG_INFO("Starting the Bleed Kernel\n\t\
 by Myles 'Mellurboo' Wilson\n\t\
 myles@bleedkernel.com\n\t\

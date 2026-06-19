@@ -9,6 +9,7 @@ typedef enum {
     FS_TYPE_UNKNOWN = -1,
     FS_TYPE_FAT32 = 0,
     FS_TYPE_EXT2  = 1,
+    FS_TYPE_EXFAT = 2
 } fs_type_t;
 
 // mount block device at path, creates it if it doesnt exist

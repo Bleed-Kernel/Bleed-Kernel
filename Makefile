@@ -153,7 +153,7 @@ userprogs:
 		echo "[USER] Building $$name"; \
 		$(MAKE) -s -C "$$dir" $(USERPROG_TOOLCHAIN); \
 		if [ -f "$$dir/bin/$$name" ]; then \
-			cp "$$dir/bin/$$name" $(INITRD_BIN)/$$name; \
+			COPYFILE_DISABLE=1 cp "$$dir/bin/$$name" $(INITRD_BIN)/$$name; \
 		else \
 			echo "ERROR: $$name binary not found"; \
 			exit 1; \
@@ -163,7 +163,9 @@ userprogs:
 .PHONY: initrd
 initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs
 	@mkdir -p initrd
-	@tar -cf initrd/initrd.tar initrd/*/* initrd/*.*
+	@find initrd -name '._*' -delete
+	@find initrd -name '.DS_Store' -delete
+	@COPYFILE_DISABLE=1 tar -cf initrd/initrd.tar initrd/*/* initrd/*.*
 
 $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 	@rm -rf iso_root
@@ -259,11 +261,41 @@ define create_ext2_disk
     rm -rf $(TMP_IMG) $(TMP_DIR)
 endef
 
+define create_exfat_disk
+    @echo "[DISK] Creating $(1) ($(2)) [exfat]"
+	$(eval TMP_DIR := .tmp_dir_$(1))
+	$(eval TMP_IMG := .tmp_img_$(1))
+    @export PATH=$$PATH:/sbin:/usr/sbin; \
+    dd if=/dev/zero of=$(1) bs=1M count=$(DISK_SIZE_MB) status=none; \
+    if [ "$(2)" = "gpt" ]; then \
+        sgdisk -n 1:2048:0 -t 1:0700 $(1) > /dev/null 2>&1; \
+    else \
+        { printf 'o\nn\np\n1\n2048\n\nt\n7\nw\n'; } | fdisk $(1) > /dev/null 2>&1; \
+    fi; \
+    mkdir -p $(TMP_DIR); \
+    echo "$(3)" > $(TMP_DIR)/hello.txt; \
+    truncate -s $$(($(DISK_SIZE_MB) - 1))M $(TMP_IMG); \
+    if [ "$$(uname)" = "Darwin" ]; then \
+        dev=$$(hdiutil attach -nomount $(TMP_IMG) | tr -d '[:space:]'); \
+        newfs_exfat -v BLEEDFS "$$dev" > /dev/null; \
+        diskutil mount "$$dev" > /dev/null; \
+        mnt=$$(diskutil info "$$dev" | awk -F': *' '/Mount Point/{print $$2}'); \
+        COPYFILE_DISABLE=1 cp $(TMP_DIR)/hello.txt "$$mnt/hello.txt"; \
+        diskutil unmount "$$dev" > /dev/null; \
+        hdiutil detach "$$dev" > /dev/null; \
+    else \
+        mkfs.exfat -L BLEEDFS $(TMP_IMG) > /dev/null 2>&1; \
+        MTOOLS_SKIP_CHECK=1 mcopy -i $(TMP_IMG) $(TMP_DIR)/hello.txt ::hello.txt; \
+    fi; \
+    dd if=$(TMP_IMG) of=$(1) bs=1M seek=1 conv=notrunc status=none; \
+    rm -rf $(TMP_IMG) $(TMP_DIR)
+endef
+
 $(IDE_DISK):
 	$(call create_ext2_disk,$@,msdos,if your seeing this the ide driver works which is awesome)
 
 $(SATA_DISK):
-	$(call create_ext2_disk,$@,gpt,if your seeing this the sata driver works which is even more awesome)
+	$(call create_exfat_disk,$@,gpt,if your seeing this the sata driver AND exfat both work which is even more awesome)
 
 $(NVME_DISK):
 	$(call create_ext2_disk,$@,gpt,if your seeing this the nvme driver works which is the most awesomest)
@@ -276,6 +308,8 @@ clean:
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete
 	find initrd -name '*.tar' -delete
+	find initrd -name '._*' -delete
+	find initrd -name '.DS_Store' -delete
 	rm -rf limine
 
 .PHONY: FORCE
@@ -289,3 +323,5 @@ distclean:
 	rm -rf $(USER_BIN_DIR)
 	rm -rf initrd/bin/*
 	find initrd -name '*.tar' -delete
+	find initrd -name '._*' -delete
+	find initrd -name '.DS_Store' -delete

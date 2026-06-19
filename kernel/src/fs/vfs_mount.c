@@ -2,6 +2,7 @@
 #include <fs/vfs.h>
 #include <fs/fat32/fat32.h>
 #include <fs/ext2/ext2.h>
+#include <fs/exfat/exfat.h>
 #include <mm/kalloc.h>
 #include <mm/spinlock.h>
 #include <string.h>
@@ -14,6 +15,8 @@
 #define PROBE_FAT32_SIG_OFF         510   // 0x55 0xAA boot signature
 #define PROBE_EXT2_MAGIC_OFF        (1024 + 56)
 #define PROBE_EXT2_MAGIC            0xEF53
+#define PROBE_EXFAT_NAME_OFF        3     // "EXFAT   " right after jump_boot[3]
+#define PROBE_EXFAT_NAME            "EXFAT   "
 
 typedef struct {
     char      mount_path[PATH_MAX];
@@ -54,9 +57,15 @@ static fs_type_t vfs_detect_fs(INode_t *dev_inode) {
         }
     }
 
-    // FAT32 Probe sector 0 must end in 0x55 0xAA
+    // exFAT probe "EXFAT   " right after jump_boot[3]
     uint8_t sector0[512];
     if (inode_read(dev_inode, sector0, sizeof(sector0), 0) == (long)sizeof(sector0)) {
+        if (memcmp(sector0 + PROBE_EXFAT_NAME_OFF, PROBE_EXFAT_NAME, 8) == 0) {
+            serial_printf(LOG_INFO "vfs_mount: detected exFAT\n");
+            return FS_TYPE_EXFAT;
+        }
+
+        // FAT32 Probe sector 0 must end in 0x55 0xAA
         uint16_t root_entry_count;
         memcpy(&root_entry_count, sector0 + PROBE_FAT32_ROOT_ENTRY_OFF, 2);
         if (sector0[PROBE_FAT32_SIG_OFF]     == 0x55 &&
@@ -138,6 +147,7 @@ int vfs_mount(const char *path, INode_t *dev_inode) {
     switch (fs_type) {
         case FS_TYPE_FAT32: r = fat32_mount(dev_inode, &fs_root); break;
         case FS_TYPE_EXT2:  r = ext2_mount (dev_inode, &fs_root); break;
+        case FS_TYPE_EXFAT: r = exfat_mount(dev_inode, &fs_root); break;
         default: break;
     }
 
@@ -163,7 +173,8 @@ int vfs_mount(const char *path, INode_t *dev_inode) {
     spinlock_release(&mount_lock);
 
     const char *fs_name = (fs_type == FS_TYPE_EXT2)  ? "ext2"  :
-                          (fs_type == FS_TYPE_FAT32)  ? "fat32" : "unknown";
+                          (fs_type == FS_TYPE_FAT32)  ? "fat32" :
+                          (fs_type == FS_TYPE_EXFAT)  ? "exfat" : "unknown";
     serial_printf(LOG_OK "vfs_mount: mounted %s at %s\n", fs_name, path);
     return 0;
 }
