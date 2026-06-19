@@ -130,8 +130,9 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     if (!task) ke_panic(NULL, "Failed to allocate task");
     memset(task, 0, sizeof(task_t));
 
-    uint64_t pid = alloc_pid();
-    if (pid > 0) task->id = pid;
+    int pid = alloc_pid();
+    if (pid <= 0) ke_panic(NULL, "Failed to allocate PID");
+    task->id = (uint64_t)pid;
     
     // SID is basically future facing semantics, i do intend on using it
     task_t *parent = get_current_task();

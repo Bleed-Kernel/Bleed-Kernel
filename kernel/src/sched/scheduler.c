@@ -172,6 +172,7 @@ void sched_yield(task_t *task) {
 void sched_block(task_t *task){
     asm volatile ("cli");
     task->state = TASK_BLOCKED;
+    ready_dequeue(task);
     asm volatile ("sti");
     asm volatile ("int $32");
 }
