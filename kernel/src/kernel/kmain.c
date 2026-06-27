@@ -100,8 +100,6 @@ void init_processor_state(){
     BLOG_OK("Paging Ready");
     serial_printf(LOG_OK "Paging Ready\n");
 
-    bootargs_init(cmdline_request.response->cmdline);
-
     BLOG_INFO("Attempting to enable SIMD");
     simd_level_t sse_level = simd_enable();
     BLOG_OKF("SIMD is Ready\n\tYour Processor Supports %s", simd_level_name(sse_level));
@@ -293,9 +291,12 @@ bool init_userspace(){
 __attribute__((noreturn))
 void kmain(void){
     asm volatile("cli");
+    bootargs_init(cmdline_request.response->cmdline);
     serial_init();
 
-    bconsole_init();
+    if (bootargs_has("verbose")){
+        bconsole_init();
+    }
 
     BLOG_INFO("Starting the Bleed Kernel\n\t\
 by Myles 'Mellurboo' Wilson\n\t\

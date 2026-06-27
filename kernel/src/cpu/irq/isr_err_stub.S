@@ -198,30 +198,9 @@ irq_common:
     push r13
     push r14
     push r15
-
-    /*
-     * Stack layout at this point (8 bytes per slot):
-     *   [rsp+  0] r15                              
-     *   [rsp+  8] r14                              
-     *   [rsp+ 16] r13                              
-     *   [rsp+ 24] r12                              
-     *   [rsp+ 32] r11                              
-     *   [rsp+ 40] r10                              
-     *   [rsp+ 48] r9                               
-     *   [rsp+ 56] r8                               
-     *   [rsp+ 64] rbp                              
-     *   [rsp+ 72] rdi  <-- userspace rdi saved here
-     *   [rsp+ 80] rsi                              
-     *   [rsp+ 88] rdx                              
-     *   [rsp+ 96] rcx                              
-     *   [rsp+104] rbx                              
-     *   [rsp+112] rax                              
-     *   [rsp+120] vector  (pushed by stub)         
-     *   [rsp+128] irq num (pushed by stub)         
-     *   [rsp+136] rip     (CPU exception frame)    
-     */
-    mov  rdi, [rsp + 128]   /* irq number from stack — rdi not clobbered pre-save */
-    lea  rsi, [rsp]         /* pointer to register frame */
+    
+    mov  rdi, [rsp + 128]
+    lea  rsi, [rsp]
     call irq_handler
     call apic_eoi
 

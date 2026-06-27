@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdarg.h>
+#include <stdbool.h>
 
 extern volatile struct limine_framebuffer_request framebuffer_request;
 
@@ -22,6 +23,8 @@ static uint32_t  s_cur_row           = 0;
 
 static uint32_t  s_fg                = BCOL_WHITE;
 static uint32_t  s_bg                = BCOL_BLACK;
+
+static bool      bl_ready            = false;
 
 static void draw_glyph(uint8_t c, uint32_t px, uint32_t py,
                         uint32_t fg, uint32_t bg) {
@@ -116,6 +119,8 @@ void bconsole_init(void) {
     s_fg      = BCOL_WHITE;
     s_bg      = BCOL_BLACK;
     s_ready   = 1;
+
+    bl_ready = true;
 }
 
 void bconsole_clear(uint32_t color) {
@@ -307,6 +312,7 @@ void bvprintf(const char *fmt, va_list ap) {
 }
 
 void bprintf(const char *fmt, ...) {
+    if (!bl_ready) return;
     va_list ap;
     va_start(ap, fmt);
     bvprintf(fmt, ap);
