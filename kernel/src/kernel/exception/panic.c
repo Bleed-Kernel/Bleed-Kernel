@@ -123,6 +123,7 @@ static inline void print_separator(const char* title) {
 __attribute__((noreturn))
 void ke_panic(struct isr_stackframe *sf, const char *pstring){
     if (!sf && !pstring) hcf();
+    bconsole_init(); //users who dont enable verbose will never see a panic unless we do this.
     breset_color();
 
     if (sf) {
