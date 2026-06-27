@@ -250,7 +250,7 @@ bool init_userspace(){
     syscall_init();
     BLOG_OK("SYSCALL enabled");
 
-    if (!bootargs_is("smap", "no")){
+    if (!bootargs_has("no-smap")){
         BLOG_INFO("Attempting to enable SMAP/SMEP");
         int smap_status = SMAP_init();
         if (smap_status == 0){
@@ -264,7 +264,7 @@ bool init_userspace(){
         }
     }
 
-    if (!bootargs_is("umip", "no")){
+    if (!bootargs_has("no-umip")){
         BLOG_INFO("Attempting to enable UMIP");
         int umip_status = UMIP_init();
         if (umip_status == 0){
