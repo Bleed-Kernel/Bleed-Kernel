@@ -53,6 +53,13 @@ void framebuffer_flush(fb_console_t *fb) {
     uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
     if (!fb_buffer) return;
 
+    if (fb->scrollback_view != 0) {
+        fb_console_render_view(fb);
+        fb->dirty_top = fb->height;
+        fb->dirty_bottom = 0;
+        return;
+    }
+
     if (fb->dirty_top < fb->dirty_bottom) {
         uint32_t* src = fb_buffer + fb->dirty_top * fb->pitch;
         uint32_t* dst = fb->pixels + fb->dirty_top * fb->pitch;
@@ -126,6 +133,8 @@ static void framebuffer_scroll_buffer(fb_console_t *fb) {
     size_t row_px = fb->font->height;
     uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
     if (!fb_buffer) return;
+    
+    fb_scrollback_capture(fb, fb_buffer);
 
     memmove(fb_buffer,
             fb_buffer + row_px * fb->pitch,

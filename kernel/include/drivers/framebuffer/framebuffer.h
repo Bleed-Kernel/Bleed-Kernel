@@ -99,6 +99,21 @@ static inline void framebuffer_write_centered_line(
     }
 }
 
+/// @brief Adjust scrollback view offset and re-render the visible frame.
+/// @param lines negative = scroll back into history, positive = move toward live
+void fb_console_scroll(fb_console_t *fb, int lines);
+
+/// @brief Capture a single evicted text line (scrollback_line_words wide) into history.
+/// Called right before that line is overwritten/scrolled out of the shadow buffer.
+void fb_scrollback_capture(fb_console_t *fb, const uint32_t *line_src);
+
+/// @brief Drop all stored scrollback history and reset to the live view.
+void fb_scrollback_reset(fb_console_t *fb);
+
+/// @brief Re-composite fb->pixels from scrollback history + shadow_pixels
+/// based on the current scrollback_view offset. Does not modify shadow_pixels.
+void fb_console_render_view(fb_console_t *fb);
+
 /// @brief Draw multiple lines centered vertically and horizontally
 /// @param fb framebuffer console
 /// @param ansi ansi state

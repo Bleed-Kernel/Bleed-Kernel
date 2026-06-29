@@ -33,6 +33,16 @@
 #define TTY_IOCTL_SET_ACTIVE        0x5423
 #define TTY_IOCTL_GET_ACTIVE_INDEX  0x5424
 
+#define TTY_IOCTL_SCROLL            0x5425
+
+#define SCROLLBACK_ROWS 500
+
+typedef struct {
+    char c;
+    uint32_t fg;
+    uint32_t bg;
+} tty_char_t;
+
 #define TTY_NCCS 7
 enum {
     TTY_VINTR = 0,

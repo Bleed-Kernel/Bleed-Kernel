@@ -28,17 +28,12 @@ typedef struct tty_linux_winsize {
     uint16_t ws_ypixel;
 } tty_linux_winsize_t;
 
-/* Single global tty0 */
 static tty_t           g_tty0;
 static tty_fb_backend_t g_tty0_backend;
 static bool            g_tty0_ready           = false;
 static bool            g_listener_registered  = false;
 
 extern struct INodeOps tty_inode_ops;
-
-/* -------------------------------------------------------------------------
- * termios <-> flags sync
- * ---------------------------------------------------------------------- */
 
 static void tty_sync_termios_from_flags(tty_t *tty) {
     if (tty->flags & TTY_ECHO)      tty->termios.c_lflag |=  TTY_TERM_ECHO;
@@ -63,10 +58,6 @@ static void tty_sync_flags_from_termios(tty_t *tty) {
         tty->flags |= TTY_NONBLOCK;
 }
 
-/* -------------------------------------------------------------------------
- * winsize helper
- * ---------------------------------------------------------------------- */
-
 static void tty_fill_winsize(tty_t *tty, uint32_t *cols_out, uint32_t *rows_out) {
     tty_fb_backend_t *b = tty->backend;
     uint32_t cols = b->fb.width;
@@ -78,10 +69,6 @@ static void tty_fill_winsize(tty_t *tty, uint32_t *cols_out, uint32_t *rows_out)
     *cols_out = cols;
     *rows_out = rows;
 }
-
-/* -------------------------------------------------------------------------
- * rendering
- * ---------------------------------------------------------------------- */
 
 static void tty_render_byte(tty_t *tty, uint8_t byte) {
     tty_fb_backend_t *b = tty->backend;
@@ -112,10 +99,6 @@ static void tty_fb_putchar(tty_t *tty, char c) {
     tty_render_byte(tty, (uint8_t)c);
 }
 
-/* -------------------------------------------------------------------------
- * fb_clear (used by console layer too)
- * ---------------------------------------------------------------------- */
-
 void fb_clear(fb_console_t *fb) {
     if (!fb || !fb->pixels) return;
 
@@ -127,15 +110,13 @@ void fb_clear(fb_console_t *fb) {
     if (dst != fb->pixels)
         framebuffer_blit(dst, fb->pixels, fb->width, fb->height, fb->pitch);
 
+    fb_scrollback_reset(fb);
+
     fb->cursor_x     = 0;
     fb->cursor_y     = 0;
     fb->dirty_top    = fb->height;
     fb->dirty_bottom = 0;
 }
-
-/* -------------------------------------------------------------------------
- * input processing
- * ---------------------------------------------------------------------- */
 
 void tty_process_input(tty_t *tty, char c) {
     if ((tty->flags & TTY_CANNONICAL) && c == '\r') c = '\n';
@@ -160,7 +141,7 @@ void tty_process_input(tty_t *tty, char c) {
     }
 
     size_t next = (tty->in_head + 1) % TTY_BUFFER_SZ;
-    if (next == tty->in_tail) {          /* buffer full, drop */
+    if (next == tty->in_tail) {
         spinlock_release(&tty->in_lock);
         irq_restore(irq);
         return;
@@ -179,10 +160,6 @@ void tty_process_input(tty_t *tty, char c) {
     irq_restore(irq);
 }
 
-/* -------------------------------------------------------------------------
- * SIGINT target picker
- * ---------------------------------------------------------------------- */
-
 typedef struct { task_t *picked; } tty_sig_pick_ctx_t;
 
 static void tty_pick_sigint_target(task_t *candidate, void *userdata) {
@@ -195,10 +172,6 @@ static void tty_pick_sigint_target(task_t *candidate, void *userdata) {
     ctx->picked = candidate;
 }
 
-/* -------------------------------------------------------------------------
- * keyboard listener
- * ---------------------------------------------------------------------- */
-
 static void tty_input_listener(const keyboard_event_t *ev) {
     if (ev->action != KEY_DOWN) return;
     if (!g_tty0_ready) return;
@@ -208,7 +181,6 @@ static void tty_input_listener(const keyboard_event_t *ev) {
     char c = tty_key_to_ascii(ev);
     if (!c) return;
 
-    /* Ctrl-C → SIGINT */
     if ((ev->keymod & KEYMOD_CTRL) && (c == 'c' || c == 'C')) {
         if (!(tty->termios.c_lflag & TTY_TERM_ISIG)) return;
 
@@ -231,10 +203,6 @@ static void tty_input_listener(const keyboard_event_t *ev) {
 
     tty_process_input(tty, c);
 }
-
-/* -------------------------------------------------------------------------
- * INode ops: read / write / ioctl
- * ---------------------------------------------------------------------- */
 
 long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
     (void)offset;
@@ -356,7 +324,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
 
             case TTY_IOCTL_GET_INDEX:
                 if (!arg) return -EINVAL;
-                *(uint32_t *)arg = 0;   /* always tty0 */
+                *(uint32_t *)arg = 0;
                 return 0;
 
             case TTY_IOCTL_TCGETS:
@@ -390,7 +358,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
             }
 
             case TTY_IOCTL_TIOCSWINSZ:
-                return 0;   /* ignored for now */
+                return 0;
 
             case TTY_IOCTL_FIONBIO:
                 if (!arg) return -EINVAL;
@@ -399,16 +367,28 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
                 tty_sync_termios_from_flags(tty);
                 return 0;
 
+            case TTY_IOCTL_SCROLL: 
+                if (!arg) return -EINVAL;
+                int lines_to_scroll = *(int *)arg;
+                tty_fb_backend_t *b = tty->backend;
+
+                unsigned long irq = irq_push();
+                spinlock_acquire(&b->fb_lock);
+
+                fb_console_scroll(&b->fb, lines_to_scroll);
+                *(int *)arg = (int)b->fb.scrollback_view;
+
+                spinlock_release(&b->fb_lock);
+                irq_restore(irq);
+
+                return 0;
+
             default:
                 return -ENOTTY;
         }
     }
     return -ENOTTY;
 }
-
-/* -------------------------------------------------------------------------
- * ops tables
- * ---------------------------------------------------------------------- */
 
 static struct tty_ops tty0_ops = {
     .putchar = tty_fb_putchar,
@@ -420,15 +400,10 @@ struct INodeOps tty_inode_ops = {
     .ioctl = tty_ioctl,
 };
 
-/* -------------------------------------------------------------------------
- * tty_device_init — no arguments, registers tty0
- * ---------------------------------------------------------------------- */
-
 void tty_device_init(void) {
     tty_t           *tty = &g_tty0;
     tty_fb_backend_t *b  = &g_tty0_backend;
 
-    /* --- build fb_console from live framebuffer --- */
     fb_console_t fb = {
         .pixels = framebuffer_get_addr(0),
         .width  = framebuffer_get_width(0),
@@ -439,15 +414,13 @@ void tty_device_init(void) {
         .bg     = 0x000000,
     };
 
-    /* --- init backend --- */
     memset(b, 0, sizeof(*b));
     b->fb              = fb;
     b->display_pixels  = fb.pixels;
-    b->is_active       = 1;         /* tty0 is immediately active */
+    b->is_active       = 1;
     b->ansi            = (ansii_state_t){0};
     b->fb_lock         = (spinlock_t){0};
 
-    /* --- init tty struct --- */
     memset(tty, 0, sizeof(*tty));
     tty->index   = 0;
     tty->backend = b;
@@ -457,17 +430,15 @@ void tty_device_init(void) {
 
     tty->flags = TTY_ECHO | TTY_CANNONICAL;
     tty->termios.c_lflag             = TTY_TERM_ECHO | TTY_TERM_ICANON | TTY_TERM_ISIG;
-    tty->termios.c_cc[TTY_VINTR]     = 3;    /* ^C */
+    tty->termios.c_cc[TTY_VINTR]     = 3;
     tty->termios.c_cc[TTY_VERASE]    = 127;
     tty->termios.c_cc[TTY_VMIN]      = 1;
     tty->termios.c_cc[TTY_VTIME]     = 0;
     tty_sync_termios_from_flags(tty);
     spinlock_init(&tty->in_lock);
 
-    /* --- register as "tty0" in device tree --- */
     device_register(&tty->device, "tty0");
 
-    /* --- wire kernel stdio (fd 1 & 2) to tty0 --- */
     file_t *f = kmalloc(sizeof(file_t));
     if (f) {
         memset(f, 0, sizeof(*f));
@@ -481,10 +452,8 @@ void tty_device_init(void) {
         }
     }
 
-    /* --- set as active console --- */
     console_set(&tty->device, *tty);
 
-    /* --- register keyboard listener once --- */
     if (!g_listener_registered) {
         keyboard_register_listener(tty_input_listener);
         g_listener_registered = true;

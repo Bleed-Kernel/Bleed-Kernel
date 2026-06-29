@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <fonts/psf.h>
 
+#define FB_SCROLLBACK_LINES 500
+
 typedef struct {
     uint32_t *pixels;
     uint32_t *shadow_pixels;
@@ -20,4 +22,10 @@ typedef struct {
 
     size_t dirty_top;
     size_t dirty_bottom;
+
+    uint32_t *scrollback_lines;
+    size_t    scrollback_line_words;
+    size_t    scrollback_head;
+    size_t    scrollback_count;
+    size_t    scrollback_view;
 } fb_console_t;
