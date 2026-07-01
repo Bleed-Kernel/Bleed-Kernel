@@ -9,6 +9,7 @@
 #include <kernel/exception/panic.h>
 #include <kernel/exception/stack_trace.h>
 #include <boot/bootlogger/bootlogger.h>
+#include <drivers/framebuffer/framebuffer.h>
 
 #define hcf() do { \
     __asm__ volatile ("hlt"); \
@@ -20,6 +21,22 @@
     bset_color(BCOL_WHITE, BCOL_BLACK); \
     bprintf("0x%llx ", val); \
 } while(0)
+
+#define SERIAL_PRINT_REG(name, val) do { \
+    serial_printf("  %s 0x%llx\n", name, (uint64_t)(val)); \
+} while(0)
+
+#define PANIC_SCREEN_COLOR 0x005C0816
+
+static inline void panic_fill_screen(uint32_t colour) {
+    framebuffer_clear(
+        (uint32_t *)framebuffer_get_addr(0),
+        framebuffer_get_width(0),
+        framebuffer_get_height(0),
+        framebuffer_get_pitch(0) / 4,
+        colour
+    );
+}
 
 const char* exception_name(uint8_t vector) {
     static const char* names[32] = {
@@ -100,14 +117,24 @@ static void dump_page_fault_info(uint64_t err, uint64_t cr2) {
     bset_color(BCOL_RED, BCOL_BLACK);
     bprintf("%s\n", violation);
 
+    const char *null_note = NULL;
     if (!(err & (1 << 0)) && cr2 < 0x1000) {
         bset_color(BCOL_YELLOW, BCOL_BLACK);
         bprintf("            : NULL pointer dereference\n");
+        null_note = "NULL pointer dereference";
     } else if ((err & (1 << 4)) && (err & (1 << 0))) {
         bset_color(BCOL_YELLOW, BCOL_BLACK);
         bprintf("            : NX Violation\n");
+        null_note = "NX Violation";
     }
     breset_color();
+
+    serial_printf("\n  PAGE FAULT\n");
+    serial_printf("  Address   : 0x%p\n", (void*)cr2);
+    serial_printf("  Action    : %s\n", access);
+    serial_printf("  Privilege : %s\n", privilege);
+    serial_printf("  Page Flags: %s\n", violation);
+    if (null_note) serial_printf("            : %s\n", null_note);
 }
 
 static inline void print_separator(const char* title) {
@@ -118,22 +145,28 @@ static inline void print_separator(const char* title) {
     bset_color(BCOL_GREY, BCOL_BLACK);
     bprintf("]----------------------------------------------------\n");
     breset_color();
+
+    serial_printf("\n--[ %s ]----------------------------------------------------\n", title);
 }
 
 __attribute__((noreturn))
 void ke_panic(struct isr_stackframe *sf, const char *pstring){
     if (!sf && !pstring) hcf();
     bconsole_init(); //users who dont enable verbose will never see a panic unless we do this.
+    panic_fill_screen(PANIC_SCREEN_COLOR);
     breset_color();
 
     if (sf) {
         serial_write("\n[PANIC] Vec:"); serial_write_hex(sf->vector);
         serial_write(" RIP:"); serial_write_hex(sf->rip);
+        serial_write("\n");
 
         bset_color(BCOL_RED, BCOL_BLACK);
         bprintf("\n  KERNEL PANIC: ");
         bset_color(BCOL_WHITE, BCOL_BLACK);
         bprintf("CPU EXCEPTION: %s (0x%x)\n", exception_name(sf->vector), (uint8_t)sf->vector);
+
+        serial_printf("  KERNEL PANIC: CPU EXCEPTION: %s (0x%x)\n", exception_name(sf->vector), (uint8_t)sf->vector);
 
         task_t *current = get_current_task();
 
@@ -142,9 +175,13 @@ void ke_panic(struct isr_stackframe *sf, const char *pstring){
             bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("  Current Task: ");
             bset_color(BCOL_GREEN, BCOL_BLACK); bprintf("%s ", current->name);
             bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("(PID: %llu)\n", current->id);
+
+            serial_printf("  Current Task: %s (PID: %llu)\n", current->name, current->id);
         } else {
             bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("  Current Task: ");
             bset_color(BCOL_YELLOW, BCOL_BLACK); bprintf("<none>\n");
+
+            serial_printf("  Current Task: <none>\n");
         }
 
         uint64_t sym_addr;
@@ -156,11 +193,20 @@ void ke_panic(struct isr_stackframe *sf, const char *pstring){
             bset_color(BCOL_YELLOW, BCOL_BLACK);
             bprintf(" <%s + 0x%llx>", name, sf->rip - sym_addr);
         }
+        bprintf("\n");
+
+        if (name) {
+            serial_printf("  Instruction : 0x%p <%s + 0x%llx>\n", (void*)sf->rip, name, sf->rip - sym_addr);
+        } else {
+            serial_printf("  Instruction : 0x%p\n", (void*)sf->rip);
+        }
         
-        bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("\n  Flags       : ");
+        bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("  Flags       : ");
         bset_color(BCOL_GREY, BCOL_BLACK);  bprintf("0x%llx ", sf->rflags);
         bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("| CS: ");
         bset_color(BCOL_GREY, BCOL_BLACK);  bprintf("0x%x\n", (uint16_t)sf->cs);
+
+        serial_printf("  Flags       : 0x%llx | CS: 0x%x\n", sf->rflags, (uint16_t)sf->cs);
 
         print_separator("CPU CONTEXT");
         PRINT_REG("RAX", sf->rax); PRINT_REG("R8 ", sf->r8);  PRINT_REG("R12", sf->r12); bprintf("\n");
@@ -168,6 +214,12 @@ void ke_panic(struct isr_stackframe *sf, const char *pstring){
         PRINT_REG("RCX", sf->rcx); PRINT_REG("R10", sf->r10); PRINT_REG("R14", sf->r14); bprintf("\n");
         PRINT_REG("RDX", sf->rdx); PRINT_REG("R11", sf->r11); PRINT_REG("R15", sf->r15); bprintf("\n");
         PRINT_REG("RSI", sf->rsi); PRINT_REG("RDI", sf->rdi); PRINT_REG("RBP", sf->rbp); bprintf("\n");
+
+        SERIAL_PRINT_REG("RAX", sf->rax); SERIAL_PRINT_REG("R8 ", sf->r8);  SERIAL_PRINT_REG("R12", sf->r12);
+        SERIAL_PRINT_REG("RBX", sf->rbx); SERIAL_PRINT_REG("R9 ", sf->r9);  SERIAL_PRINT_REG("R13", sf->r13);
+        SERIAL_PRINT_REG("RCX", sf->rcx); SERIAL_PRINT_REG("R10", sf->r10); SERIAL_PRINT_REG("R14", sf->r14);
+        SERIAL_PRINT_REG("RDX", sf->rdx); SERIAL_PRINT_REG("R11", sf->r11); SERIAL_PRINT_REG("R15", sf->r15);
+        SERIAL_PRINT_REG("RSI", sf->rsi); SERIAL_PRINT_REG("RDI", sf->rdi); SERIAL_PRINT_REG("RBP", sf->rbp);
 
         uint64_t cr2;
         __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
@@ -183,7 +235,7 @@ void ke_panic(struct isr_stackframe *sf, const char *pstring){
         bset_color(BCOL_GREY, BCOL_BLACK);
         bprintf("  Put this code into https://bleedkernel.com/panic.html or share it to report the issue\n\n");
         bset_color(BCOL_YELLOW, BCOL_BLACK);
-        bprintf("  ");
+        bprintf("");
 
     } else {
         serial_write("\n[PANIC] "); serial_write(pstring); serial_write("\n");
@@ -193,6 +245,8 @@ void ke_panic(struct isr_stackframe *sf, const char *pstring){
         bset_color(BCOL_WHITE, BCOL_BLACK);
         bprintf("%s\n", pstring);
 
+        serial_printf("  KERNEL PANIC: %s\n", pstring);
+
         task_t *current = get_current_task();
 
         print_separator("PROCESS CONTEXT");
@@ -200,9 +254,13 @@ void ke_panic(struct isr_stackframe *sf, const char *pstring){
             bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("  Current Task: ");
             bset_color(BCOL_GREEN, BCOL_BLACK); bprintf("%s ", current->name);
             bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("(PID: %llu)\n", current->id);
+
+            serial_printf("  Current Task: %s (PID: %llu)\n", current->name, current->id);
         } else {
             bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("  Current Task: ");
             bset_color(BCOL_YELLOW, BCOL_BLACK); bprintf("<none>\n");
+
+            serial_printf("  Current Task: <none>\n");
         }
 
         print_separator("BACKTRACE");

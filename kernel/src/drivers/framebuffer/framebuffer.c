@@ -31,9 +31,16 @@ uint64_t framebuffer_get_bpp(int idx) {
 }
 
 static void fb_scrollback_ensure(fb_console_t *fb) {
-    if (fb->scrollback_lines || !fb->font || !fb->pitch) return;
+    if (!fb->font || !fb->pitch) return;
 
-    fb->scrollback_line_words = (size_t)fb->font->height * fb->pitch;
+    size_t new_lw = (size_t)fb->font->height * fb->pitch;
+
+    if (fb->scrollback_lines && fb->scrollback_line_words == new_lw) return;
+
+    if (fb->scrollback_lines)
+        kfree(fb->scrollback_lines);
+
+    fb->scrollback_line_words = new_lw;
     fb->scrollback_lines = kmalloc(fb->scrollback_line_words * FB_SCROLLBACK_LINES * sizeof(uint32_t));
     fb->scrollback_head  = 0;
     fb->scrollback_count = 0;
@@ -117,4 +124,13 @@ void fb_console_scroll(fb_console_t *fb, int lines) {
 
     fb->scrollback_view = (size_t)new_view;
     fb_console_render_view(fb);
+}
+
+void framebuffer_clear(uint32_t *pixels, uint64_t width, uint64_t height, uint64_t pitch, uint32_t colour) {
+    if (!pixels) return;
+    (void)width;
+
+    uint64_t total_words = height * pitch;
+    for (uint64_t i = 0; i < total_words; i++)
+        pixels[i] = colour;
 }
