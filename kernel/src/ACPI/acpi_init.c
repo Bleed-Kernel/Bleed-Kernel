@@ -8,6 +8,7 @@
 #include <ansii.h>
 #include <kernel/exception/panic.h>
 #include <drivers/serial/serial.h>
+#include <ACPI/acpi_bgrt.h>
 #include "acpi_priv.h"
 
 #define MAX_ISO 16
@@ -121,6 +122,11 @@ void acpi_init(void) {
             ke_panic(NULL, "ACPI: Enable timeout");
         }
     }
+
+    // for anyone under 16, there was a time where firmware didnt provide
+    // logos, so this can fail silently if it doenst find one but itll just get
+    // logged.
+    acpi_init_bgrt();
 
     madt = (struct acpi_madt *)acpi_find_sdt("APIC");
     if (!madt)

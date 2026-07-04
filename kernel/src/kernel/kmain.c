@@ -25,6 +25,7 @@
 
 #include <ACPI/acpi.h>
 #include <ACPI/acpi_hpet.h>
+#include <ACPI/acpi_bgrt.h>
 
 #include <drivers/ps2/PS2_mouse.h>
 #include <drivers/ps2/PS2_keyboard.h>
@@ -127,7 +128,9 @@ void init_ramdisk(){
 
     bool splash_display = false;
 
-    if (!bootargs_is("splash", "no")){
+    if (bootargs_is("splash", "no")){
+        splash_display = true;
+    } else if (bootargs_is("splash", "bleed")) {
         splash_display = display_splash_screen("initrd/boot/splash.bgra", 200, 252);
 
         if (splash_display){
@@ -136,8 +139,20 @@ void init_ramdisk(){
         }else{
             BLOG_FAIL("\t x BGRA Splash Image");
         }
-    }else{
-        splash_display = true;
+    } else {
+        if (acpi_bgrt_present() && acpi_bgrt_display_logo()) {
+            splash_display = true;
+            BLOG_OK("\t - Firmware (ACPI BGRT) Splash Image");
+        } else {
+            splash_display = display_splash_screen("initrd/boot/splash.bgra", 200, 252);
+
+            if (splash_display){
+                bconsole_reserve_rows(252);
+                BLOG_OK("\t - BGRA Splash Image");
+            }else{
+                BLOG_FAIL("\t x BGRA Splash Image");
+            }
+        }
     }
 
     bool font_init = false;
@@ -304,9 +319,8 @@ myles@bleedkernel.com\n\t\
 Licenced under GPLv3\n");
 
     init_processor_state();
-
-    init_ramdisk();
     init_firmware_relationship();
+    init_ramdisk();
     init_devices();
     init_block_devices();
     init_multitasking();
