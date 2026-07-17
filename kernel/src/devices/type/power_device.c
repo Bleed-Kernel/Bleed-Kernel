@@ -16,9 +16,13 @@ static int power_ioctl(INode_t *inode, unsigned long request, void *arg) {
     if (request == POWER_DEVICE_POWEROFF) {
         serial_printf(LOG_OK "Power Device recieved Poweroff instruction\n");
         acpi_shutdown();
+        serial_printf(LOG_ERROR "acpi_shutdown() returned unexpectedly\n");
+        return -EIO;
     }else if (request == POWER_DEVICE_REBOOT){
         serial_printf(LOG_OK "Power Device recieved Reboot instruction\n");
         acpi_reboot();
+        serial_printf(LOG_ERROR "acpi_reboot() returned unexpectedly\n");
+        return -EIO;
     }
 
     return -EINVAL;
