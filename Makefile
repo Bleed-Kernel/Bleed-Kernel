@@ -83,6 +83,8 @@ USER_REPOS := \
     "https://github.com/Bleed-Kernel/Bleed-tvi tvi" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils cat" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils echo" \
+    "https://github.com/Bleed-Kernel/Bleed-Coreutils write" \
+	"https://github.com/Bleed-Kernel/Bleed-Coreutils ioctl" \
 
 USER_BIN_DIR := external/
 INITRD_BIN := initrd/bin
