@@ -20,6 +20,7 @@
 #include <user/signal.h>
 #include <user/errno.h>
 #include <kernel/kmain.h>
+#include <stdio.h>
 
 typedef struct tty_linux_winsize {
     uint16_t ws_row;
@@ -34,6 +35,7 @@ static bool            g_tty0_ready           = false;
 static bool            g_listener_registered  = false;
 
 extern struct INodeOps tty_inode_ops;
+extern spinlock_t sched_lock;
 
 static void tty_sync_termios_from_flags(tty_t *tty) {
     if (tty->flags & TTY_ECHO)      tty->termios.c_lflag |=  TTY_TERM_ECHO;
@@ -164,12 +166,13 @@ typedef struct { task_t *picked; } tty_sig_pick_ctx_t;
 
 static void tty_pick_sigint_target(task_t *candidate, void *userdata) {
     tty_sig_pick_ctx_t *ctx = (tty_sig_pick_ctx_t *)userdata;
-    if (!candidate || !ctx || ctx->picked) return;
+    if (!candidate || !ctx) return;
     if (candidate->task_privilege != PRIVILEGE_USER) return;
     if (candidate->state == TASK_DEAD ||
         candidate->state == TASK_FREE ||
         candidate->state == TASK_ZOMBIE) return;
-    ctx->picked = candidate;
+    if (!ctx->picked || candidate->id > ctx->picked->id)
+        ctx->picked = candidate;
 }
 
 static void tty_input_listener(const keyboard_event_t *ev) {
@@ -184,20 +187,22 @@ static void tty_input_listener(const keyboard_event_t *ev) {
     if ((ev->keymod & KEYMOD_CTRL) && (c == 'c' || c == 'C')) {
         if (!(tty->termios.c_lflag & TTY_TERM_ISIG)) return;
 
-        task_t *task = get_current_task();
-        if (!task || task->task_privilege != PRIVILEGE_USER) {
-            tty_sig_pick_ctx_t ctx = {0};
-            itterate_each_task(tty_pick_sigint_target, &ctx);
-            task = ctx.picked;
-        }
-        if (task) signal_send(task, SIGINT);
+        tty_sig_pick_ctx_t ctx = {0};
+        itterate_each_task(tty_pick_sigint_target, &ctx);
+        if (ctx.picked)
+            signal_send(ctx.picked, SIGINT);
 
         if (tty->flags & TTY_ECHO) {
             tty->ops->putchar(tty, '^');
             tty->ops->putchar(tty, 'C');
             tty->ops->putchar(tty, '\n');
         }
+
+        unsigned long irq = irq_push();
+        spinlock_acquire(&tty->in_lock);
         tty->in_head = tty->line_start;
+        spinlock_release(&tty->in_lock);
+        irq_restore(irq);
         return;
     }
 
@@ -426,6 +431,7 @@ void tty_device_init(void) {
     tty->backend = b;
     tty->device.ops           = &tty_inode_ops;
     tty->device.internal_data = tty;
+    tty->device.shared        = 1;
     tty->ops     = &tty0_ops;
 
     tty->flags = TTY_ECHO | TTY_CANNONICAL;

@@ -39,6 +39,28 @@ static int signal_default_terminate(int sig) {
     return !signal_default_ignored(sig) && !signal_default_stop(sig);
 }
 
+static int signal_apply_default_action(task_t *task, int sig, sigset_t bit) {
+    uintptr_t handler = task->sig_handlers[sig];
+    if (handler == SIG_IGN || (handler == SIG_DFL && signal_default_ignored(sig)))
+        return 0;
+
+    if (handler == SIG_DFL && signal_default_stop(sig)) {
+        task->state = TASK_STOPPED;
+        task->sig_pending &= ~bit;
+        sched_yield(task);
+        return 1;
+    }
+
+    if (handler == SIG_DFL && signal_default_terminate(sig)) {
+        task->sig_pending &= ~bit;
+        task->exit_signal = sig;
+        task->exit_code = 128 + sig;
+        exit();
+    }
+
+    return -1;
+}
+
 int signal_send(task_t *task, int sig) {
     if (!task)
         return -ESRCH;
@@ -202,21 +224,9 @@ void signal_deliver_pending(task_t *task, cpu_context_t *ctx) {
 
         task->sig_pending &= ~bit;
 
-        uintptr_t handler = task->sig_handlers[sig];
-        if (handler == SIG_IGN || (handler == SIG_DFL && signal_default_ignored(sig)))
+        int default_action = signal_apply_default_action(task, sig, bit);
+        if (default_action != -1)
             return;
-
-        if (handler == SIG_DFL && signal_default_stop(sig)) {
-            task->state = TASK_STOPPED;
-            sched_yield(get_current_task());
-            return;
-        }
-
-        if (handler == SIG_DFL && signal_default_terminate(sig)) {
-            task->exit_signal = sig;
-            task->exit_code = 128 + sig;
-            exit();
-        }
 
         if (signal_setup_user_handler(task, ctx, sig) < 0) {
             task->exit_signal = sig;
@@ -245,6 +255,12 @@ int signal_should_interrupt(task_t *task) {
             continue;
         if (handler == SIG_DFL && signal_default_ignored(sig))
             continue;
+
+        task->sig_pending &= ~bit;
+        int default_action = signal_apply_default_action(task, sig, bit);
+        if (default_action != -1)
+            return default_action;
+
         return 1;
     }
 

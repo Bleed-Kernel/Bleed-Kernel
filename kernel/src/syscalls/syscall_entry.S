@@ -65,7 +65,6 @@ syscall_entry:
 
     // Switch back to the User context
     cli
-    add rsp, 8          // skip saved rax
-    add rsp, 16         // skip vector + error
+    add rsp, 24 // skip saved rax. vector and error.
     iretq
 .size syscall_entry, .-syscall_entry

@@ -271,6 +271,6 @@ irq80:
     pop rcx
     pop rbx
 
-    add  rsp, 24
+    add  rsp, 16
     iretq
 .size irq80, .-irq80

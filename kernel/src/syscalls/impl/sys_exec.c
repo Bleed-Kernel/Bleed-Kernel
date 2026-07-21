@@ -160,7 +160,13 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     task->page_map = new_cr3;
     task->alloc_list = NULL;
     task->heap = new_heap;
+    task->sig_pending = 0;
+    task->sig_blocked = 0;
     task->sig_active_frame = 0;
+    memset(task->sig_handlers, 0, sizeof(task->sig_handlers));
+    memset(task->sig_masks, 0, sizeof(task->sig_masks));
+    memset(task->sig_flags, 0, sizeof(task->sig_flags));
+    memset(task->sig_restorers, 0, sizeof(task->sig_restorers));
 
     cpu_context_t *ctx = task->context;
     if (!ctx) {

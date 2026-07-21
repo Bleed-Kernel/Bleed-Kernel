@@ -179,7 +179,7 @@ void init_paging(void) {
             cr3,
             p,
             (uintptr_t)paddr_to_vaddr(p),
-            PTE_PRESENT | PTE_WRITABLE | PTE_PAT | PTE_NX,
+            PTE_PRESENT | PTE_WRITABLE | PTE_PAT | PTE_NX | PTE_PCD,
             0
         );
     }
