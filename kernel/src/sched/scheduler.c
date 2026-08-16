@@ -101,6 +101,9 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
 }
 
 void* sched_next_context(void* old_context) {
+    if (!task_queue)
+        return sched_switch_task(current_task, old_context);
+
     task_t *start = task_queue->next;
     task_t *next_task = start;
 

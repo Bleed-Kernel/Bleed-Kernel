@@ -314,7 +314,7 @@ void kmain(void){
     }
 
     BLOG_INFO("Starting the Bleed Kernel\n\t\
-by Myles 'Mellurboo' Wilson\n\t\
+by Isabella 'Mellurboo' Wilson\n\t\
 myles@bleedkernel.com\n\t\
 Licenced under GPLv3\n");
 

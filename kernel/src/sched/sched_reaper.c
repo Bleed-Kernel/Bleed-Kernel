@@ -67,23 +67,22 @@ void sched_mark_task_dead(task_t *task) {
     task->state = TASK_DEAD;
     task->dead_next = NULL;
 
+
+    __typeof__(task->current_directory) cwd = task->current_directory;
+    task->current_directory = NULL;
+
     if (!dead_task_head) {
         dead_task_head = task;
         dead_task_tail = task;
-        spinlock_release(&sched_lock);
-        irq_restore(flags);
-        vfs_drop(task->current_directory);
-        task->current_directory = NULL;
-        return;
+    } else {
+        dead_task_tail->dead_next = task;
+        dead_task_tail = task;
     }
 
-    dead_task_tail->dead_next = task;
-    dead_task_tail = task;
     spinlock_release(&sched_lock);
     irq_restore(flags);
 
-    vfs_drop(task->current_directory);
-    task->current_directory = NULL;
+    vfs_drop(cwd);
 }
 
 void scheduler_reap(void) {
@@ -125,8 +124,9 @@ void scheduler_reap(void) {
                 continue;
             }
 
-            if (task_queue)
-                unlink_from_list(&task_queue, task);
+            if (task_queue == task)
+                task_queue = (task->next == task) ? NULL : task->next;
+
             if (task_list_head)
                 unlink_from_list(&task_list_head, task);
 
@@ -141,6 +141,9 @@ void scheduler_reap(void) {
 
             if (task->kernel_stack)
                 kfree(task->kernel_stack);
+
+            if (task->heap)
+                kfree(task->heap);
 
             ipc_task_cleanup(task);
             paging_destroy_address_space(task->page_map);
