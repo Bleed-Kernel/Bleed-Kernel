@@ -131,7 +131,7 @@ void init_ramdisk(){
     if (bootargs_is("splash", "no")){
         splash_display = true;
     } else if (bootargs_is("splash", "bleed")) {
-        splash_display = display_splash_screen("initrd/boot/splash.bgra", 200, 252);
+        splash_display = display_splash_screen("initrd/boot/splash.bgra", 256, 256);
 
         if (splash_display){
             bconsole_reserve_rows(252);
@@ -144,7 +144,7 @@ void init_ramdisk(){
             splash_display = true;
             BLOG_OK("\t - Firmware (ACPI BGRT) Splash Image");
         } else {
-            splash_display = display_splash_screen("initrd/boot/splash.bgra", 200, 252);
+            splash_display = display_splash_screen("initrd/boot/splash.bgra", 256, 256);
 
             if (splash_display){
                 bconsole_reserve_rows(252);
@@ -315,7 +315,7 @@ void kmain(void){
 
     BLOG_INFO("Starting the Bleed Kernel\n\t\
 by Isabella 'Mellurboo' Wilson\n\t\
-myles@bleedkernel.com\n\t\
+admin@bleedkernel.com\n\t\
 Licenced under GPLv3\n");
 
     init_processor_state();
