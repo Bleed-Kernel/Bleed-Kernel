@@ -53,6 +53,8 @@ extern volatile struct limine_module_request module_request;
 extern volatile struct limine_rsdp_request rsdp_request;
 extern volatile struct limine_executable_cmdline_request cmdline_request;
 
+// to be clear this is used when its too early for the kernel to properly panic
+// realistically, it should never run.
 #define KERNEL_STOP()                           \
     do {                                        \
         __asm__ volatile (                      \

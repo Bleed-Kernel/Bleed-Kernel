@@ -226,13 +226,14 @@ run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0
 
+#apple silicon emulation sucks, if you are getting performance issues, please test it on an x86_64 machine before submitting an issue!
 .PHONY: run-mac
 run-mac: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		-cdrom $(IMAGE_NAME).iso \
-		-accel tcg \
-		-cpu max \
+		-accel tcg,thread=multi,tb-size=1024 \
+		-cpu qemu64 \
 		-m $(MEMSZ) \
 		-boot d \
 		-serial stdio \

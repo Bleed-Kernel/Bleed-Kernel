@@ -8,6 +8,7 @@
 #include <string.h>
 #include <mm/kalloc.h>
 #include <ansii.h>
+#include <kernel/exception/panic.h>
 
 static int power_ioctl(INode_t *inode, unsigned long request, void *arg) {
     (void)inode;
@@ -22,6 +23,11 @@ static int power_ioctl(INode_t *inode, unsigned long request, void *arg) {
         serial_printf(LOG_OK "Power Device recieved Reboot instruction\n");
         acpi_reboot();
         serial_printf(LOG_ERROR "acpi_reboot() returned unexpectedly\n");
+        return -EIO;
+    }else if (request == POWER_DEVICE_KERNEL_PANIC){
+        serial_printf(LOG_OK "Power Device recieved Kernel Panic instruction");
+        ke_panic(NULL, "Manually Initiated Crash");
+        serial_printf(LOG_ERROR "ke_panic() returned? how did it manage that?\n");
         return -EIO;
     }
 

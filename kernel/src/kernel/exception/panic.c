@@ -26,8 +26,7 @@
     serial_printf("  %s 0x%llx\n", name, (uint64_t)(val)); \
 } while(0)
 
-#define PANIC_SCREEN_COLOR 0x005C0816
-
+#define PANIC_SCREEN_COLOR 0x00000000
 static inline void panic_fill_screen(uint32_t colour) {
     framebuffer_clear(
         (uint32_t *)framebuffer_get_addr(0),
@@ -156,13 +155,18 @@ void ke_panic(struct isr_stackframe *sf, const char *pstring){
     panic_fill_screen(PANIC_SCREEN_COLOR);
     breset_color();
 
+    bset_color(BCOL_WHITE, BCOL_BLACK);
+    bprintf("The Bleed Kernel has Encounterd an Error in which it is no longer safe to continue, to protect your devices it has issued a kernel panic\n\
+there is nothing more to be done here, feel free to restart your computer via it's power button\n");
+
+
     if (sf) {
         serial_write("\n[PANIC] Vec:"); serial_write_hex(sf->vector);
         serial_write(" RIP:"); serial_write_hex(sf->rip);
         serial_write("\n");
-
+        
         bset_color(BCOL_RED, BCOL_BLACK);
-        bprintf("\n  KERNEL PANIC: ");
+        bprintf("  KERNEL PANIC: ");
         bset_color(BCOL_WHITE, BCOL_BLACK);
         bprintf("CPU EXCEPTION: %s (0x%x)\n", exception_name(sf->vector), (uint8_t)sf->vector);
 
