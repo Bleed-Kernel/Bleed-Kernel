@@ -8,6 +8,7 @@
 #include <ansii.h>
 #include <kernel/exception/panic.h>
 #include <drivers/serial/serial.h>
+#include <boot/bootloader_interface/generic_bootloader.h>
 #include <ACPI/acpi_bgrt.h>
 #include "acpi_priv.h"
 
@@ -39,16 +40,11 @@ static int acpi_checksum(void *ptr, size_t len) {
 }
 
 static void *acpi_get_rsdp(void) {
-    extern volatile struct limine_rsdp_request rsdp_request;
+    if (!g_gbi.rsdp_address) {
+        ke_panic(NULL, "ACPI: No RSDP response from bootloader");
+    }
 
-    if (!rsdp_request.response) {
-            ke_panic(NULL, "ACPI: No RSDP response from bootloader");
-        }
-    if (!rsdp_request.response->address) {
-            ke_panic(NULL, "ACPI: Invalid RSDP address from bootloader");
-        }
-
-    return rsdp_request.response->address;
+    return (void *)g_gbi.rsdp_address;
 }
 
 struct acpi_sdt *acpi_find_sdt(const char sig[4]) {

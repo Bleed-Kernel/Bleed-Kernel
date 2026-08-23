@@ -1,5 +1,6 @@
 #include <boot/bootlogger/bootlogger.h>
 #include <vendor/limine_bootloader/limine.h>
+#include <boot/bootloader_interface/generic_bootloader.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdarg.h>
@@ -91,20 +92,14 @@ static void newline(void) {
 
 void bconsole_init(void) {
     if (s_ready) return;
+    if (!g_gbi.framebuffer.present || !g_gbi.framebuffer.address) return;
 
-    struct limine_framebuffer_response *resp =
-        (struct limine_framebuffer_response *)framebuffer_request.response;
-    if (!resp || resp->framebuffer_count == 0) return;
+    s_fb      = (volatile uint32_t *)(uintptr_t)g_gbi.framebuffer.address;
+    s_width   = (uint32_t)g_gbi.framebuffer.width;
+    s_height  = (uint32_t)g_gbi.framebuffer.height;
 
-    struct limine_framebuffer *fb = resp->framebuffers[0];
-    if (!fb || !fb->address)      return;
-
-    s_fb      = (volatile uint32_t *)(uintptr_t)fb->address;
-    s_width   = (uint32_t)fb->width;
-    s_height  = (uint32_t)fb->height;
-
-    if (fb->bpp != 32) return;
-    s_pitch32 = (uint32_t)(fb->pitch / 4);
+    if (g_gbi.framebuffer.bpp != 32) return;
+    s_pitch32 = (uint32_t)(g_gbi.framebuffer.pitch / 4);
 
     if ((s_pitch32 * s_height) > MAX_BACKBUFFER_WORDS) return;
 

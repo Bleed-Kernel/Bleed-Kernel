@@ -1,19 +1,16 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
-#include <vendor/limine_bootloader/limine.h>
-
-extern volatile struct limine_memmap_request memmap_request;
-extern volatile struct limine_hhdm_request hhdm_request;
+#include <boot/bootloader_interface/generic_bootloader.h>
 
 typedef uintptr_t paddr_t;
 
 static inline void *paddr_to_vaddr(paddr_t p) {
-    return (void *)(p + hhdm_request.response->offset);
+    return (void *)(p + g_gbi.hhdm_offset);
 }
 
 static inline paddr_t vaddr_to_paddr(void *v) {
-    return (paddr_t)((uintptr_t)v - hhdm_request.response->offset);
+    return (paddr_t)((uintptr_t)v - g_gbi.hhdm_offset);
 }
 
 typedef struct bitmap_entry {

@@ -1,34 +1,32 @@
 #include <stdio.h>
-#include <vendor/limine_bootloader/limine.h>
+#include <boot/bootloader_interface/generic_bootloader.h>
 #include <fs/vfs.h>
 #include <boot/sysinfo/sysinfo.h>
 #include <mm/kalloc.h>
 #include <ansii.h>
 
-extern volatile struct limine_memmap_request memmap_request;
-
 system_memory_info_t *get_system_memory_info(){
-    if (!memmap_request.response) kprintf(LOG_ERROR "No Memory Map from Limine, How did you get here?");
+    if (g_gbi.memmap_entry_count == 0) kprintf(LOG_ERROR "No Memory Map from Limine, How did you get here?");
     system_memory_info_t *memory_table = kmalloc(sizeof(system_memory_info_t));
     if (!memory_table) return NULL;
 
     uint64_t usable = 0;
     uint64_t reserved = 0;
     uint64_t faulty = 0;
-    
-    for (uint64_t i = 0; i < memmap_request.response->entry_count; i++){
-        struct limine_memmap_entry* entry = memmap_request.response->entries[i];
+
+    for (size_t i = 0; i < g_gbi.memmap_entry_count; i++){
+        gbi_memmap_entry_t *entry = &g_gbi.memmap[i];
 
         switch (entry->type){
-            case LIMINE_MEMMAP_USABLE:
+            case GBI_MEMMAP_USABLE:
                 usable += entry->length;
                 break;
-            case LIMINE_MEMMAP_ACPI_TABLES:
-            case LIMINE_MEMMAP_ACPI_NVS:
-            case LIMINE_MEMMAP_EXECUTABLE_AND_MODULES:
+            case GBI_MEMMAP_ACPI_RECLAIMABLE:
+            case GBI_MEMMAP_ACPI_NVS:
+            case GBI_MEMMAP_KERNEL_AND_MODULES:
                 reserved += entry->length;
                 break;
-            case LIMINE_MEMMAP_BAD_MEMORY:
+            case GBI_MEMMAP_BAD_MEMORY:
                 faulty += entry->length;
                 break;
             default:

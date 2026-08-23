@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <vendor/limine_bootloader/limine.h>
+#include <boot/bootloader_interface/generic_bootloader.h>
 #include <boot/bootlogger/bootlogger.h>
 #include <drivers/serial/serial.h>
 #include <kernel/bootargs.h>
@@ -48,10 +48,6 @@
 #include <syscalls/syscall.h>
 #include <kernel/kmain.h>
 #include <kernel/exception/panic.h>
-
-extern volatile struct limine_module_request module_request;
-extern volatile struct limine_rsdp_request rsdp_request;
-extern volatile struct limine_executable_cmdline_request cmdline_request;
 
 // to be clear this is used when its too early for the kernel to properly panic
 // realistically, it should never run.
@@ -115,15 +111,15 @@ void init_ramdisk(){
     BLOG_OK("Root Mounted");
 
     BLOG_INFO("Locating initrd from Bootloader");
-    if (!module_request.response || module_request.response->module_count == 0){
+    if (g_gbi.module_count == 0){
         ke_panic(NULL, "Bootloader Modules Empty, Initrd is missing");
         return;
     }
     BLOG_OK("Located initrd");
 
     BLOG_INFO("Attempting to Extract initrd");
-    struct limine_file* initrd = module_request.response->modules[0];
-    tar_extract(initrd->address, initrd->size);
+    gbi_module_t *initrd = &g_gbi.modules[0];
+    tar_extract((void *)initrd->address, initrd->size);
     BLOG_OK("initrd extracted successfully");
 
     BLOG_INFO("Loading Kernel Resources");
@@ -308,7 +304,9 @@ bool init_userspace(){
 __attribute__((noreturn))
 void kmain(void){
     asm volatile("cli");
-    bootargs_init(cmdline_request.response->cmdline);
+    gbi_init();
+
+    bootargs_init(g_gbi.cmdline);
     serial_init();
 
     if (bootargs_has("verbose")){

@@ -1,4 +1,4 @@
-#include <vendor/limine_bootloader/limine.h>
+#include <boot/bootloader_interface/generic_bootloader.h>
 #include <drivers/framebuffer/framebuffer.h>
 #include <drivers/framebuffer/blit.h>
 #include <devices/type/tty_device.h>
@@ -8,26 +8,29 @@
 #include <stdbool.h>
 #include <ansii.h>
 
-extern volatile struct limine_framebuffer_request framebuffer_request;
-
 void *framebuffer_get_addr(int idx) {
-    return framebuffer_request.response->framebuffers[idx]->address;
+    (void)idx;
+    return (void *)g_gbi.framebuffer.address;
 }
 
 uint64_t framebuffer_get_pitch(int idx) {
-    return framebuffer_request.response->framebuffers[idx]->pitch;
+    (void)idx;
+    return g_gbi.framebuffer.pitch;
 }
 
 uint64_t framebuffer_get_width(int idx) {
-    return framebuffer_request.response->framebuffers[idx]->width;
+    (void)idx;
+    return g_gbi.framebuffer.width;
 }
 
 uint64_t framebuffer_get_height(int idx) {
-    return framebuffer_request.response->framebuffers[idx]->height;
+    (void)idx;
+    return g_gbi.framebuffer.height;
 }
 
 uint64_t framebuffer_get_bpp(int idx) {
-    return framebuffer_request.response->framebuffers[idx]->bpp;
+    (void)idx;
+    return g_gbi.framebuffer.bpp;
 }
 
 static void fb_scrollback_ensure(fb_console_t *fb) {

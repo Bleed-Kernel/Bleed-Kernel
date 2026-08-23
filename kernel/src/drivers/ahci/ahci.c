@@ -14,17 +14,15 @@
 #include <ansii.h>
 #include <string.h>
 #include <stdio.h>
-#include <vendor/limine_bootloader/limine.h>
+#include <boot/bootloader_interface/generic_bootloader.h>
 #include <cpu/control_registers.h>
 
 #define ACHI_UPDATE_CMD_REG 0x80
 #define AHCI_LBA_MODE       0x40
 
-extern volatile struct limine_hhdm_request hhdm_request;
-
 // offset helper
 static inline uint64_t ahci_hhdm_offset(void) {
-    return hhdm_request.response->offset;
+    return g_gbi.hhdm_offset;
 }
 
 #define PHYS(vptr)   ((uint64_t)(uintptr_t)(vptr) - ahci_hhdm_offset())

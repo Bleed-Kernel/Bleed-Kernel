@@ -12,12 +12,13 @@
 #include <string.h>
 #include <stdio.h>
 #include <vendor/limine_bootloader/limine.h>
+#include <boot/bootloader_interface/generic_bootloader.h>
 #include <cpu/control_registers.h>
 
 extern volatile struct limine_hhdm_request hhdm_request;
 
 static inline uint64_t nvme_hhdm_offset(void) {
-    return hhdm_request.response->offset;
+    return g_gbi.hhdm_offset;
 }
 
 #define PHYS(vptr)  ((uint64_t)(uintptr_t)(vptr) - nvme_hhdm_offset())

@@ -1,4 +1,4 @@
-#include <vendor/limine_bootloader/limine.h>
+#include <boot/bootloader_interface/generic_bootloader.h>
 #include <drivers/serial/serial.h>
 #include <mm/pmm.h>
 #include <stdio.h>
@@ -22,11 +22,10 @@
 static bitmap_entry_t *bitmap_head = NULL;
 
 uintptr_t get_max_paddr(void) {
-    struct limine_memmap_response *mmap = memmap_request.response;
     uint64_t max = 0;
-    for (uint64_t i = 0; i < mmap->entry_count; i++) {
-        struct limine_memmap_entry *e = mmap->entries[i];
-        if (e->type != LIMINE_MEMMAP_USABLE) continue;
+    for (size_t i = 0; i < g_gbi.memmap_entry_count; i++) {
+        gbi_memmap_entry_t *e = &g_gbi.memmap[i];
+        if (e->type != GBI_MEMMAP_USABLE) continue;
         uint64_t end = e->base + e->length;
         if (end > max) max = end;
     }
@@ -34,11 +33,10 @@ uintptr_t get_max_paddr(void) {
 }
 
 size_t paging_get_usable_mem_size(void) {
-    struct limine_memmap_response *mmap = memmap_request.response;
     size_t bytes = 0;
-    for (size_t i = 0; i < mmap->entry_count; i++) {
-        if (mmap->entries[i]->type == LIMINE_MEMMAP_USABLE)
-            bytes += mmap->entries[i]->length;
+    for (size_t i = 0; i < g_gbi.memmap_entry_count; i++) {
+        if (g_gbi.memmap[i].type == GBI_MEMMAP_USABLE)
+            bytes += g_gbi.memmap[i].length;
     }
     return bytes;
 }
@@ -56,14 +54,11 @@ static void paging_mark_entry_available(bitmap_entry_t *entry, size_t start, siz
 }
 
 uint8_t pmm_init(void) {
-    struct limine_memmap_response *mmap = memmap_request.response;
-    struct limine_hhdm_response   *hhdm = hhdm_request.response;
-
     bitmap_entry_t **prev_tail = &bitmap_head;
 
-    for (uint64_t i = 0; i < mmap->entry_count; i++) {
-        struct limine_memmap_entry *region = mmap->entries[i];
-        if (region->type != LIMINE_MEMMAP_USABLE)
+    for (size_t i = 0; i < g_gbi.memmap_entry_count; i++) {
+        gbi_memmap_entry_t *region = &g_gbi.memmap[i];
+        if (region->type != GBI_MEMMAP_USABLE)
             continue;
 
         uintptr_t region_base = PAGE_ALIGN_UP(region->base);
@@ -83,7 +78,7 @@ uint8_t pmm_init(void) {
             continue;
         }
 
-        bitmap_entry_t *bm = (bitmap_entry_t *)(region_base + hhdm->offset);
+        bitmap_entry_t *bm = (bitmap_entry_t *)(region_base + g_gbi.hhdm_offset);
 
         *prev_tail       = bm;
         bm->next_entry   = NULL;
