@@ -1,4 +1,4 @@
-# The Bleed Kernel by Mellurboo
+# The Bleed Kernel by Isabella Wilson
 An Operating System Kernel for x86_64 Processors designed as just a passion project. The Bleed Kernel focuses on modern hardware. however, has no interest in anything other than 64 bit.
 
 > [!CAUTION]
