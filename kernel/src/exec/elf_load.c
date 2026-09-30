@@ -28,7 +28,6 @@ int elf_setup_user_args(task_t *task, int argc, const char *const argv[]) {
     if (!task || argc < 0 || argc > EXEC_MAX_ARGS) return -1;
     if (argc > 0 && !argv) return -1;
 
-    uint64_t argv_user[EXEC_MAX_ARGS + 1];
     uintptr_t tramp_addr = (USER_STACK_TOP - sizeof(exec_exit_trampoline)) & ~0xFULL;
     uintptr_t sp = tramp_addr;
     uintptr_t stack_floor = USER_STACK_TOP - USER_STACK_SIZE;
@@ -36,37 +35,40 @@ int elf_setup_user_args(task_t *task, int argc, const char *const argv[]) {
     if (tramp_addr < stack_floor) return -1;
     if (copy_to_user(task, (void *)tramp_addr, exec_exit_trampoline, sizeof(exec_exit_trampoline)) != 0) return -1;
 
+    size_t argv_bytes = (size_t)(argc + 1) * sizeof(uint64_t);
+    uint64_t *argv_user = kmalloc(argv_bytes);
+    if (!argv_user) return -1;
+
     for (int i = argc - 1; i >= 0; i--) {
-        if (!argv[i]) return -1;
+        if (!argv[i]) goto fail;
 
-        size_t len = strlen(argv[i]);
-        if (len == EXEC_MAX_ARG_LEN) return -1;
-        len += 1;
+        size_t len = strlen(argv[i]) + 1;
 
-        if (sp < len) return -1;
+        // strings are packed downward from the trampoline, never let one cross the stack floor
+        if (sp - stack_floor < len) goto fail;
         sp -= len;
         sp &= ~0x7ULL;
 
-        if (sp < stack_floor) return -1;
-        if (copy_to_user(task, (void *)sp, argv[i], len) != 0) return -1;
+        if (sp < stack_floor) goto fail;
+        if (copy_to_user(task, (void *)sp, argv[i], len) != 0) goto fail;
 
         argv_user[i] = (uint64_t)sp;
     }
 
     argv_user[argc] = 0;
 
-    size_t argv_bytes = (size_t)(argc + 1) * sizeof(uint64_t);
     size_t frame_bytes = sizeof(uint64_t) + argv_bytes;
-    if (sp < frame_bytes) return -1;
+    if (sp - stack_floor < frame_bytes) goto fail;
 
     uintptr_t frame_base = (sp - frame_bytes) & ~0xFULL;
     uintptr_t user_argv = frame_base + sizeof(uint64_t);
-    if (frame_base < stack_floor) return -1;
-    if (user_argv + argv_bytes > sp) return -1;
+    if (frame_base < stack_floor) goto fail;
+    if (user_argv + argv_bytes > sp) goto fail;
 
     uint64_t ret_addr = (uint64_t)tramp_addr;
-    if (copy_to_user(task, (void *)frame_base, &ret_addr, sizeof(ret_addr)) != 0) return -1;
-    if (copy_to_user(task, (void *)user_argv, argv_user, argv_bytes) != 0) return -1;
+    if (copy_to_user(task, (void *)frame_base, &ret_addr, sizeof(ret_addr)) != 0) goto fail;
+    if (copy_to_user(task, (void *)user_argv, argv_user, argv_bytes) != 0) goto fail;
+    kfree(argv_user);
 
     sp = frame_base;
 
@@ -75,6 +77,10 @@ int elf_setup_user_args(task_t *task, int argc, const char *const argv[]) {
     task->context->rsi = (uint64_t)user_argv;
 
     return 0;
+
+fail:
+    kfree(argv_user);
+    return -1;
 }
 
 int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){

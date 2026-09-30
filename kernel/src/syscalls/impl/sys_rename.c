@@ -18,24 +18,17 @@ int sys_rename(const char *user_oldpath, const char *user_newpath) {
     if (!caller)
         return -ESRCH;
 
-    if (copy_from_user(caller, oldpath, user_oldpath, sizeof(oldpath)) != 0)
-        return -EFAULT;
-    if (copy_from_user(caller, newpath, user_newpath, sizeof(newpath)) != 0)
-        return -EFAULT;
-    oldpath[sizeof(oldpath) - 1] = '\0';
-    newpath[sizeof(newpath) - 1] = '\0';
-
-    size_t oldlen = 0;
-    while (oldlen < sizeof(oldpath) && oldpath[oldlen] != '\0')
-        oldlen++;
-    if (oldlen == sizeof(oldpath))
+    long oldlen = copy_user_path(caller, user_oldpath, oldpath, sizeof(oldpath));
+    if (oldlen == -2)
         return -E2BIG;
+    if (oldlen < 0)
+        return -EFAULT;
 
-    size_t newlen = 0;
-    while (newlen < sizeof(newpath) && newpath[newlen] != '\0')
-        newlen++;
-    if (newlen == sizeof(newpath))
+    long newlen = copy_user_path(caller, user_newpath, newpath, sizeof(newpath));
+    if (newlen == -2)
         return -E2BIG;
+    if (newlen < 0)
+        return -EFAULT;
 
     int r = vfs_rename(oldpath, newpath);
     if (r >= 0)

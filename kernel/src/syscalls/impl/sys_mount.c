@@ -26,24 +26,20 @@ int sys_mount(const char *user_source,
     // src path copy
     char ksource[256];
     memset(ksource, 0, sizeof(ksource));
-    if (copy_from_user(caller, ksource, user_source, sizeof(ksource)) != 0)
-        return -EFAULT;
-    ksource[sizeof(ksource) - 1] = '\0';
-
-    size_t slen = strnlen(ksource, sizeof(ksource));
-    if (slen == sizeof(ksource))
+    long slen = copy_user_path(caller, user_source, ksource, sizeof(ksource));
+    if (slen == -2)
         return -ENAMETOOLONG;
+    if (slen < 0)
+        return -EFAULT;
 
     // target
     char ktarget[256];
     memset(ktarget, 0, sizeof(ktarget));
-    if (copy_from_user(caller, ktarget, user_target, sizeof(ktarget)) != 0)
-        return -EFAULT;
-    ktarget[sizeof(ktarget) - 1] = '\0';
-
-    size_t tlen = strnlen(ktarget, sizeof(ktarget));
-    if (tlen == sizeof(ktarget))
+    long tlen = copy_user_path(caller, user_target, ktarget, sizeof(ktarget));
+    if (tlen == -2)
         return -ENAMETOOLONG;
+    if (tlen < 0)
+        return -EFAULT;
 
     /* Only block devices under /dev/ are valid sources */
     if (strncmp(ksource, "/dev/", 5) != 0)

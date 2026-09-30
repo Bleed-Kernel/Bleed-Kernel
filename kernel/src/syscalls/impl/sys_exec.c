@@ -45,74 +45,16 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
         return -ESRCH;
     }
 
-    char kpath[EXEC_MAX_ARG_LEN];
+    char kpath[EXEC_MAX_PATH_LEN];
     for (size_t i = 0; i < sizeof(kpath); i++) kpath[i] = 0;
     if (copy_user_string(task, (const char *)user_path_ptr, kpath, sizeof(kpath)) != 0) {
         return -EFAULT;
     }
 
-    const char *argv_kernel[EXEC_MAX_ARGS];
-    char *argv_owned[EXEC_MAX_ARGS];
-    for (size_t i = 0; i < EXEC_MAX_ARGS; i++) {
-        argv_kernel[i] = NULL;
-        argv_owned[i] = NULL;
-    }
-
-    int argc = 1;
-    argv_kernel[0] = kpath;
-
-    int use_extended = user_argc > 0 &&
-                       user_argc <= EXEC_MAX_ARGS &&
-                       user_ptr_valid(user_argv_ptr);
-
-    int parse_error = 0;
-    if (use_extended) {
-        for (uint64_t i = 0; i < user_argc; i++) {
-            uint64_t user_arg_ptr = 0;
-            if (copy_from_user(task,
-                               &user_arg_ptr,
-                               (const void *)(user_argv_ptr + i * sizeof(uint64_t)),
-                               sizeof(user_arg_ptr)) != 0)
-                parse_error = 1;
-
-            if (!parse_error && !user_ptr_valid(user_arg_ptr))
-                parse_error = 1;
-
-            if (parse_error)
-                break;
-
-            argv_owned[i] = kmalloc(EXEC_MAX_ARG_LEN);
-            if (!argv_owned[i]) {
-                for (size_t j = 0; j < EXEC_MAX_ARGS; j++) {
-                    if (argv_owned[j])
-                        kfree(argv_owned[j]);
-                }
-                return -ENOMEM;
-            }
-
-            if (copy_user_string(task,
-                                 (const char *)user_arg_ptr,
-                                 argv_owned[i],
-                                 EXEC_MAX_ARG_LEN) != 0) {
-                for (size_t j = 0; j < EXEC_MAX_ARGS; j++) {
-                    if (argv_owned[j])
-                        kfree(argv_owned[j]);
-                }
-                return -EFAULT;
-            }
-
-            argv_kernel[i] = argv_owned[i];
-        }
-        if (!parse_error)
-            argc = (int)user_argc;
-    }
-    if (parse_error) {
-        for (size_t i = 0; i < EXEC_MAX_ARGS; i++) {
-            if (argv_owned[i])
-                kfree(argv_owned[i]);
-        }
-        return -EFAULT;
-    }
+    exec_args_t args;
+    long args_err = exec_args_copy_from_user(task, user_argv_ptr, user_argc, kpath, &args);
+    if (args_err < 0)
+        return args_err;
 
     long ret = -EIO;
     paddr_t new_cr3 = 0;
@@ -179,7 +121,7 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     ctx->rflags |= 0x200ULL;
     ctx->rax = 0;
 
-    if (elf_setup_user_args(task, argc, argv_kernel) != 0) {
+    if (elf_setup_user_args(task, args.argc, (const char *const *)args.argv) != 0) {
         ret = -EFAULT;
         goto rollback_task;
     }
@@ -214,10 +156,7 @@ fail_new_cr3:
     if (new_cr3)
         paging_destroy_address_space(new_cr3);
 done:
-    for (size_t i = 0; i < EXEC_MAX_ARGS; i++) {
-        if (argv_owned[i])
-            kfree(argv_owned[i]);
-    }
+    exec_args_free(&args);
     if (ret < 0) {
         serial_printf(LOG_ERROR "exec failed pid=%u err=%d path=%s\n",
                       (unsigned)task->id,

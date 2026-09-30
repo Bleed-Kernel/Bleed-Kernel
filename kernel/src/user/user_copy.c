@@ -92,3 +92,45 @@ int copy_user_string(task_t *caller, const char *user_src, char *kernel_dst, siz
     kernel_dst[dst_len - 1] = '\0';
     return -1;
 }
+
+
+/// @brief length of a user string, scanned a page at a time instead of byte by byte
+/// @return length without the terminator, -1 if unmapped, -2 if no terminator within max_len
+long user_strnlen(task_t *caller, const char *user_src, size_t max_len) {
+    if (!caller || !user_src) return -1;
+
+    char chunk[256];
+    size_t scanned = 0;
+
+    while (scanned < max_len) {
+        uintptr_t addr = (uintptr_t)user_src + scanned;
+        size_t to_page_end = PAGE_SIZE - (addr & (PAGE_SIZE - 1));
+        size_t n = to_page_end < sizeof(chunk) ? to_page_end : sizeof(chunk);
+        if (n > max_len - scanned)
+            n = max_len - scanned;
+
+        if (copy_from_user(caller, chunk, (const void *)addr, n) != 0)
+            return -1;
+
+        for (size_t i = 0; i < n; i++) {
+            if (chunk[i] == '\0')
+                return (long)(scanned + i);
+        }
+        scanned += n;
+    }
+
+    return -2;
+}
+
+/// @brief copy a user string into a fixed kernel buffer, only touching bytes up to its terminator
+/// @return string length, -1 if unmapped, -2 if it does not fit in dst_len
+long copy_user_path(task_t *caller, const char *user_src, char *kernel_dst, size_t dst_len) {
+    if (!kernel_dst || dst_len == 0) return -1;
+
+    long len = user_strnlen(caller, user_src, dst_len);
+    if (len < 0) return len;
+
+    if (copy_from_user(caller, kernel_dst, user_src, (size_t)len + 1) != 0) return -1;
+    kernel_dst[len] = '\0';
+    return len;
+}

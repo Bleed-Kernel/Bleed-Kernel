@@ -19,13 +19,11 @@ int sys_umount2(const char *user_target, int flags) {
 
     char ktarget[256];
     memset(ktarget, 0, sizeof(ktarget));
-    if (copy_from_user(caller, ktarget, user_target, sizeof(ktarget)) != 0)
-        return -EFAULT;
-    ktarget[sizeof(ktarget) - 1] = '\0';
-
-    size_t tlen = strnlen(ktarget, sizeof(ktarget));
-    if (tlen == sizeof(ktarget))
+    long tlen = copy_user_path(caller, user_target, ktarget, sizeof(ktarget));
+    if (tlen == -2)
         return -ENAMETOOLONG;
+    if (tlen < 0)
+        return -EFAULT;
 
     int r = vfs_umount(ktarget);
     if (r >= 0)

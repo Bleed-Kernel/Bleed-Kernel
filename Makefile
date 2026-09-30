@@ -89,6 +89,13 @@ USER_REPOS := \
 USER_BIN_DIR := external/
 INITRD_BIN := initrd/bin
 
+# build user programs from local checkouts instead of cloning/pulling GitHub,
+# e.g. `make run USERPROG_SRC=..` picks up ../Verdict-Shell, ../Bleed-coreutils and ../blibc.
+# repos without a local checkout still come from GitHub
+
+#there is also make runlocal for this which is nice
+USERPROG_SRC ?=
+
 .PHONY: all
 all: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 
@@ -143,7 +150,17 @@ userprogs:
 		repo=$${entry%% *}; \
 		name=$${entry##* }; \
 		dir=$(USER_BIN_DIR)/$$name; \
-		if [ ! -d "$$dir" ]; then \
+		local_dir=""; blibc_arg=""; \
+		if [ -n "$(USERPROG_SRC)" ]; then \
+			local_dir=$$(find "$(USERPROG_SRC)" -maxdepth 1 -type d -iname "$${repo##*/}" | head -n 1); \
+			if [ -d "$(USERPROG_SRC)/blibc" ]; then \
+				blibc_arg="BLIBC_DIR=$$(cd "$(USERPROG_SRC)/blibc" && pwd)"; \
+			fi; \
+		fi; \
+		if [ -n "$$local_dir" ]; then \
+			echo "[USER] Using local checkout $$local_dir for $$name"; \
+			dir=$$local_dir; \
+		elif [ ! -d "$$dir" ]; then \
 			echo "[USER] Cloning $$name from $$repo"; \
 			git clone "$$repo" "$$dir"; \
 		else \
@@ -151,7 +168,7 @@ userprogs:
 			(cd "$$dir" && git pull --rebase); \
 		fi; \
 		echo "[USER] Preparing blibc for $$name"; \
-		$(MAKE) -s -C "$$dir" blibc $(USERPROG_TOOLCHAIN); \
+		$(MAKE) -s -C "$$dir" blibc $(USERPROG_TOOLCHAIN) $$blibc_arg; \
 		echo "[USER] Building $$name"; \
 		$(MAKE) -s -C "$$dir" $(USERPROG_TOOLCHAIN); \
 		if [ -f "$$dir/bin/$$name" ]; then \
@@ -205,8 +222,7 @@ repack: limine/limine $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE)
 	$(build_initrd_tar)
 	$(build_iso)
 
-.PHONY: run
-run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+define run_qemu
 	qemu-system-x86_64 \
 		-cdrom $(IMAGE_NAME).iso \
 		$(if $(filter Darwinarm64,$(UNAME_S)$(UNAME_M)), \
@@ -221,6 +237,20 @@ run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0
+endef
+
+.PHONY: run
+run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+	$(run_qemu)
+
+# boot the existing iso as-is: no rebuild, no clone or pull, pair with `make repack` to avoid git entirely
+.PHONY: runlocal
+runlocal: $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+	@if [ ! -f $(IMAGE_NAME).iso ]; then \
+		echo "ERROR: $(IMAGE_NAME).iso not found, run 'make repack' first"; \
+		exit 1; \
+	fi
+	$(run_qemu)
 
 .PHONY: run-uefi
 run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)

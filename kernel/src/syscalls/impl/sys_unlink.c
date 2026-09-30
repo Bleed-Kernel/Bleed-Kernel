@@ -16,15 +16,11 @@ int sys_unlink(const char *user_path) {
     if (!caller)
         return -ESRCH;
 
-    if (copy_from_user(caller, kpath, user_path, sizeof(kpath)) != 0)
-        return -EFAULT;
-    kpath[sizeof(kpath) - 1] = '\0';
-
-    size_t plen = 0;
-    while (plen < sizeof(kpath) && kpath[plen] != '\0')
-        plen++;
-    if (plen == sizeof(kpath))
+    long plen = copy_user_path(caller, user_path, kpath, sizeof(kpath));
+    if (plen == -2)
         return -E2BIG;
+    if (plen < 0)
+        return -EFAULT;
 
     int r = vfs_unlink(kpath);
     if (r >= 0)
