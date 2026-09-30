@@ -178,13 +178,14 @@ void framebuffer_put_char(fb_console_t *fb, uint32_t c) {
     size_t max_cols = fb->width / fb->font->width;
     size_t max_rows = fb->height / fb->font->height;
 
+    uint16_t idx = 0;
     switch (c) {
     case '\n': fb->cursor_x = 0; fb->cursor_y++; break;
     case '\r': fb->cursor_x = 0; break;
     case '\b': if (fb->cursor_x) fb->cursor_x--; break;
     case '\t': fb->cursor_x = (fb->cursor_x + 8) & ~7; break;
     default:
-        uint16_t idx = psf_lookup_glyph(fb->font, c);
+        idx = psf_lookup_glyph(fb->font, c);
         framebuffer_render_glyph_index(fb, fb->cursor_y, fb->cursor_x, idx, fb->fg, fb->bg);
         fb->cursor_x++;
         break;

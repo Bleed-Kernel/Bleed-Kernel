@@ -21,6 +21,13 @@ void serial_write_n(const char *buf, size_t len);
 /// @param value uint value
 void serial_write_hex(uint64_t value);
 
+/// @brief total bytes ever emitted to serial
+size_t serial_log_size(void);
+
+/// @brief copy out of the serial log ring
+/// @return bytes copied
+size_t serial_log_read(char *dst, size_t len, size_t offset);
+
 /// @brief Write a formatted string to COM1
 /// @param fmt formatted string
 /// @param  VARDIC

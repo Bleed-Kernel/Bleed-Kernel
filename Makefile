@@ -162,14 +162,14 @@ userprogs:
 		fi; \
 	done
 
-.PHONY: initrd
-initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs
+define build_initrd_tar
 	@mkdir -p initrd
 	@find initrd -name '._*' -delete
 	@find initrd -name '.DS_Store' -delete
 	@COPYFILE_DISABLE=1 tar -cf initrd/initrd.tar initrd/*/* initrd/*.*
+endef
 
-$(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
+define build_iso
 	@rm -rf iso_root
 	@mkdir -p iso_root/boot
 	@cp $(KERNEL_BIN) iso_root/boot/
@@ -190,14 +190,28 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 		--protective-msdos-label \
 		iso_root -o $(IMAGE_NAME).iso 2>/dev/null
 	@rm -rf iso_root
+endef
+
+.PHONY: initrd
+initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs
+	$(build_initrd_tar)
+
+$(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
+	$(build_iso)
+
+# without cloning/pulling/building the user programs.
+.PHONY: repack
+repack: limine/limine $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE)
+	$(build_initrd_tar)
+	$(build_iso)
 
 .PHONY: run
 run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	qemu-system-x86_64 \
 		-cdrom $(IMAGE_NAME).iso \
 		$(if $(filter Darwinarm64,$(UNAME_S)$(UNAME_M)), \
-			-accel tcg -cpu max -display cocoa, \
-			--enable-kvm -cpu host -display sdl) \
+			-accel tcg,thread=multi,tb-size=1024 -cpu max -display cocoa, \
+			--enable-kvm -display sdl) \
 		-boot d \
 		-m $(MEMSZ) \
 		-serial stdio \
@@ -214,8 +228,8 @@ run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		-cdrom $(IMAGE_NAME).iso \
 		$(if $(filter Darwinarm64,$(UNAME_S)$(UNAME_M)), \
-			-accel tcg -cpu max -display cocoa, \
-			--enable-kvm -cpu host -display sdl) \
+			-accel tcg,thread=multi,tb-size=1024 -cpu max, -display cocoa, \
+			--enable-kvm -display sdl) \
 		-boot d \
 		-m $(MEMSZ) \
 		-serial stdio \
@@ -227,13 +241,14 @@ run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-device nvme,serial=bleed-nvme-1,drive=nvm0
 
 #apple silicon emulation sucks, if you are getting performance issues, please test it on an x86_64 machine before submitting an issue!
+#SMAP and SMEP are known to be funny on mac, it may not emulate it at all, just be careful but bleed should handle it.
 .PHONY: run-mac
 run-mac: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		-cdrom $(IMAGE_NAME).iso \
 		-accel tcg,thread=multi,tb-size=1024 \
-		-cpu qemu64 \
+		-cpu max \
 		-m $(MEMSZ) \
 		-boot d \
 		-serial stdio \
@@ -249,17 +264,23 @@ define create_ext2_disk
     @echo "[DISK] Creating $(1) ($(2))"
     $(eval TMP_DIR := .tmp_dir_$(1))
     $(eval TMP_IMG := .tmp_img_$(1))
-    @export PATH=$$PATH:/sbin:/usr/sbin; \
+    @export PATH=$$PATH:/sbin:/usr/sbin:/opt/homebrew/opt/e2fsprogs/sbin:/usr/local/opt/e2fsprogs/sbin; \
+    if ! command -v mkfs.ext2 > /dev/null 2>&1; then \
+        echo "[DISK] ERROR: mkfs.ext2 not found. On macOS: brew install e2fsprogs"; \
+        exit 1; \
+    fi; \
     dd if=/dev/zero of=$(1) bs=1M count=$(DISK_SIZE_MB) status=none; \
     if [ "$(2)" = "gpt" ]; then \
         sgdisk -n 1:2048:0 -t 1:8300 $(1) > /dev/null 2>&1; \
+    elif [ "$$(uname)" = "Darwin" ]; then \
+        echo "2048,$$(($(DISK_SIZE_MB) * 2048 - 2048)),0x83,-" | fdisk -y -r $(1) > /dev/null 2>&1; \
     else \
         { printf 'o\nn\np\n1\n2048\n\nw\n'; } | fdisk $(1) > /dev/null 2>&1; \
     fi; \
     mkdir -p $(TMP_DIR); \
     echo "$(3)" > $(TMP_DIR)/hello.txt; \
     truncate -s $$(($(DISK_SIZE_MB) - 1))M $(TMP_IMG); \
-    mkfs.ext2 -F -d $(TMP_DIR) $(TMP_IMG) > /dev/null 2>&1; \
+    mkfs.ext2 -F -d $(TMP_DIR) $(TMP_IMG); \
     dd if=$(TMP_IMG) of=$(1) bs=1M seek=1 conv=notrunc status=none; \
     rm -rf $(TMP_IMG) $(TMP_DIR)
 endef
@@ -272,6 +293,8 @@ define create_exfat_disk
     dd if=/dev/zero of=$(1) bs=1M count=$(DISK_SIZE_MB) status=none; \
     if [ "$(2)" = "gpt" ]; then \
         sgdisk -n 1:2048:0 -t 1:0700 $(1) > /dev/null 2>&1; \
+    elif [ "$$(uname)" = "Darwin" ]; then \
+        echo "2048,$$(($(DISK_SIZE_MB) * 2048 - 2048)),0x07,-" | fdisk -y -r $(1) > /dev/null 2>&1; \
     else \
         { printf 'o\nn\np\n1\n2048\n\nt\n7\nw\n'; } | fdisk $(1) > /dev/null 2>&1; \
     fi; \

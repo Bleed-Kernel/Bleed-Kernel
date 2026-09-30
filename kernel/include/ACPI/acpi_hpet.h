@@ -7,17 +7,18 @@
 #define femtosecondsPerMicrosecond  1000000000
 #define femtosecondsPerNanosecond   1000
 
-#define HPET_MAINCOUNTER_ENABLE 0b1
-#define HPET_LEGACY_REPLACEMENT 0b01
-#define HPET_TIMER_INTERUPTS    0b100
-#define HPET_TIMER_PERIODIC     0b1000
+#define HPET_MAINCOUNTER_ENABLE   (1u << 0)
+#define HPET_LEGACY_REPLACEMENT   (1u << 1)
+#define HPET_TIMER_INTERRUPTS     (1u << 2)
+#define HPET_TIMER_PERIODIC       (1u << 3)
+#define HPET_TIMER_VAL_SET        (1u << 6)
 
 #define HPET_MAIN_COUNTER       0xF0
 
 #define HPET_ENABLE_CNF   (1 << 0)
 #define HPET_LEGACY_CNF   (1 << 1)
 
-extern volatile void* address;
+extern volatile uint64_t* address;
 
 struct acpi_hpet{
     struct acpi_sdt header;
@@ -41,9 +42,7 @@ struct acpi_hpet{
     uint8_t     page_protection;
 }__attribute__((packed));
 
-static inline uint64_t hpet_read_counter(void) {
-    return *(volatile uint64_t *)((uintptr_t)address + HPET_MAIN_COUNTER);
-}
+uint64_t hpet_read_counter(void);
 
 uint64_t hpet_get_femtoseconds();
 

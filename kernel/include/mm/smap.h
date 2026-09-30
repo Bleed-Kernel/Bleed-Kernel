@@ -4,10 +4,14 @@
 
 int SMAP_init(void);
 
+extern int smap_supported;
+
 static inline void stac(void){
+    if (!smap_supported) return;
     asm volatile("stac" ::: "cc");
 }
 
 static inline void clac(void){
+    if (!smap_supported) return;
     asm volatile("clac" ::: "cc");
 }

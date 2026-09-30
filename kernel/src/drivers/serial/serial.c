@@ -15,15 +15,22 @@
 
 #define PORT_COM1   0x3F8
 #define SERIAL_TIMEOUT 100000
+#define SERIAL_LOG_SIZE 65536
 
 static int serial_available = 0;
 static spinlock_t serial_lock = {0};
+
+// everything emitted gets kept here so /dev/serial can read it back
+static char serial_log_buffer[SERIAL_LOG_SIZE];
+static size_t serial_log_total = 0;
 
 static int is_serial_transmit_empty(void) {
     return inb(PORT_COM1 + 5) & 0x20;
 }
 
 static void serial_emit_char(char c) {
+    serial_log_buffer[serial_log_total++ % SERIAL_LOG_SIZE] = c;
+
     if (c == '\n') {
         while (!is_serial_transmit_empty()) { }
         outb(PORT_COM1, '\r');
@@ -111,6 +118,37 @@ void serial_write_n(const char *buf, size_t len) {
     serial_emit_n(buf, len);
     spinlock_release(&serial_lock);
     irq_restore(flags);
+}
+
+/// @brief total bytes ever emitted, used as the log size
+size_t serial_log_size(void) {
+    return serial_log_total;
+}
+
+/// @brief copy out of the serial log, offsets older than the ring are clamped forward
+/// @return bytes copied
+size_t serial_log_read(char *dst, size_t len, size_t offset) {
+    if (!dst || len == 0) return 0;
+
+    unsigned long flags = irq_push();
+    asm volatile("cli" ::: "memory");
+    spinlock_acquire(&serial_lock);
+
+    size_t start = serial_log_total > SERIAL_LOG_SIZE
+                 ? serial_log_total - SERIAL_LOG_SIZE : 0;
+    if (offset < start) offset = start;
+
+    size_t n = 0;
+    if (offset < serial_log_total) {
+        n = serial_log_total - offset;
+        if (n > len) n = len;
+        for (size_t i = 0; i < n; i++)
+            dst[i] = serial_log_buffer[(offset + i) % SERIAL_LOG_SIZE];
+    }
+
+    spinlock_release(&serial_lock);
+    irq_restore(flags);
+    return n;
 }
 
 /// @brief write a hex value to the screen from a uint
