@@ -28,6 +28,7 @@ typedef struct gbi_memmap_entry {
 
 typedef struct gbi_framebuffer {
     uint64_t address;
+    uint64_t phys_address;
     uint32_t width;
     uint32_t height;
     uint32_t pitch;

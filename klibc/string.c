@@ -8,18 +8,24 @@
 /// @param src source
 /// @param n size to evaluate
 /// @return void
+
+typedef uint64_t __attribute__((may_alias, aligned(1))) u64_unaligned_t;
+
 void *memmove(void *dest, const void *src, uint64_t n) {
     uint8_t *pdest = (uint8_t *)dest;
     const uint8_t *psrc = (const uint8_t *)src;
 
-    if (src > dest) {
-        for (uint64_t i = 0; i < n; i++) {
-            pdest[i] = psrc[i];
-        }
-    } else if (src < dest) {
-        for (uint64_t i = n; i > 0; i--) {
-            pdest[i-1] = psrc[i-1];
-        }
+    if (pdest <= psrc || pdest >= psrc + n)
+        return memcpy(dest, src, n);
+        
+    uint64_t i = n;
+    while (i >= 8) {
+        i -= 8;
+        *(u64_unaligned_t *)(pdest + i) = *(const u64_unaligned_t *)(psrc + i);
+    }
+    while (i > 0) {
+        i--;
+        pdest[i] = psrc[i];
     }
 
     return dest;
@@ -44,22 +50,28 @@ int memcmp(const void *s1, const void *s2, uint64_t n) {
 }
 
 void *memcpy(void *dest, const void *src, uint64_t n) {
-    uint8_t *pdest = (uint8_t *)dest;
-    const uint8_t *psrc = (const uint8_t *)src;
+    void *d = dest;
+    uint64_t words = n >> 3;
+    uint64_t tail  = n & 7;
 
-    for (uint64_t i = 0; i < n; i++) {
-        *pdest++ = *psrc++;
-    }
+    asm volatile("cld\n\trep movsq"
+                 : "+D"(d), "+S"(src), "+c"(words) : : "memory", "cc");
+    asm volatile("rep movsb"
+                 : "+D"(d), "+S"(src), "+c"(tail) : : "memory", "cc");
 
     return dest;
 }
 
 void *memset(void *s, int c, uint64_t n) {
-    uint8_t *p = (uint8_t *)s;
+    void *d = s;
+    uint64_t pattern = 0x0101010101010101ULL * (uint8_t)c;
+    uint64_t words = n >> 3;
+    uint64_t tail  = n & 7;
 
-    for (uint64_t i = 0; i < n; i++) {
-        p[i] = (uint8_t)c;
-    }
+    asm volatile("cld\n\trep stosq"
+                 : "+D"(d), "+c"(words) : "a"(pattern) : "memory", "cc");
+    asm volatile("rep stosb"
+                 : "+D"(d), "+c"(tail) : "a"(pattern) : "memory", "cc");
 
     return s;
 }

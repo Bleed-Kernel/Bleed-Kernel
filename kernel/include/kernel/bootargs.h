@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define VALID_BOOTARG_COUNT 11
+
 typedef struct {
     char* key;
     char* value;

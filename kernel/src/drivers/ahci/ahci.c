@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <boot/bootloader_interface/generic_bootloader.h>
 #include <cpu/control_registers.h>
+#include <ACPI/acpi_hpet.h>
 
 #define ACHI_UPDATE_CMD_REG 0x80
 #define AHCI_LBA_MODE       0x40
@@ -54,30 +55,54 @@ static inline void port_write(uint64_t abar, uint8_t port,
     ahci_write(abar, 0x100 + (uint32_t)port * 0x80 + offset, val);
 }
 
+// timed off the HPET, if there is no HPET we fall back to counting spins
+static bool ahci_port_wait_clear(uint64_t abar, uint8_t port, uint32_t reg,
+                                 uint32_t mask, uint64_t timeout_ms) {
+    uint64_t start = hpet_get_femtoseconds();
+    for (uint64_t spins = 0; ; spins++) {
+        if (!(port_read(abar, port, reg) & mask))
+            return true;
+
+        uint64_t now = hpet_get_femtoseconds();
+        if (now) {
+            if (now - start > timeout_ms * femtosecondsPerMillisecond)
+                return false;
+        } else if (spins > timeout_ms * 1000) {
+            return false;
+        }
+        asm volatile("pause");
+    }
+}
+
 // stop/start ports
-static void ahci_port_stop(uint64_t abar, uint8_t port) {
+// returns false if the engine is still running, the HBA may still DMA into
+// whatever buffers the port was last given so they must not be reused
+static bool ahci_port_stop(uint64_t abar, uint8_t port) {
     uint32_t cmd = port_read(abar, port, AHCI_PORT_CMD);
-    cmd &= ~(AHCI_PORT_CMD_ST | AHCI_PORT_CMD_FRE);
+    cmd &= ~AHCI_PORT_CMD_ST;
     port_write(abar, port, AHCI_PORT_CMD, cmd);
 
-    // Wait for CR and FR to clear
-    for (int i = 0; i < 500; i++) {
-        cmd = port_read(abar, port, AHCI_PORT_CMD);
-        if (!(cmd & (AHCI_PORT_CMD_CR | AHCI_PORT_CMD_FR)))
-            return;
-        
-        for (volatile int d = 0; d < 1000; d++);    // arbitrary delay, sure hope processors dont get any faster
-    }
-    serial_printf(LOG_WARN "ahci: port %u stop timeout\n", port);
+    bool stopped = ahci_port_wait_clear(abar, port, AHCI_PORT_CMD,
+                                        AHCI_PORT_CMD_CR, AHCI_STOP_TIMEOUT_MS);
+
+    // FRE may only be cleared once the command list has stopped
+    cmd = port_read(abar, port, AHCI_PORT_CMD);
+    cmd &= ~AHCI_PORT_CMD_FRE;
+    port_write(abar, port, AHCI_PORT_CMD, cmd);
+
+    if (!ahci_port_wait_clear(abar, port, AHCI_PORT_CMD,
+                              AHCI_PORT_CMD_FR, AHCI_STOP_TIMEOUT_MS))
+        stopped = false;
+
+    if (!stopped)
+        serial_printf(LOG_WARN "ahci: port %u stop timeout\n", port);
+    return stopped;
 }
 
 static void ahci_port_start(uint64_t abar, uint8_t port) {
     // wait for the cr to clear
-    for (int i = 0; i < 500; i++) {
-        if (!(port_read(abar, port, AHCI_PORT_CMD) & AHCI_PORT_CMD_CR))
-            break;
-        for (volatile int d = 0; d < 1000; d++);
-    }
+    ahci_port_wait_clear(abar, port, AHCI_PORT_CMD, AHCI_PORT_CMD_CR, AHCI_STOP_TIMEOUT_MS);
+
     uint32_t cmd = port_read(abar, port, AHCI_PORT_CMD);
     cmd |= AHCI_PORT_CMD_FRE | AHCI_PORT_CMD_ST;
     port_write(abar, port, AHCI_PORT_CMD, cmd);
@@ -85,43 +110,66 @@ static void ahci_port_start(uint64_t abar, uint8_t port) {
 
 // wait for idle to clear (a command slot to become available)
 static int ahci_port_wait_idle(uint64_t abar, uint8_t port) {
-    for (int i = 0; i < 100000; i++) {
-        uint32_t tfd = port_read(abar, port, AHCI_PORT_TFD);
-        if (!(tfd & (ATA_DEV_BUSY | ATA_DEV_DRQ)))
-            return 0;
-        for (volatile int d = 0; d < 10; d++);
-    }
+    if (ahci_port_wait_clear(abar, port, AHCI_PORT_TFD,
+                             ATA_DEV_BUSY | ATA_DEV_DRQ, AHCI_IDLE_TIMEOUT_MS))
+        return 0;
     return -1;
 }
 
 static int ahci_port_wait_cmd(uint64_t abar, uint8_t port, uint32_t slot_mask) {
-    for (int i = 0; i < 500000; i++) {
+    uint64_t start = hpet_get_femtoseconds();
+    for (uint64_t spins = 0; ; spins++) {
         uint32_t ci = port_read(abar, port, AHCI_PORT_CI);
-        if (!(ci & slot_mask)) {
-            /* Check for error */
-            uint32_t is = port_read(abar, port, AHCI_PORT_IS);
-            if (is & (1u << 30)) {   /* Task File Error Status */
-                uint32_t tfd = port_read(abar, port, AHCI_PORT_TFD);
-                serial_printf(LOG_ERROR "ahci: port %u cmd error IS=0x%08x TFD=0x%08x\n",
-                              port, is, tfd);
-                port_write(abar, port, AHCI_PORT_IS, is); /* clear */
-                return -1;
-            }
-            return 0;
+        uint32_t is = port_read(abar, port, AHCI_PORT_IS);
+
+        // Check for error, the HBA stops processing so CI never clears
+        if (is & AHCI_PORT_IS_TFES) {
+            uint32_t tfd = port_read(abar, port, AHCI_PORT_TFD);
+            serial_printf(LOG_ERROR "ahci: port %u cmd error IS=0x%08x TFD=0x%08x\n",
+                          port, is, tfd);
+            port_write(abar, port, AHCI_PORT_IS, is);
+            return -1;
         }
-        for (volatile int d = 0; d < 10; d++);
+        if (!(ci & slot_mask))
+            return 0;
+
+        uint64_t now = hpet_get_femtoseconds();
+        if (now) {
+            if (now - start > AHCI_CMD_TIMEOUT_MS * femtosecondsPerMillisecond)
+                break;
+        } else if (spins > AHCI_CMD_TIMEOUT_MS * 1000) {
+            break;
+        }
+        asm volatile("pause");
     }
     serial_printf(LOG_ERROR "ahci: port %u command timeout\n", port);
     return -2;
+}
+
+// a command failed or never finished, the drive may still be mid transfer into the DMA buffer
+static void ahci_release_dma(ahci_drive_t *drive, int result, paddr_t phys, size_t pages) {
+    if (result < 0) {
+        if (!ahci_port_stop(drive->abar, drive->port)) {
+            serial_printf(LOG_ERROR "ahci: port %u wont stop, disabling drive\n", drive->port);
+            drive->present = false;
+            return;
+        }
+        port_write(drive->abar, drive->port, AHCI_PORT_SERR, 0xFFFFFFFF);
+        port_write(drive->abar, drive->port, AHCI_PORT_IS,   0xFFFFFFFF);
+        ahci_port_start(drive->abar, drive->port);
+    }
+    pmm_free_pages(phys, pages);
 }
 
 static bool ahci_port_init(ahci_drive_t *drive) {
     uint64_t abar = drive->abar;
     uint8_t  port = drive->port;
 
-    ahci_port_stop(abar, port);
+    // firmware can leave the port running, we cant move CLB/FB under a live engine
+    if (!ahci_port_stop(abar, port))
+        return false;
 
-paddr_t dma_phys = pmm_alloc_pages(1);
+    paddr_t dma_phys = pmm_alloc_pages(1);
     if (!dma_phys) {
         serial_printf(LOG_ERROR "ahci: OOM during port %u init\n", port);
         return false;
@@ -228,7 +276,7 @@ static int ahci_issue_cmd(ahci_drive_t *drive, uint64_t lba, uint16_t count,
     if (r == 0 && !write)
         memcpy(buf, bounce_virt, byte_count);
 
-    pmm_free_pages(bounce_phys, pages_needed);
+    ahci_release_dma(drive, r, bounce_phys, pages_needed);
     return r;
 }
 
@@ -267,8 +315,9 @@ static bool ahci_identify(ahci_drive_t *drive) {
 
     port_write(abar, port, AHCI_PORT_CI, 1u << 0);
 
-    if (ahci_port_wait_cmd(abar, port, 1u << 0) < 0) {
-        pmm_free_pages(id_phys, 1);
+    int r = ahci_port_wait_cmd(abar, port, 1u << 0);
+    if (r < 0) {
+        ahci_release_dma(drive, r, id_phys, 1);
         return false;
     }
 

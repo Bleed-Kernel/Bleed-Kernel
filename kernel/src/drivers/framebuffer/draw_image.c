@@ -23,7 +23,7 @@ void draw_bgra_image(uint32_t start_x, uint32_t start_y, uint32_t img_width, uin
             // Calculate exact memory offsets
             // image_data is contiguous, so pitch is just width * 4
             uint64_t img_offset = (y * img_width + x) * 4; 
-            uint64_t fb_offset = ((start_y + y) * fb_pitch) + ((start_x + x) * 4);
+            uint64_t fb_offset = ((start_y + y) * fb_pitch) + ((start_x + x) * (fb_bpp / 8));
 
             *(uint32_t*)(fb_addr + fb_offset) = *(uint32_t*)(image_data + img_offset);
         }

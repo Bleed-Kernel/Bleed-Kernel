@@ -1,4 +1,6 @@
 #include <kernel/bootargs.h>
+#include <boot/bootlogger/bootlogger.h>
+#include <drivers/serial/serial.h>
 #include <string.h>
 
 // bootargs.c
@@ -20,6 +22,20 @@
 
 #define MAX_BOOTARGS        64
 #define BOOTARG_BUFFER_SIZE 2048
+
+static char* valid_tokens[VALID_BOOTARG_COUNT] = {
+    "init",
+    "splash",
+    "ttyfont",
+    "verbose",
+    "no-smap",
+    "no-umip",
+    "strict",
+    "fb-width",
+    "fb-height",
+    "fb-pitch",
+    "fb-bpp"
+};
 
 static bootarg_t args[MAX_BOOTARGS];
 static size_t    arg_count = 0;
@@ -78,6 +94,19 @@ void bootargs_init(const char* cmdline) {
 
         char* token = arena_copy(start, len);
         if (!token) break; // out of arena space; stop parsing rather than overflow
+        
+
+        for (int i = 0; i < VALID_BOOTARG_COUNT; i++){
+            int valid = 0;
+            if (strcmp(token, valid_tokens[i]) == 0){
+                serial_printf("%s is a valid boot argument\n", token);
+                valid = 1;
+            }
+
+            if (valid == 0){
+                serial_printf("%s is not a valid boot argument and is redundant\n", token);
+            }
+        }
 
         char* eq = strchr(token, '=');
         if (eq) {

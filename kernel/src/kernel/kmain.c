@@ -5,6 +5,7 @@
 #include <boot/bootlogger/bootlogger.h>
 #include <drivers/serial/serial.h>
 #include <kernel/bootargs.h>
+#include <drivers/framebuffer/framebuffer.h>
 #include <ansii.h>
 
 #include <cpu/features/simd.h>
@@ -305,9 +306,10 @@ __attribute__((noreturn))
 void kmain(void){
     asm volatile("cli");
     gbi_init();
-
-    bootargs_init(g_gbi.cmdline);
+    
     serial_init();
+    bootargs_init(g_gbi.cmdline);
+    framebuffer_apply_bootargs();
 
     if (bootargs_has("verbose")){
         bconsole_init();
@@ -329,5 +331,7 @@ Licenced under GPLv3\n");
     init_userspace();
     kernel_console_init();
 
-    for(;;){}
+    for(;;){
+        sched_yield(get_current_task());
+    }
 }
