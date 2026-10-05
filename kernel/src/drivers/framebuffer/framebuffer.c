@@ -2,6 +2,8 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <drivers/framebuffer/blit.h>
 #include <devices/type/tty_device.h>
+#include <drivers/serial/serial.h>
+#include <kernel/bootargs.h>
 #include <mm/kalloc.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -31,6 +33,81 @@ uint64_t framebuffer_get_height(int idx) {
 uint64_t framebuffer_get_bpp(int idx) {
     (void)idx;
     return g_gbi.framebuffer.bpp;
+}
+
+#define FB_MAX_DIMENSION 16384
+
+// parse a decimal boot argument, false if it is missing, malformed or zero
+static bool fb_bootarg_u32(const char *key, uint32_t *out) {
+    const char *val = bootargs_get(key);
+    if (!val || !*val) return false;
+
+    uint64_t n = 0;
+    for (; *val >= '0' && *val <= '9'; val++) {
+        n = n * 10 + (uint64_t)(*val - '0');
+        if (n > UINT32_MAX) return false;
+    }
+
+    if (*val || n == 0) {
+        serial_printf(LOG_ERROR "%s: not a positive whole number, ignored\n", key);
+        return false;
+    }
+
+    *out = (uint32_t)n;
+    return true;
+}
+
+///     fb-width=<pixels>  fb-height=<pixels>  fb-pitch=<bytes per scanline>  fb-bpp=<bits>
+/// the result is checked as a whole, if it doesnt describe a sane mode none of it is applied
+void framebuffer_apply_bootargs(void) {
+    if (!g_gbi.framebuffer.present) return;
+
+    uint32_t width  = g_gbi.framebuffer.width;
+    uint32_t height = g_gbi.framebuffer.height;
+    uint32_t pitch  = g_gbi.framebuffer.pitch;
+    uint32_t bpp    = g_gbi.framebuffer.bpp;
+
+    bool changed = false;
+    changed |= fb_bootarg_u32("fb-width",  &width);
+    changed |= fb_bootarg_u32("fb-height", &height);
+    changed |= fb_bootarg_u32("fb-bpp",    &bpp);
+
+    bool pitch_given = fb_bootarg_u32("fb-pitch", &pitch);
+    changed |= pitch_given;
+
+    if (!changed) return;
+
+    if (bpp != 16 && bpp != 24 && bpp != 32) {
+        serial_printf(LOG_ERROR "fb: fb-bpp=%u is not 16, 24 or 32, overrides ignored\n", bpp);
+        return;
+    }
+
+    if (width > FB_MAX_DIMENSION || height > FB_MAX_DIMENSION) {
+        serial_printf(LOG_ERROR "fb: %ux%u is out of range, overrides ignored\n", width, height);
+        return;
+    }
+
+    // a wider mode needs a longer scanline
+    uint32_t bytes_per_pixel = bpp / 8;
+    uint32_t min_pitch = width * bytes_per_pixel;
+    if (!pitch_given && pitch < min_pitch)
+        pitch = min_pitch;
+
+    if (pitch < min_pitch || (pitch % bytes_per_pixel)) {
+        serial_printf(LOG_ERROR "fb: fb-pitch=%u doesnt fit %u pixels at %ubpp (need >= %u), overrides ignored\n",
+                      pitch, width, bpp, min_pitch);
+        return;
+    }
+
+    serial_printf(LOG_INFO "fb: mode overridden %ux%u pitch %u %ubpp -> %ux%u pitch %u %ubpp\n",
+                  g_gbi.framebuffer.width, g_gbi.framebuffer.height,
+                  g_gbi.framebuffer.pitch, g_gbi.framebuffer.bpp,
+                  width, height, pitch, bpp);
+
+    g_gbi.framebuffer.width  = width;
+    g_gbi.framebuffer.height = height;
+    g_gbi.framebuffer.pitch  = pitch;
+    g_gbi.framebuffer.bpp    = (uint16_t)bpp;
 }
 
 static void fb_scrollback_ensure(fb_console_t *fb) {

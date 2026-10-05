@@ -1,5 +1,6 @@
 #include <ACPI/acpi.h>
 #include <ACPI/acpi_hpet.h>
+#include <ACPI/acpi_apic.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <drivers/serial/serial.h>
@@ -44,6 +45,17 @@ void acpi_init_hpet(void){
 
     femtosecondsPerTick = hpet_read64(HPET_REG_CAPABILITIES) >> 32;
     serial_printf(LOG_OK "HPET is at %u femtoseconds per tick\n", femtosecondsPerTick);
+
+    hpet_write64(HPET_REG_CONFIG, hpet_read64(HPET_REG_CONFIG) & ~(uint64_t)(HPET_MAINCOUNTER_ENABLE | HPET_LEGACY_REPLACEMENT));
+    hpet_write64(HPET_REG_MAIN_COUNTER, 0);
+    hpet_write64(HPET_REG_T0_CONFIG, hpet_read64(HPET_REG_T0_CONFIG) & ~(uint64_t)HPET_TIMER_INTERRUPTS);
+    hpet_write64(HPET_REG_CONFIG, hpet_read64(HPET_REG_CONFIG) | HPET_MAINCOUNTER_ENABLE);
+
+    // not all manufacturers will actually allow you to tick off the HPET
+    if (lapic_timer_start(HPET_FREQUENCY) == 0)
+        return;
+
+    serial_printf(LOG_WARN "LAPIC timer unavailable, ticking off HPET timer 0\n");
 
     hpet_write64(HPET_REG_CONFIG, hpet_read64(HPET_REG_CONFIG) & ~(uint64_t)HPET_MAINCOUNTER_ENABLE);
     hpet_write64(HPET_REG_MAIN_COUNTER, 0);

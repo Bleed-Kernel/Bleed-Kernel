@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <ansii.h>
 #include <cpu/io.h>
+#include <ACPI/acpi_hpet.h>
+#include <drivers/serial/serial.h>
 #include "../acpi_priv.h"
 
 #define LAPIC_SIZE  0x1000
@@ -33,6 +35,15 @@
 
 #define APIC_LVT_MASKED       (1U << 16)
 #define APIC_SVR_ENABLE       (1U << 8)
+
+#define LAPIC_REG_TIMER_INIT  0x380
+#define LAPIC_REG_TIMER_CUR   0x390
+#define LAPIC_REG_TIMER_DIV   0x3E0
+
+#define LAPIC_TIMER_PERIODIC  (1U << 17)
+#define LAPIC_TIMER_DIV_16    0x3
+#define LAPIC_TIMER_VECTOR    0x20
+#define LAPIC_CALIBRATE_MS    10
 
 #define IOAPIC_REG_SEL        0x00
 #define IOAPIC_REG_WIN        0x10
@@ -95,6 +106,46 @@ static uint64_t ioapic_entry_for_irq(uint8_t vector, uint32_t lapic_id, uint32_t
 
     entry |= ((uint64_t)lapic_id << 56);
     return entry;
+}
+
+/// @brief start the LAPIC timer as the periodic scheduler tick on vector 0x20
+/// @param hz tick rate
+/// @return 0 on success, -1 if it couldnt be calibrated (no LAPIC or no running HPET)
+int lapic_timer_start(uint32_t hz) {
+    if (!apic_enabled || !lapic || !femtosecondsPerTick || !hz)
+        return -1;
+
+    uint64_t hpet_ticks = (LAPIC_CALIBRATE_MS * femtosecondsPerMillisecond) / femtosecondsPerTick;
+
+    lapic_write(LAPIC_REG_LVT_TIMER, APIC_LVT_MASKED);
+    lapic_write(LAPIC_REG_TIMER_DIV, LAPIC_TIMER_DIV_16);
+    lapic_write(LAPIC_REG_TIMER_INIT, 0xFFFFFFFF);
+
+    // calibrate lapic timere
+    uint64_t start = hpet_read_counter();
+    uint64_t spins = 0;
+    while (hpet_read_counter() - start < hpet_ticks) {
+        // fuck
+        if (++spins > 100000000ULL) {
+            lapic_write(LAPIC_REG_TIMER_INIT, 0);
+            return -1;
+        }
+        asm volatile("pause");
+    }
+
+    uint32_t elapsed = 0xFFFFFFFF - lapic[LAPIC_REG_TIMER_CUR / 4];
+    lapic_write(LAPIC_REG_TIMER_INIT, 0);
+
+    uint64_t per_tick = ((uint64_t)elapsed * 1000) / ((uint64_t)LAPIC_CALIBRATE_MS * hz);
+    if (!elapsed || !per_tick || per_tick > 0xFFFFFFFF)
+        return -1;
+
+    lapic_write(LAPIC_REG_LVT_TIMER, LAPIC_TIMER_VECTOR | LAPIC_TIMER_PERIODIC);
+    lapic_write(LAPIC_REG_TIMER_DIV, LAPIC_TIMER_DIV_16);
+    lapic_write(LAPIC_REG_TIMER_INIT, (uint32_t)per_tick);
+
+    serial_printf(LOG_OK "LAPIC timer ticking at %u Hz (%u counts per tick)\n", hz, (uint32_t)per_tick);
+    return 0;
 }
 
 static int cpu_has_apic(void) {

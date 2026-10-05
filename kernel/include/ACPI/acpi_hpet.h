@@ -42,6 +42,8 @@ struct acpi_hpet{
     uint8_t     page_protection;
 }__attribute__((packed));
 
+extern uint64_t femtosecondsPerTick;
+
 uint64_t hpet_read_counter(void);
 
 uint64_t hpet_get_femtoseconds();

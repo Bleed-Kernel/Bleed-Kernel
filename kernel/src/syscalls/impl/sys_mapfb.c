@@ -19,11 +19,9 @@ void* sys_mapfb(size_t *out_pages) {
     if (!task)
         return (void *)(uintptr_t)-ESRCH;
 
-    uintptr_t fb_phys = (uintptr_t)framebuffer_get_addr(0);
-    
-    if (fb_phys >= 0xFFFF800000000000ULL) {
-        fb_phys = vaddr_to_paddr((void*)fb_phys);
-    }
+    uintptr_t fb_phys = (uintptr_t)g_gbi.framebuffer.phys_address;
+    if (!fb_phys)
+        return (void *)(uintptr_t)-ENODEV;
 
     uintptr_t fb_phys_aligned = fb_phys & ~(PAGE_SIZE - 1);
     size_t offset = fb_phys & (PAGE_SIZE - 1);
@@ -54,7 +52,7 @@ void* sys_mapfb(size_t *out_pages) {
 
         uintptr_t clean_p = p & 0x000FFFFFFFFFF000ULL;
         
-        paging_map_page_invl(task->page_map, clean_p, v, PTE_PRESENT | PTE_WRITABLE | PTE_USER, 0);
+        paging_map_page_wc(task->page_map, clean_p, v, PTE_WRITABLE | PTE_USER | PTE_NX);
     }
 
     user_alloc_t* alloc = kmalloc(sizeof(user_alloc_t));

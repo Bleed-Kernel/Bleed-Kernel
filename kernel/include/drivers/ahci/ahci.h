@@ -64,6 +64,12 @@
 #define AHCI_SIG_ATA        0x00000101  // SATA disk 
 #define AHCI_SIG_ATAPI      0xEB140101  // ATAPI signature
 
+#define AHCI_STOP_TIMEOUT_MS   500
+#define AHCI_IDLE_TIMEOUT_MS   5000 // allow for spinup time
+#define AHCI_CMD_TIMEOUT_MS    10000
+
+#define AHCI_PORT_IS_TFES      (1u << 30)  // task file error status
+
 // prdt entry
 typedef struct __attribute__((packed)) ahci_prdt_entry {
     uint32_t dba;        // low data base address

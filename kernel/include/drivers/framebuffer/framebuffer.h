@@ -23,6 +23,7 @@ void* framebuffer_get_addr(int idx);
 
 /// @return bytes between 2 scanlines
 uint64_t framebuffer_get_pitch(int idx);
+void framebuffer_apply_bootargs(void);
 
 /// @return framebuffer (x)
 uint64_t framebuffer_get_width(int idx);

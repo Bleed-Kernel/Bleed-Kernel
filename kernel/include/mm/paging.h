@@ -11,7 +11,7 @@
 #define PTE_PCD             (1ULL << 4)
 #define PTE_ACCESSED        (1ULL << 5)
 #define PTE_DIRTY           (1ULL << 6)
-#define PTE_PAGESIZE        (1ULL << 7)
+#define PTE_PAT_4K          (1ULL << 7)
 #define PTE_GLOBAL          (1ULL << 8)
 #define PTE_COW             (1ULL << 9)
 #define PTE_PAT             (1ULL << 12)
@@ -22,12 +22,15 @@
 #define PAGE_USER_RW        (PTE_WRITABLE | PTE_USER)
 #define PAGE_USER_RO        (PTE_USER)
 
-#define PAGE_FB_WC          (PTE_WRITABLE | PTE_PCD | PTE_PAT | PTE_PAGESIZE)
+#define PAGE_FB_WC          (PTE_WRITABLE | PTE_PCD | PTE_PAT | PTE_PAT_4K)
 
 #define PAGE_SIZE_4K       4096
 #define PAGE_SIZE          4096
 #define PAGE_SIZE_2M       (512 * PAGE_SIZE_4K)
 #define PADDR_ENTRY_MASK   0x000FFFFFFFFFF000ULL
+
+// the kernels own write-combining window onto the framebuffer
+#define FB_KERNEL_VIRT     0xFFFFFE8000000000ULL
 
 #define PAGE_ALIGN_UP(n)   (((n) + (PAGE_SIZE-1))/PAGE_SIZE*PAGE_SIZE)
 #define PAGE_ALIGN_DOWN(n) ((n)/PAGE_SIZE*PAGE_SIZE)
@@ -37,6 +40,7 @@ extern paddr_t kernel_page_map;
 struct task;
 
 void init_paging();
+void paging_map_page_wc(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags);
 
 /// @brief map a physical page at a vaddr using a pd entry
 /// @param paddr physical address to map the page frame at

@@ -99,7 +99,7 @@ void bconsole_init(void) {
     s_height  = (uint32_t)g_gbi.framebuffer.height;
 
     if (g_gbi.framebuffer.bpp != 32) return;
-    s_pitch32 = (uint32_t)(g_gbi.framebuffer.pitch / 4);
+    s_pitch32 = (uint32_t)(g_gbi.framebuffer.pitch / (g_gbi.framebuffer.bpp / 8));
 
     if ((s_pitch32 * s_height) > MAX_BACKBUFFER_WORDS) return;
 

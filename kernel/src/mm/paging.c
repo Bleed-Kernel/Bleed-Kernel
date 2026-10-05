@@ -105,7 +105,7 @@ void paging_walk_page_tables(paddr_t cr3, uint64_t vaddr,
     }
     uint64_t *pd = paddr_to_vaddr(p_pd);
 
-    if (!(flags & PTE_PAGESIZE)) {
+    if (!(flags & PTE_PAT_4K)) {
         uint64_t p_pt = paging_write_table_entry(
             pd, pdi, PTE_PRESENT | PTE_WRITABLE | (flags & PTE_USER));
         if (!p_pt) {
@@ -131,7 +131,7 @@ void paging_map_page_invl(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t 
     size_t idx;
 
     paging_walk_page_tables(cr3, vaddr, &pd, &idx,
-        flags & (PTE_USER | PTE_PAGESIZE));
+        flags & (PTE_USER | PTE_PAT_4K));
 
     if (!pd) return;
 
@@ -152,6 +152,24 @@ void paging_map_page(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags
     paging_map_page_invl(cr3, paddr, vaddr, flags, 1);
 }
 
+/// @brief map a 4K page as write-combining (PAT entry 4, see pat_enable_wc)
+/// @param paddr physical address to map the page frame at
+/// @param vaddr virtual address to map the page at
+/// @param flags PTE Flags
+void paging_map_page_wc(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags) {
+    uint64_t *pt;
+    size_t idx;
+
+    // PAT shares bit 7 with PTE_PAT_4K so this cant go through paging_map_page
+    paging_walk_page_tables(cr3, vaddr, &pt, &idx, flags & PTE_USER);
+    if (!pt) return;
+
+    pt[idx] = (paddr & PADDR_ENTRY_MASK)
+            | (flags & ~(PTE_PAT_4K | PTE_PCD | PTE_PWT))
+            | PTE_PAT_4K
+            | PTE_PRESENT;
+}
+
 /// @brief create the kernels page map and save it, key part of multitasking
 void paging_init_kernel_map(void) {
     kernel_page_map = read_cr3() & PADDR_ENTRY_MASK;
@@ -165,23 +183,22 @@ void init_paging(void) {
     nx_init();
     pat_enable_wc();
     
-    uintptr_t fb_base = (uintptr_t)framebuffer_get_addr(0);
-    size_t fb_size =
-        framebuffer_get_height(0) * framebuffer_get_pitch(0);
-    uintptr_t fb_end = fb_base + fb_size;
+    // kernels view of the wc framebuffer
+    uintptr_t fb_virt = (uintptr_t)framebuffer_get_addr(0);
+    if (fb_virt) {
+        paddr_t fb_phys = vaddr_to_paddr((void *)fb_virt);
+        size_t  fb_size = framebuffer_get_height(0) * framebuffer_get_pitch(0);
 
-    uintptr_t fb_map_base = fb_base & ~(PAGE_SIZE_2M - 1);
-    uintptr_t fb_map_end = (fb_end + PAGE_SIZE_2M - 1) & ~(PAGE_SIZE_2M - 1);
-    paddr_t cr3 = read_cr3();
+        paddr_t fb_phys_base = fb_phys & ~(paddr_t)(PAGE_SIZE_4K - 1);
+        size_t  fb_offset    = fb_phys - fb_phys_base;
+        paddr_t cr3 = read_cr3();
 
-    for (uintptr_t p = fb_map_base; p < fb_map_end; p += PAGE_SIZE_2M) {
-        paging_map_page_invl(
-            cr3,
-            p,
-            (uintptr_t)paddr_to_vaddr(p),
-            PTE_PRESENT | PTE_WRITABLE | PTE_PAT | PTE_NX | PTE_PCD,
-            0
-        );
+        for (size_t off = 0; off < fb_offset + fb_size; off += PAGE_SIZE_4K)
+            paging_map_page_wc(cr3, fb_phys_base + off, FB_KERNEL_VIRT + off,
+                               PTE_WRITABLE | PTE_NX);
+
+        g_gbi.framebuffer.phys_address = fb_phys;
+        g_gbi.framebuffer.address      = FB_KERNEL_VIRT + fb_offset;
     }
 
     paging_init_kernel_map();
@@ -310,7 +327,7 @@ int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
         for (size_t pdpti = 0; pdpti < 512; pdpti++) {
             if (!(pdpt[pdpti] & PTE_PRESENT))
                 continue;
-            if (pdpt[pdpti] & PTE_PAGESIZE)
+            if (pdpt[pdpti] & PTE_PAT_4K)
                 return -1;
 
             uint64_t *pd = (uint64_t *)paddr_to_vaddr(pdpt[pdpti] & PADDR_ENTRY_MASK);
@@ -320,7 +337,7 @@ int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
             for (size_t pdi = 0; pdi < 512; pdi++) {
                 if (!(pd[pdi] & PTE_PRESENT))
                     continue;
-                if (pd[pdi] & PTE_PAGESIZE)
+                if (pd[pdi] & PTE_PAT_4K)
                     return -1;
 
                 uint64_t *pt = (uint64_t *)paddr_to_vaddr(pd[pdi] & PADDR_ENTRY_MASK);
@@ -427,7 +444,7 @@ void paging_release_user_space(paddr_t cr3) {
             uint64_t pdpte = pdpt[pdpti];
             if (!(pdpte & PTE_PRESENT))
                 continue;
-            if (pdpte & PTE_PAGESIZE)
+            if (pdpte & PTE_PAT_4K)
                 continue;
 
             paddr_t pd_phys = pdpte & PADDR_ENTRY_MASK;
@@ -439,7 +456,7 @@ void paging_release_user_space(paddr_t cr3) {
                 uint64_t pde = pd[pdi];
                 if (!(pde & PTE_PRESENT))
                     continue;
-                if (pde & PTE_PAGESIZE)
+                if (pde & PTE_PAT_4K)
                     continue;
 
                 paddr_t pt_phys = pde & PADDR_ENTRY_MASK;

@@ -39,4 +39,4 @@
 
 int apic_init(void);
 int apic_is_enabled(void);
-static uint64_t ioapic_entry_for_irq(uint8_t vector, uint32_t lapic_id, uint32_t irq);
+int lapic_timer_start(uint32_t hz);
