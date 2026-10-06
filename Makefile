@@ -18,6 +18,10 @@ SATA_DISK := satadisk.img
 NVME_DISK := nvmedisk.img
 DISK_SIZE_MB := 128
 
+LIMINE_VERSION := 12.9.2
+LIMINE_URL := https://github.com/Limine-Bootloader/Limine/releases/download/v$(LIMINE_VERSION)/limine-binary.tar.gz
+LIMINE_SHA256 := 047e7eeae7de4de62fca4fc3740b621aa37a2038b208f4d0ac993750a18eed86
+
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
@@ -139,8 +143,11 @@ $(KERNEL_SYM): $(KERNEL_NM) $(MK_SYMTAB)
 
 limine/limine:
 	rm -rf limine
-	git clone https://github.com/limine-bootloader/limine limine --branch v10.5.0-binary --depth 1
-	cd limine && git checkout $(LIMINE_10_5_0)
+	mkdir -p limine
+	curl -fsSL -o limine/limine-binary.tar.gz $(LIMINE_URL)
+	echo "$(LIMINE_SHA256)  limine/limine-binary.tar.gz" | shasum -a 256 -c -
+	tar -xzf limine/limine-binary.tar.gz -C limine --strip-components=1
+	rm -f limine/limine-binary.tar.gz
 
 .PHONY: userprogs
 userprogs:
@@ -236,12 +243,21 @@ define run_qemu
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
 		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
-		-device nvme,serial=bleed-nvme-1,drive=nvm0
+		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
+		$(1)
 endef
+
+# what an intel mac looks like to us: no PS/2 controller at all, the keyboard and trackpad hang off OHCI root ports
+QEMU_OHCI_INPUT := -machine pc,i8042=off -device pci-ohci,id=ohci -device usb-kbd,bus=ohci.0 -device usb-mouse,bus=ohci.0
 
 .PHONY: run
 run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	$(run_qemu)
+
+# same as run but the only keyboard and mouse are usb ones on an OHCI controller, for testing the usb stack
+.PHONY: run-ohci
+run-ohci: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+	$(call run_qemu,$(QEMU_OHCI_INPUT))
 
 # boot the existing iso as-is: no rebuild, no clone or pull, pair with `make repack` to avoid git entirely
 .PHONY: runlocal

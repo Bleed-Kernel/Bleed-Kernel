@@ -30,6 +30,7 @@
 
 #include <drivers/ps2/PS2_mouse.h>
 #include <drivers/ps2/PS2_keyboard.h>
+#include <drivers/usb/ohci.h>
 #include <devices/type/hpet_device.h>
 #include <devices/type/mouse_device.h>
 #include <devices/type/kbd_device.h>
@@ -202,6 +203,9 @@ void init_devices(){
     PS2_Mouse_init();
     mouse_device_init();
     BLOG_OK("mouse Device Ready");
+
+    BLOG_INFO("Enumerating OHCI Controller");
+    ohci_init();
 
     BLOG_INFO("Starting serial Device");
     serial_device_register();

@@ -39,9 +39,12 @@ void acpi_init_hpet(void){
         serial_printf(LOG_OK "HPET Found\n");
     }
 
-    hpet_base = (volatile uint8_t *)paddr_to_vaddr(hpet->address.address);
-
-    paging_map_page(kernel_page_map, (uint64_t)hpet->address.address, (uint64_t)hpet_base, PTE_PRESENT | PTE_WRITABLE);
+    // own vaddr like the lapic, the hhdm one sits inside a limine huge page
+    uint64_t  hpet_phys_page = hpet->address.address & PADDR_ENTRY_MASK;
+    uintptr_t hpet_off       = (uintptr_t)(hpet->address.address & ~PADDR_ENTRY_MASK);
+    paging_map_page(kernel_page_map, hpet_phys_page, HPET_VIRT,
+                    PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT);
+    hpet_base = (volatile uint8_t *)(HPET_VIRT + hpet_off);
 
     femtosecondsPerTick = hpet_read64(HPET_REG_CAPABILITIES) >> 32;
     serial_printf(LOG_OK "HPET is at %u femtoseconds per tick\n", femtosecondsPerTick);
