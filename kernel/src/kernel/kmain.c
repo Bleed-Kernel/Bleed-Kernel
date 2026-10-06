@@ -63,6 +63,8 @@
         );                                      \
     } while (0)
 
+static simd_level_t sse_level;
+
 void init_processor_state(){
     BLOG_INFO("Attempting to initialise GDT");
     void* gdt_ptr = gdt_init();
@@ -102,8 +104,6 @@ void init_processor_state(){
     BLOG_OK("Paging Ready");
     serial_printf(LOG_OK "Paging Ready\n");
 
-    BLOG_INFO("Attempting to enable SIMD");
-    simd_level_t sse_level = simd_enable();
     BLOG_OKF("SIMD is Ready\n\tYour Processor Supports %s", simd_level_name(sse_level));
     serial_printf(LOG_OK "%s Ready\n", simd_level_name(sse_level));
 
@@ -313,6 +313,8 @@ bool init_userspace(){
 __attribute__((noreturn))
 void kmain(void){
     asm volatile("cli");
+    
+    sse_level = simd_enable();
     gbi_init();
     
     serial_init();

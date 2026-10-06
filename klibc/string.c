@@ -2,6 +2,68 @@
 #include <stddef.h>
 #include <string.h>
 #include <mm/kalloc.h>
+#include <mm/spinlock.h>
+#include <cpu/control_registers.h>
+
+#define CR0_TS          (1ULL << 3)
+
+#define SIMD_CHUNK      (64 * 1024)     // most we do with interrupts off in one go
+
+// i only wanna use it for this file for now but ill look at expanding it when i do simd stuff in userspace too
+#define MEM_VEC __attribute__((noinline, target("sse2"), \
+                               optimize("-ftree-vectorize", "-fvect-cost-model=dynamic", \
+                                        "-fno-tree-loop-distribute-patterns")))
+
+typedef struct {
+    uint8_t       area[512] __attribute__((aligned(16)));   // fxsave image
+    uint64_t      cr0;
+    unsigned long flags;
+} simd_guard_t;
+
+// dont trap with #NM and saves the registers
+static inline void simd_begin(simd_guard_t *g) {
+    g->flags = irq_push();
+
+    g->cr0 = read_cr0();
+    if (g->cr0 & CR0_TS)
+        asm volatile("clts");
+    asm volatile("fxsave64 (%0)" :: "r"(g->area) : "memory");
+}
+
+static inline void simd_end(simd_guard_t *g) {
+    asm volatile("fxrstor64 (%0)" :: "r"(g->area) : "memory");
+    if (g->cr0 & CR0_TS)
+        write_cr0(g->cr0);
+    irq_restore(g->flags);
+}
+
+// no restrict on purpose, memmove sends dest below src through here and gcc checks the
+// distance itself before it takes the vector loop
+MEM_VEC static void copy_fwd_vec(uint8_t *dest, const uint8_t *src, uint64_t n) {
+    for (uint64_t i = 0; i < n; i++)
+        dest[i] = src[i];
+}
+
+// the vectoriser wont take a loop that walks down, so hand it whole 16 byte blocks. each
+// one is read in full before its written, thats what makes dest above src safe
+MEM_VEC static void copy_back_vec(uint8_t *dest, const uint8_t *src, uint64_t n) {
+    while (n >= 16) {
+        uint8_t block[16];
+
+        n -= 16;
+        __builtin_memcpy(block, src + n, 16);
+        __builtin_memcpy(dest + n, block, 16);
+    }
+    while (n > 0) {
+        n--;
+        dest[n] = src[n];
+    }
+}
+
+MEM_VEC static void fill_vec(uint8_t *dest, uint8_t c, uint64_t n) {
+    for (uint64_t i = 0; i < n; i++)
+        dest[i] = c;
+}
 
 /// @brief move memory from destination to source
 /// @param dest destination
@@ -9,23 +71,24 @@
 /// @param n size to evaluate
 /// @return void
 
-typedef uint64_t __attribute__((may_alias, aligned(1))) u64_unaligned_t;
-
 void *memmove(void *dest, const void *src, uint64_t n) {
     uint8_t *pdest = (uint8_t *)dest;
     const uint8_t *psrc = (const uint8_t *)src;
 
     if (pdest <= psrc || pdest >= psrc + n)
         return memcpy(dest, src, n);
-        
-    uint64_t i = n;
-    while (i >= 8) {
-        i -= 8;
-        *(u64_unaligned_t *)(pdest + i) = *(const u64_unaligned_t *)(psrc + i);
-    }
-    while (i > 0) {
-        i--;
-        pdest[i] = psrc[i];
+
+    // overlapping with dest above src, so the chunks come off the end first
+    // in a fabulous circular motion
+    simd_guard_t guard;
+
+    while (n > 0) {
+        uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
+
+        n -= chunk;
+        simd_begin(&guard);
+        copy_back_vec(pdest + n, psrc + n, chunk);
+        simd_end(&guard);
     }
 
     return dest;
@@ -50,28 +113,39 @@ int memcmp(const void *s1, const void *s2, uint64_t n) {
 }
 
 void *memcpy(void *dest, const void *src, uint64_t n) {
-    void *d = dest;
-    uint64_t words = n >> 3;
-    uint64_t tail  = n & 7;
+    uint8_t       *pdest = (uint8_t *)dest;
+    const uint8_t *psrc  = (const uint8_t *)src;
+    simd_guard_t   guard;
 
-    asm volatile("cld\n\trep movsq"
-                 : "+D"(d), "+S"(src), "+c"(words) : : "memory", "cc");
-    asm volatile("rep movsb"
-                 : "+D"(d), "+S"(src), "+c"(tail) : : "memory", "cc");
+    while (n > 0) {
+        uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
+
+        simd_begin(&guard);
+        copy_fwd_vec(pdest, psrc, chunk);
+        simd_end(&guard);
+
+        pdest += chunk;
+        psrc  += chunk;
+        n     -= chunk;
+    }
 
     return dest;
 }
 
 void *memset(void *s, int c, uint64_t n) {
-    void *d = s;
-    uint64_t pattern = 0x0101010101010101ULL * (uint8_t)c;
-    uint64_t words = n >> 3;
-    uint64_t tail  = n & 7;
+    uint8_t     *pdest = (uint8_t *)s;
+    simd_guard_t guard;
 
-    asm volatile("cld\n\trep stosq"
-                 : "+D"(d), "+c"(words) : "a"(pattern) : "memory", "cc");
-    asm volatile("rep stosb"
-                 : "+D"(d), "+c"(tail) : "a"(pattern) : "memory", "cc");
+    while (n > 0) {
+        uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
+
+        simd_begin(&guard);
+        fill_vec(pdest, (uint8_t)c, chunk);
+        simd_end(&guard);
+
+        pdest += chunk;
+        n     -= chunk;
+    }
 
     return s;
 }
