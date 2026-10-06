@@ -52,7 +52,14 @@ uint64_t paging_alloc_empty_frame(void **vaddr) {
 /// @return paddr table[index]
 static uint64_t paging_write_table_entry(uint64_t* table, size_t index, uint64_t flags) {
     uint64_t entry = table[index];
-    if (entry & PTE_PRESENT) return entry & PADDR_ENTRY_MASK;
+    if (entry & PTE_PRESENT) {
+        // huge page not a table, walking into it reads whatever is at that paddr
+        if (entry & PTE_PAT_4K) {
+            serial_printf(LOG_ERROR "paging: refusing to walk through a huge page entry\n");
+            return 0;
+        }
+        return entry & PADDR_ENTRY_MASK;
+    }
 
     void *v = NULL;
     uint64_t p = paging_alloc_empty_frame(&v);

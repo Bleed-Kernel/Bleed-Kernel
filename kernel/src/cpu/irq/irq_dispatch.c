@@ -1,11 +1,17 @@
 #include <stdint.h>
 #include <drivers/ps2/PS2_keyboard.h>
 #include <drivers/ps2/PS2_mouse.h>
+#include <drivers/usb/ohci.h>
+#include <drivers/usb/usb_keyboard.h>
 #include <sched/scheduler.h>
 
 volatile uint64_t timer_ticks = 0;
 
 cpu_context_t *timer_handle(cpu_context_t *ctx) {
+    // usb has no irq of its own here, it gets serviced off the tick instead
+    ohci_poll();
+    usb_keyboard_tick();
+
     cpu_context_t *next = sched_tick(ctx);
     timer_ticks++;
     return next;

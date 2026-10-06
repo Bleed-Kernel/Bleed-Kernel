@@ -42,9 +42,10 @@ void pci_write16(uint8_t bus, uint8_t dev, uint8_t func,
     pci_write32(bus, dev, func, offset & ~3u, cur);
 }
 
-// seek busses
-bool pci_find_device(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
-                     pci_device_t *out) {
+// seek busses, index picks which match you get back so a driver can walk
+// every controller of a kind (theres usually more than one usb controller)
+bool pci_find_device_nth(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
+                         int index, pci_device_t *out) {
     for (uint16_t bus = 0; bus < 256; bus++) {
         for (uint8_t dev = 0; dev < 32; dev++) {
             
@@ -65,6 +66,8 @@ bool pci_find_device(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
 
                 if (cls != class_code || sub != subclass || pif != prog_if)
                     continue;
+                if (index-- > 0)
+                    continue;
 
                 out->bus       = (uint8_t)bus;
                 out->device    = dev;
@@ -84,4 +87,9 @@ bool pci_find_device(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
         }
     }
     return false;
+}
+
+bool pci_find_device(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
+                     pci_device_t *out) {
+    return pci_find_device_nth(class_code, subclass, prog_if, 0, out);
 }

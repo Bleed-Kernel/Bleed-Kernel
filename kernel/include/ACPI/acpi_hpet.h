@@ -14,6 +14,7 @@
 #define HPET_TIMER_VAL_SET        (1u << 6)
 
 #define HPET_MAIN_COUNTER       0xF0
+#define HPET_VIRT               0xFFFFFFFFFED00000ULL
 
 #define HPET_ENABLE_CNF   (1 << 0)
 #define HPET_LEGACY_CNF   (1 << 1)

@@ -34,6 +34,13 @@
 #define PCI_SUBCLASS_SATA       0x06
 #define PCI_PROGIF_AHCI         0x01
 
+/* Class/subclass for USB host controllers, prog_if picks the flavour */
+#define PCI_CLASS_SERIAL_BUS    0x0C
+#define PCI_SUBCLASS_USB        0x03
+#define PCI_PROGIF_UHCI         0x00
+#define PCI_PROGIF_OHCI         0x10
+#define PCI_PROGIF_EHCI         0x20
+
 #define PCI_VENDOR_NONE     0xFFFF
 
 typedef struct {
@@ -57,3 +64,7 @@ void     pci_write16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uin
 // scans all PCI bussus
 bool pci_find_device(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
                      pci_device_t *out);
+
+// same scan but returns the nth match (0 based), false once you run out
+bool pci_find_device_nth(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
+                         int index, pci_device_t *out);
