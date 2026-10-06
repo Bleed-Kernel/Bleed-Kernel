@@ -36,15 +36,21 @@ void pat_enable_wc(void) {
 /// @param vaddr out virtual address
 /// @return physical address
 uint64_t paging_alloc_empty_frame(void **vaddr) {
+    if (vaddr) *vaddr = NULL;
+
+    // paddr 0 still has a valid hhdm address, bail before we zero it and hand it out as a table
     paddr_t paddr = pmm_alloc_pages(1);
-    if (!paddr)
+    if (!paddr) {
         kprintf(LOG_ERROR "Page Allocation Failed\n");
+        return 0;
+    }
 
     void *v = paddr_to_vaddr(paddr);
-    if (v) memset(v, 0, PAGE_SIZE_4K);
+    memset(v, 0, PAGE_SIZE_4K);
     if (vaddr) *vaddr = v;
     return paddr;
 }
+
 /// @brief write a page table at a given index, if it already exsists, we return its paddr
 /// @param table Pointer to target table
 /// @param index Index of entry to modify
@@ -212,21 +218,19 @@ void init_paging(void) {
     wp_enable();
 }
 
-/// @brief reinitalise paging so we can access a full memory range, not just the
-/// default from limine
+/// @brief create a new address space that shares the kernels higher half
+/// @return paddr of the new pml4, 0 on failure
 paddr_t paging_create_address_space(void){
     void* vaddr = NULL;
     paddr_t pml4_paddr = paging_alloc_empty_frame(&vaddr);
 
     if (!pml4_paddr) {
-        serial_printf("Failed to allocate PML4\n"); 
+        serial_printf(LOG_ERROR "Failed to allocate PML4\n");
         return 0;
     }
-    
+
     uint64_t *kernel_pml4 = (uint64_t *)paddr_to_vaddr(kernel_page_map);
     uint64_t *new_pml4 = (uint64_t *)vaddr;
-
-    memset(new_pml4, 0, PAGE_SIZE);
 
     for (size_t i = 256; i < 512; i++){
         new_pml4[i] = kernel_pml4[i];
@@ -261,61 +265,80 @@ void paging_destroy_address_space(paddr_t cr3){
     pmm_free_pages(cr3, 1);
 }
 
+// step one level down the tables, filling in a missing table when asked to
+static uint64_t *paging_next_table(uint64_t *table, size_t index, int create) {
+    uint64_t entry = table[index];
+    if (!(entry & PTE_PRESENT)) {
+        if (!create) return NULL;
+        paddr_t paddr = paging_alloc_empty_frame(NULL);
+        if (!paddr) return NULL;
+        entry = paddr | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
+        table[index] = entry;
+    }
+
+    // huge page not a table, theres no pte underneath it to hand back
+    if (entry & PTE_PAT_4K) return NULL;
+
+    return (uint64_t *)paddr_to_vaddr(entry & PADDR_ENTRY_MASK);
+}
+
 uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create) {
     if ((cr3 & PADDR_ENTRY_MASK) == 0) return NULL;
 
-    uint64_t *pml4 = (uint64_t*)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
-    if (!pml4) return NULL;
+    uint64_t *table = (uint64_t*)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
 
-    size_t pml4_index = (vaddr >> 39) & 0x1FF;
-    size_t pdpt_index = (vaddr >> 30) & 0x1FF;
-    size_t pd_index   = (vaddr >> 21) & 0x1FF;
-    size_t pt_index   = (vaddr >> 12) & 0x1FF;
+    // pml4 -> pdpt -> pd -> pt
+    for (int shift = 39; shift > 12; shift -= 9) {
+        table = paging_next_table(table, (vaddr >> shift) & 0x1FF, create);
+        if (!table) return NULL;
+    }
 
-    uint64_t pml4e = pml4[pml4_index];
-    if (!(pml4e & PTE_PRESENT)) {
+    size_t pt_index = (vaddr >> 12) & 0x1FF;
+    if (!(table[pt_index] & PTE_PRESENT)) {
         if (!create) return NULL;
         paddr_t paddr = paging_alloc_empty_frame(NULL);
         if (!paddr) return NULL;
-        pml4[pml4_index] = paddr | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
-        pml4e = pml4[pml4_index];
+        table[pt_index] = paddr | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
     }
 
-    uint64_t *pdpt = (uint64_t*)paddr_to_vaddr(pml4e & PADDR_ENTRY_MASK);
-    if (!pdpt) return NULL;
+    return &table[pt_index];
+}
 
-    uint64_t pdpte = pdpt[pdpt_index];
-    if (!(pdpte & PTE_PRESENT)) {
-        if (!create) return NULL;
-        paddr_t paddr = paging_alloc_empty_frame(NULL);
-        if (!paddr) return NULL;
-        pdpt[pdpt_index] = paddr | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
-        pdpte = pdpt[pdpt_index];
+// is vaddr backed by anything at all, a 4K page or a huge one further up
+static int paging_is_mapped(paddr_t cr3, uint64_t vaddr) {
+    uint64_t *table = (uint64_t *)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
+
+    for (int shift = 39; shift >= 12; shift -= 9) {
+        uint64_t entry = table[(vaddr >> shift) & 0x1FF];
+        if (!(entry & PTE_PRESENT)) return 0;
+        if (shift == 12 || (entry & PTE_PAT_4K)) return 1;
+        table = (uint64_t *)paddr_to_vaddr(entry & PADDR_ENTRY_MASK);
     }
+    return 0;
+}
 
-    uint64_t *pd = (uint64_t*)paddr_to_vaddr(pdpte & PADDR_ENTRY_MASK);
-    if (!pd) return NULL;
+/// @brief make sure a physical mmio range can be reached through the hhdm
+/// @param phys start of the range, doesnt need to be page aligned
+/// @param size length of the range in bytes
+/// @return 0 on success, -1 if a page couldnt be mapped
+int paging_map_mmio(paddr_t phys, size_t size) {
+    paddr_t cr3   = read_cr3();
+    paddr_t start = PAGE_ALIGN_DOWN(phys);
+    paddr_t end   = PAGE_ALIGN_UP(phys + size);
 
-    uint64_t pde = pd[pd_index];
-    if (!(pde & PTE_PRESENT)) {
-        if (!create) return NULL;
-        paddr_t paddr = paging_alloc_empty_frame(NULL);
-        if (!paddr) return NULL;
-        pd[pd_index] = paddr | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
-        pde = pd[pd_index];
+    for (paddr_t p = start; p < end; p += PAGE_SIZE_4K) {
+        uint64_t virt = (uint64_t)paddr_to_vaddr(p);
+
+        // limine tends to cover this already with a huge page, theres no pte to edit then
+        // and walking into it as if it were a table writes over whatever it points at
+        if (paging_is_mapped(cr3, virt))
+            continue;
+
+        paging_map_page(cr3, p, virt, PTE_WRITABLE | PTE_NX);
+        if (!paging_is_mapped(cr3, virt))
+            return -1;
     }
-
-    uint64_t *pt = (uint64_t*)paddr_to_vaddr(pde & PADDR_ENTRY_MASK);
-    if (!pt) return NULL;
-
-    if (!(pt[pt_index] & PTE_PRESENT)) {
-        if (!create) return NULL;
-        paddr_t paddr = paging_alloc_empty_frame(NULL);
-        if (!paddr) return NULL;
-        pt[pt_index] = paddr | PTE_PRESENT | PTE_WRITABLE | PTE_USER;
-    }
-
-    return &pt[pt_index];
+    return 0;
 }
 
 int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
@@ -365,6 +388,18 @@ int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
                     paddr_t phys = pte & PADDR_ENTRY_MASK;
                     uint64_t flags = (pte & ~PADDR_ENTRY_MASK) & ~PTE_PRESENT;
 
+                    // mmio like the framebuffer isnt ram, parent and child both keep pointing at the device.
+                    // written raw because the PAT bit would read as a huge page in paging_map_page
+                    if (pte & PTE_NOFREE) {
+                        uint64_t *child_pt;
+                        size_t child_idx;
+                        paging_walk_page_tables(child_cr3, vaddr, &child_pt, &child_idx, PTE_USER);
+                        if (!child_pt)
+                            return -1;
+                        child_pt[child_idx] = pte;
+                        continue;
+                    }
+
                     if ((pte & PTE_WRITABLE) || (pte & PTE_COW)) {
                         if (!(pte & PTE_COW)) {
                             pt[pti] = (pte & ~PTE_WRITABLE) | PTE_COW;
@@ -396,11 +431,8 @@ int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_
     if (!task)
         return 0;
 
-    if (!(pf_error & (1U << 0)))
-        return 0;
-    if (!(pf_error & (1U << 1)))
-        return 0;
-    if (!(pf_error & (1U << 2)))
+    // only a user write to a present page can be cow
+    if ((pf_error & 0x7) != 0x7)
         return 0;
 
     uint64_t page = PAGE_ALIGN_DOWN(fault_addr);
@@ -412,21 +444,19 @@ int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_
     uint64_t old_flags = *pte & ~PADDR_ENTRY_MASK;
     uint32_t refs = cow_get_refcount(old_phys);
 
+    // last one holding the frame just takes it back, everyone else gets their own copy
+    paddr_t new_phys = old_phys;
     if (refs > 1) {
-        paddr_t new_phys = pmm_alloc_pages(1);
+        new_phys = pmm_alloc_pages(1);
         if (!new_phys)
             return 0;
 
         memcpy(paddr_to_vaddr(new_phys), paddr_to_vaddr(old_phys), PAGE_SIZE);
-
-        uint64_t new_flags = (old_flags | PTE_WRITABLE) & ~PTE_COW;
-        *pte = (new_phys & PADDR_ENTRY_MASK) | new_flags;
-        (void)cow_unref_page(old_phys);
-    } else {
-        uint64_t new_flags = (old_flags | PTE_WRITABLE) & ~PTE_COW;
-        *pte = (old_phys & PADDR_ENTRY_MASK) | new_flags;
-        (void)cow_unref_page(old_phys);
     }
+
+    uint64_t new_flags = (old_flags | PTE_WRITABLE) & ~PTE_COW;
+    *pte = (new_phys & PADDR_ENTRY_MASK) | new_flags;
+    (void)cow_unref_page(old_phys);
 
     asm volatile("invlpg (%0)" :: "r"(page) : "memory");
     return 1;
@@ -477,7 +507,9 @@ void paging_release_user_space(paddr_t cr3) {
                         continue;
 
                     paddr_t phys = pte & PADDR_ENTRY_MASK;
-                    if (pte & PTE_COW) {
+                    if (pte & PTE_NOFREE) {
+                        // never came from the pmm
+                    } else if (pte & PTE_COW) {
                         if (cow_unref_page(phys) == 0)
                             pmm_free_pages(phys, 1);
                     } else {

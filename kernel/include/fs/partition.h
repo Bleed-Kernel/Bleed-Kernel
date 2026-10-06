@@ -23,6 +23,7 @@ typedef struct {
 #define PART_MBR_SIGNATURE 0xAA55
 
 // GPT structures
+#define PART_GPT_MAX_ENTRIES 128     // what the spec reserves room for, nothing sane has more
 typedef struct {
     char     signature[8];
     uint32_t revision;

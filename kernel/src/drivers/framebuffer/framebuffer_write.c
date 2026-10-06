@@ -19,8 +19,12 @@ static uint32_t *framebuffer_get_shadow_buffer(fb_console_t *fb) {
 
     size_t size = fb->pitch * fb->height * sizeof(uint32_t);
     if (!fb->shadow_pixels || fb->shadow_pixels_size != size) {
+        // the old one is the wrong size now, dont leave it behind
+        if (fb->shadow_pixels)
+            kfree(fb->shadow_pixels);
+
         fb->shadow_pixels = kmalloc(size);
-        fb->shadow_pixels_size = size;
+        fb->shadow_pixels_size = fb->shadow_pixels ? size : 0;
         fb->shadow_initialized = 0;
     }
 

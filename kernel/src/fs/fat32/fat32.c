@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <drivers/serial/serial.h>
 #include <ansii.h>
-#include <status.h>
+#include <user/errno.h>
 #include <stddef.h>
 
 #include "fat32_priv.h"
@@ -52,7 +52,7 @@ static int fat32_write_fat(fat32_fs_t *fs, uint32_t cluster, uint32_t value) {
     for (uint8_t f = 0; f < 2; f++) {
         uint32_t lba = fs->fat_start_lba + f * fs->fat_size_sectors + fat_sector;
         if (fat32_write_bytes(fs, lba, fat_off_in, &value, sizeof(value)) < 0)
-            return -1;
+            return -EIO;
     }
     return 0;
 }
@@ -266,12 +266,12 @@ static int fat32_lookup(INode_t *dir, const char *name, size_t namelen, INode_t 
     while (fat32_iter_next(&it, &de, &dc, &doff)) {
         if (fat32_name_matches(&de, name, namelen)) {
             INode_t *inode = fat32_make_inode(fs, &de, dc, doff, dir);
-            if (!inode) return status_print_error(OUT_OF_MEMORY);
+            if (!inode) return -ENOMEM;
             *result = inode;
             return 0;
         }
     }
-    return -FILE_NOT_FOUND;
+    return -ENOENT;
 }
 
 static long fat32_read(INode_t *inode, void *buf, size_t count, size_t offset) {
@@ -338,7 +338,7 @@ static long fat32_write(INode_t *inode, const void *buf, size_t count, size_t of
 
     if (cluster < 2) {
         cluster = fat32_alloc_cluster(fs, 0);
-        if (!cluster) return status_print_error(OUT_OF_MEMORY);
+        if (!cluster) return -ENOMEM;
         fi->first_cluster = cluster;
         fat32_dirent_t de;
         uint32_t lba = fat32_cluster_to_lba(fs, fi->dirent_cluster);
@@ -361,7 +361,7 @@ static long fat32_write(INode_t *inode, const void *buf, size_t count, size_t of
 
     while (have < needed_clusters) {
         uint32_t nc = fat32_alloc_cluster(fs, prev);
-        if (!nc) return status_print_error(OUT_OF_MEMORY);
+        if (!nc) return -ENOMEM;
         prev = nc;
         have++;
     }
@@ -370,7 +370,7 @@ static long fat32_write(INode_t *inode, const void *buf, size_t count, size_t of
     cluster = fi->first_cluster;
     for (uint32_t i = 0; i < cluster_idx; i++) {
         cluster = fat32_read_fat(fs, cluster);
-        if (cluster >= FAT32_CLUSTER_EOC || cluster < 2) return -1;
+        if (cluster >= FAT32_CLUSTER_EOC || cluster < 2) return -EIO;
     }
 
     size_t written_total = 0;
@@ -492,14 +492,13 @@ static int fat32_readdir(INode_t *dir, size_t index, INode_t **result) {
             continue;
         if (visible == index) {
             INode_t *inode = fat32_make_inode(fs, &de, dc, doff, dir);
-            if (!inode) return status_print_error(OUT_OF_MEMORY);
-            inode->shared++;
+            if (!inode) return -ENOMEM;
             *result = inode;
             return 0;
         }
         visible++;
     }
-    return -FILE_NOT_FOUND;
+    return -ENOENT;
 }
 
 static int fat32_create(INode_t *parent, const char *name, size_t namelen,
@@ -510,7 +509,7 @@ static int fat32_create(INode_t *parent, const char *name, size_t namelen,
     /* Buffer padded to 16 to prevent compiler stringop-overflow warnings */
     char name83[16];
     if (!fat32_name_to_83(name, namelen, name83))
-        return status_print_error(NAME_LIMITS);
+        return -ENAMETOOLONG;
 
     uint32_t slot_cluster = 0, slot_off = 0;
     uint32_t prev_cluster = 0;
@@ -537,13 +536,13 @@ static int fat32_create(INode_t *parent, const char *name, size_t namelen,
 
     if (!found) {
         uint32_t nc = fat32_alloc_cluster(fs, prev_cluster);
-        if (!nc) return status_print_error(OUT_OF_MEMORY);
+        if (!nc) return -ENOMEM;
         slot_cluster = nc;
         slot_off     = 0;
     }
 
     uint32_t new_cluster = fat32_alloc_cluster(fs, 0);
-    if (!new_cluster) return status_print_error(OUT_OF_MEMORY);
+    if (!new_cluster) return -ENOMEM;
 
     fat32_dirent_t de;
     memset(&de, 0, sizeof(de));
@@ -580,7 +579,7 @@ static int fat32_create(INode_t *parent, const char *name, size_t namelen,
     }
 
     fat32_inode_t *fi = kmalloc(sizeof(*fi));
-    if (!fi) return status_print_error(OUT_OF_MEMORY);
+    if (!fi) return -ENOMEM;
     fi->fs             = fs;
     fi->first_cluster  = new_cluster;
     fi->file_size      = 0;
@@ -588,7 +587,7 @@ static int fat32_create(INode_t *parent, const char *name, size_t namelen,
     fi->dirent_offset  = slot_off;
 
     INode_t *inode = kmalloc(sizeof(*inode));
-    if (!inode) { kfree(fi); return status_print_error(OUT_OF_MEMORY); }
+    if (!inode) { kfree(fi); return -ENOMEM; }
     memset(inode, 0, sizeof(*inode));
     inode->type          = (node_type == INODE_DIRECTORY) ? INODE_DIRECTORY : INODE_FILE;
     inode->ops           = (node_type == INODE_DIRECTORY) ? &fat32_dir_ops : &fat32_file_ops;
@@ -625,7 +624,7 @@ static int fat32_unlink(INode_t *dir, const char *name, size_t namelen) {
                 has_children = true;
                 break;
             }
-            if (has_children) return status_print_error(OUT_OF_BOUNDS);
+            if (has_children) return -ENOTEMPTY;
         }
 
         uint32_t fc = ((uint32_t)de.first_cluster_hi << 16) | de.first_cluster_lo;
@@ -637,7 +636,7 @@ static int fat32_unlink(INode_t *dir, const char *name, size_t namelen) {
 
         return 0;
     }
-    return -FILE_NOT_FOUND;
+    return -ENOENT;
 }
 
 static int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen,
@@ -648,7 +647,7 @@ static int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen,
     /* Buffer padded to 16 to prevent compiler stringop-overflow warnings */
     char new83[16];
     if (!fat32_name_to_83(newname, newlen, new83))
-        return status_print_error(NAME_LIMITS);
+        return -ENAMETOOLONG;
 
     fat32_dir_iter_t it;
     fat32_iter_init(&it, fs, fi->first_cluster);
@@ -666,7 +665,7 @@ static int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen,
         fat32_write_bytes(fs, lba, doff, &de, sizeof(de));
         return 0;
     }
-    return -FILE_NOT_FOUND;
+    return -ENOENT;
 }
 
 static const INodeOps_t fat32_dir_ops = {
@@ -689,11 +688,11 @@ static const INodeOps_t fat32_file_ops = {
 int fat32_mount(INode_t *dev_inode, INode_t **root) {
     if (!dev_inode || !dev_inode->ops) {
         serial_printf(LOG_ERROR "fat32: null device inode\n");
-        return -1;
+        return -EIO;
     }
     if (!dev_inode->ops->read) {
         serial_printf(LOG_ERROR "fat32: device inode has no read op\n");
-        return -1;
+        return -EIO;
     }
 
     serial_printf(LOG_INFO "fat32: attempting mount via device inode\n");
@@ -703,7 +702,7 @@ int fat32_mount(INode_t *dev_inode, INode_t **root) {
     long r = inode_read(dev_inode, raw_sector, 512, 0);
     if (r < 512) {
         serial_printf(LOG_ERROR "fat32: failed to read BPB (got %ld bytes)\n", r);
-        return -1;
+        return -EIO;
     }
 
     fat32_bpb_t bpb;
@@ -720,22 +719,22 @@ int fat32_mount(INode_t *dev_inode, INode_t **root) {
     if (raw_sector[510] != 0x55 || raw_sector[511] != 0xAA) {
         serial_printf(LOG_ERROR "fat32: missing boot signature (got %02x %02x)\n",
                       raw_sector[510], raw_sector[511]);
-        return -1;
+        return -EIO;
     }
 
     if (bpb.bytes_per_sector == 0 || bpb.sectors_per_cluster == 0 ||
         bpb.num_fats == 0 || bpb.fat_size_32 == 0) {
         serial_printf(LOG_ERROR "fat32: invalid BPB fields\n");
-        return -1;
+        return -EIO;
     }
     if (bpb.root_entry_count != 0) {
         serial_printf(LOG_ERROR "fat32: not FAT32 (root_entry_count=%u, expected 0)\n",
                       bpb.root_entry_count);
-        return -1;
+        return -EIO;
     }
 
     fat32_fs_t *fs = kmalloc(sizeof(*fs));
-    if (!fs) return -1;
+    if (!fs) return -ENOMEM;
     memset(fs, 0, sizeof(*fs));
 
     fs->dev                 = dev_inode;
@@ -754,7 +753,7 @@ int fat32_mount(INode_t *dev_inode, INode_t **root) {
         serial_printf(LOG_ERROR "fat32: data_start_lba (%u) >= total_sectors (%u)\n",
                       fs->data_start_lba, total_sectors);
         kfree(fs);
-        return -1;
+        return -EIO;
     }
     uint32_t data_sectors = total_sectors - fs->data_start_lba;
     fs->total_clusters    = data_sectors / bpb.sectors_per_cluster;
@@ -773,7 +772,7 @@ int fat32_mount(INode_t *dev_inode, INode_t **root) {
     INode_t *root_inode = fat32_make_inode(fs, &root_de, 0, 0, NULL);
     if (!root_inode) {
         kfree(fs);
-        return -1;
+        return -EIO;
     }
 
     *root = root_inode;

@@ -4,6 +4,7 @@
 .extern ke_processor_exception
 .extern irq_handler
 .extern timer_handle
+.extern sched_yield_handle
 .extern syscall_dispatch
 .extern apic_eoi
 
@@ -87,6 +88,7 @@ isr_common:
     push r14
     push r15
 
+    cld                 /* sysv says DF is clear on function entry, user code may have left it set */
     mov  rdi, rsp
     call ke_processor_exception
     mov  rsp, rax
@@ -140,6 +142,7 @@ irq0:
     push r14
     push r15
 
+    cld
     mov  rdi, rsp
     call timer_handle
     mov  rsp, rax
@@ -164,6 +167,53 @@ irq0:
     add  rsp, 16
     iretq
 .size irq0, .-irq0
+
+/* sched_yield lands here: same frame as the timer but no tick and no EOI, nothing was raised */
+.globl isr_yield
+.type  isr_yield,@function
+isr_yield:
+    push 0
+    push 0x81
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    cld
+    mov  rdi, rsp
+    call sched_yield_handle
+    mov  rsp, rax
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    add  rsp, 16
+    iretq
+.size isr_yield, .-isr_yield
 
 IRQ_STUB 1,  33
 IRQ_STUB 2,  34
@@ -198,7 +248,8 @@ irq_common:
     push r13
     push r14
     push r15
-    
+
+    cld
     mov  rdi, [rsp + 128]
     lea  rsi, [rsp]
     call irq_handler
@@ -253,6 +304,7 @@ irq80:
     push r14
     push r15
 
+    cld
     mov  rdi, rsp
     call syscall_dispatch
 
@@ -271,6 +323,6 @@ irq80:
     pop rcx
     pop rbx
 
-    add  rsp, 16
+    add  rsp, 24        /* saved rax (the return value stays in rax), vector and error */
     iretq
 .size irq80, .-irq80

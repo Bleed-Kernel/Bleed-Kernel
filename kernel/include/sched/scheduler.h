@@ -7,7 +7,7 @@
 #include <fs/vfs.h>
 #include <user/signal.h>
 
-#define KERNEL_STACK_SIZE   8196
+#define KERNEL_STACK_SIZE   8192
 
 #define USER_STACK_TOP      0x00007ffffffff000ULL
 #define USER_STACK_SIZE     (8 * 1024 * 1024)
@@ -15,24 +15,12 @@
 #define MAX_TASKS           64
 #define QUANTUM             10
 
-#define FP_Save(buf) \
-    __asm__ volatile ( \
-        "fxsave64 (%0)" \
-        : : "r"(buf) : "memory" \
-    )
+// orphans are handed to the reaper, the same job init has on linux
+#define REAPER_PID          1
 
-#define FP_Restore(buf) \
-    __asm__ volatile ( \
-        "fxrstor64 (%0)" \
-        : : "r"(buf) : "memory" \
-    )
-
-#define FP_Init(buf) \
-    __asm__ volatile ( \
-        "fninit\n\t" \
-        "fxsave64 (%0)" \
-        : : "r"(buf) : "memory" \
-    )
+// software interrupt sched_yield uses to give the cpu away
+#define SCHED_YIELD_VECTOR      0x81
+#define SCHED_YIELD_VECTOR_STR  "0x81"
 
 typedef struct user_heap user_heap_t;
 typedef struct ipc_message ipc_message_t;
@@ -88,11 +76,12 @@ typedef struct task {
     INode_t         *current_directory;
     task_privil_t   task_privilege;
 
-    uint8_t         fx_state[512] __attribute__((aligned(16)));
+    uint8_t         *fpu_state;      // xsave area, only current while someone else owns the fpu
 
     struct task     *wait_queue;
     struct task     *wait_next;
     struct task     *ready_next;
+    uint8_t         ready_queued;
     uint64_t        wait_target_pid;
 
     struct task     *next;
@@ -126,21 +115,23 @@ void scheduler_reap(void);
 void sched_mark_task_dead(task_t *task);
 task_t *sched_get_task(uint64_t pid);
 
-uint64_t get_task_count();
-task_t *get_current_task();
+uint64_t get_task_count(void);
+task_t *get_current_task(void);
 void sched_yield(task_t *task);
 void sched_block(task_t *task);
+task_t *sched_reparent_children(task_t *parent);
 
 void itterate_each_task(task_itteration_fn fn, void *userdata);
 
 void* task_mmap(task_t* task, size_t pages);
 void task_munmap(task_t* task, void* addr);
+void* task_mmap_reserve(task_t* task, size_t pages);
+void task_mmap_release(task_t* task, void* addr);
+void sched_free_alloc_list(user_alloc_t *list);
 void sched_init_task_heap(task_t* task);
 void* sched_switch_task(task_t *next_task, void* old_context);
 void* sched_next_context(void* old_context);
 
 void exit(void);
-
-cpu_context_t *sched_kill_and_switch(task_t *victim);
 
 extern task_t *task_list_head;

@@ -3,26 +3,33 @@
 #include <mm/kalloc.h>
 #include <mm/vmm.h>
 
-#define USER_MMAP_BASE  0x0000004000000000ULL
-#define USER_MMAP_LIMIT 0x00007fffffe00000ULL
+// take the node tracking addr out of the tasks alloc list, the caller owns it after this
+static user_alloc_t *alloc_list_unlink(task_t *task, void *addr) {
+    user_alloc_t *prev = NULL;
 
-static void rollback_mapping(task_t *task, uintptr_t base, size_t mapped_pages) {
-    if (!mapped_pages)
-        return;
-    (void)vmm_unmap_free_pages(task->page_map, (void *)base, mapped_pages);
+    for (user_alloc_t *a = task->alloc_list; a; prev = a, a = a->next) {
+        if (a->vaddr != addr)
+            continue;
+
+        if (prev) prev->next = a->next;
+        else task->alloc_list = a->next;
+        return a;
+    }
+    return NULL;
 }
 
-void* task_mmap(task_t* task, size_t pages) {
+/// @brief find a free run in the mmap window and track it in the alloc list, nothing is mapped yet
+/// @return base of the reserved range, NULL if it doesnt fit
+void* task_mmap_reserve(task_t* task, size_t pages) {
     if (!task || !pages) return NULL;
 
     uintptr_t base = USER_MMAP_BASE;
     user_alloc_t* prev = NULL;
     user_alloc_t* next = task->alloc_list;
 
+    // the list is kept sorted so the first gap that fits is the lowest one
     for (user_alloc_t* a = task->alloc_list; a; prev = a, a = a->next) {
-        uintptr_t gap_start = base;
-        uintptr_t gap_end   = (uintptr_t)a->vaddr;
-        size_t gap_pages = (gap_end - gap_start) / PAGE_SIZE;
+        size_t gap_pages = ((uintptr_t)a->vaddr - base) / PAGE_SIZE;
 
         if (gap_pages >= pages) {
             next = a;
@@ -38,23 +45,9 @@ void* task_mmap(task_t* task, size_t pages) {
     if (pages > (USER_MMAP_LIMIT - base) / PAGE_SIZE)
         return NULL;
 
-    size_t mapped_pages = 0;
-    for (size_t i = 0; i < pages; i++) {
-        paddr_t phys = pmm_alloc_pages(1);
-        if (!phys) {
-            rollback_mapping(task, base, mapped_pages);
-            return NULL;
-        }
-
-        paging_map_page_invl(task->page_map, phys, base + i * PAGE_SIZE, PTE_PRESENT | PTE_WRITABLE | PTE_USER , 0);
-        mapped_pages++;
-    }
-
     user_alloc_t* alloc = kmalloc(sizeof(user_alloc_t));
-    if (!alloc) {
-        rollback_mapping(task, base, mapped_pages);
+    if (!alloc)
         return NULL;
-    }
 
     alloc->vaddr = (void*)base;
     alloc->pages = pages;
@@ -68,23 +61,39 @@ void* task_mmap(task_t* task, size_t pages) {
     return (void*)base;
 }
 
+/// @brief forget a reservation, whatever is mapped there is left alone
+void task_mmap_release(task_t* task, void* addr) {
+    if (!task || !addr) return;
+
+    user_alloc_t *a = alloc_list_unlink(task, addr);
+    if (a) kfree(a);
+}
+
+void* task_mmap(task_t* task, size_t pages) {
+    uintptr_t base = (uintptr_t)task_mmap_reserve(task, pages);
+    if (!base) return NULL;
+
+    for (size_t i = 0; i < pages; i++) {
+        // zeroed, a task should never see what the last owner of the frame left behind
+        paddr_t phys = paging_alloc_empty_frame(NULL);
+        if (!phys) {
+            if (i) (void)vmm_unmap_free_pages(task->page_map, (void *)base, i);
+            task_mmap_release(task, (void *)base);
+            return NULL;
+        }
+
+        paging_map_page_invl(task->page_map, phys, base + i * PAGE_SIZE, PTE_PRESENT | PTE_WRITABLE | PTE_USER , 0);
+    }
+
+    return (void*)base;
+}
+
 void task_munmap(task_t* task, void* addr) {
     if (!task || !addr) return;
 
-    user_alloc_t* prev = NULL;
-    user_alloc_t* a = task->alloc_list;
+    user_alloc_t *a = alloc_list_unlink(task, addr);
+    if (!a) return;
 
-    while (a) {
-        if (a->vaddr == addr) {
-            (void)vmm_unmap_free_pages(task->page_map, addr, a->pages);
-
-            if (prev) prev->next = a->next;
-            else task->alloc_list = a->next;
-
-            kfree(a);
-            return;
-        }
-        prev = a;
-        a = a->next;
-    }
+    (void)vmm_unmap_free_pages(task->page_map, addr, a->pages);
+    kfree(a);
 }

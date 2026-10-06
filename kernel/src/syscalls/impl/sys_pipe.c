@@ -12,8 +12,9 @@ long sys_pipe(uint64_t user_fds_ptr) {
         return -EFAULT;
 
     int fds[2] = { -1, -1 };
-    if (vfs_pipe(fds) != 0)
-        return -EMFILE;
+    int rc = vfs_pipe(fds);
+    if (rc < 0)
+        return rc;
 
     if (copy_to_user(caller, (void *)user_fds_ptr, fds, sizeof(fds)) != 0) {
         vfs_close(fds[0]);

@@ -7,6 +7,7 @@
 #include <user/user_task.h>
 #include <fs/vfs.h>
 #include <user/signal.h>
+#include <user/user_file.h>
 
 enum {
     SYS_READ            = 0,
@@ -63,9 +64,8 @@ int sys_rename(const char *user_oldpath, const char *user_newpath);
 int sys_mkdir(const char *user_path, int mode);
 
 int sys_close(int fd);
-void sys_exit();
-uint64_t sys_clear(uint64_t fd);
-void sys_yield();
+void sys_exit(void);
+void sys_yield(void);
 uint64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg);
 
 uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc);
@@ -82,14 +82,11 @@ long sys_sigprocmask(int how, const sigset_t *user_set, sigset_t *user_old);
 long sys_sigreturn(void);
 long sys_getpid(void);
 
-system_memory_info_t *sys_meminfo();
+int sys_meminfo(system_memory_info_t *user_buf);
 int sys_time(struct rtc_time* user_buf);
 
-uintptr_t sys_alloc(uint64_t pages);
-uintptr_t sys_free(uint64_t addr, uint64_t pages);
-
 long sys_chdir(const char *user_path);
-long sys_getcwd(char *buf, size_t size);
+long sys_getcwd(char *buf, long size);
 
 uint64_t sys_taskinfo(uint64_t pid, uint64_t user_info_ptr);
 uint64_t sys_taskcount(void);
@@ -99,11 +96,10 @@ int sys_stat(int fd, user_file_t *user_buf);
 void *sys_mmap(size_t pages);
 void sys_munmap(void *addr);
 
-int sys_test_usercopy(uint64_t user_buf_ptr, uint64_t len);
-void* sys_mapfb(task_t *task, size_t *out_pages);
+void* sys_mapfb(size_t *out_pages);
 
 long sys_seek(int fd, long offset, int whence);
-uint64_t sys_femtoseconds();
+uint64_t sys_femtoseconds(void);
 
 long sys_ipc_send(uint64_t target_pid, uint64_t src_addr, uint64_t pages);
 long sys_ipc_recv(uint64_t user_msg_ptr);

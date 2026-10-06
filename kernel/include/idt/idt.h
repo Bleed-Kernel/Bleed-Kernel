@@ -18,4 +18,4 @@ typedef struct {
     uint64_t    address;
 } __attribute__((packed)) idt_ptr_t;
 
-uint64_t idt_init();
+uint64_t idt_init(void);

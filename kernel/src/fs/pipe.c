@@ -3,6 +3,7 @@
 #include <mm/kalloc.h>
 #include <mm/spinlock.h>
 #include <sched/scheduler.h>
+#include <sched/signal.h>
 #include <string.h>
 #include <user/errno.h>
 
@@ -65,6 +66,10 @@ static long pipe_read_inode(INode_t *inode, void *out_buffer, size_t size, size_
         if (writers == 0)
             return 0;
 
+        // checked with the lock dropped, a fatal signal never comes back from this
+        if (signal_should_interrupt(get_current_task()))
+            return -EINTR;
+
         sched_yield(get_current_task());
     }
 }
@@ -118,6 +123,9 @@ static long pipe_write_inode(INode_t *inode, const void *in_buffer, size_t size,
             return (long)copied;
         if (!full)
             continue;
+
+        if (signal_should_interrupt(get_current_task()))
+            return copied ? (long)copied : -EINTR;
 
         sched_yield(get_current_task());
     }

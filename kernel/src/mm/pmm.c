@@ -7,8 +7,9 @@
 #include <ansii.h>
 #include <stddef.h>
 #include <string.h>
-#include <status.h>
+#include <user/errno.h>
 #include <mm/paging.h>
+#include <mm/spinlock.h>
 
 #define FRAME_USED  1
 #define FRAME_FREE  0
@@ -20,6 +21,7 @@
 #define PMM_MIN_REGION_PAGES  4
 
 static bitmap_entry_t *bitmap_head = NULL;
+static spinlock_t      pmm_lock    = {0};
 
 uintptr_t get_max_paddr(void) {
     uint64_t max = 0;
@@ -48,9 +50,16 @@ void paging_mark_entry_unavailable(bitmap_entry_t *entry, size_t start, size_t p
 }
 
 static void paging_mark_entry_available(bitmap_entry_t *entry, size_t start, size_t page_count) {
-    for (size_t i = 0; i < page_count; i++)
+    for (size_t i = 0; i < page_count; i++) {
+        // a double free would otherwise count the same frame as available twice
+        if (!BIT_TST(entry->bitmap, start + i)) {
+            serial_printf(LOG_WARN "PMM: double free of frame %zu in region 0x%lx\n",
+                          start + i, (unsigned long)entry->region_base);
+            continue;
+        }
         BIT_CLR(entry->bitmap, start + i);
-    entry->available_pages += page_count;
+        entry->available_pages++;
+    }
 }
 
 uint8_t pmm_init(void) {
@@ -172,6 +181,10 @@ static int64_t paging_bitmap_find_free(bitmap_entry_t *entry, size_t count) {
 paddr_t pmm_alloc_pages(size_t page_count) {
     if (!page_count) return 0;
 
+    // syscalls can be preempted once they have yielded, the bitmaps cant be shared unlocked
+    unsigned long irq = irq_push();
+    spinlock_acquire(&pmm_lock);
+
     for (bitmap_entry_t *bm = bitmap_head; bm != NULL; bm = bm->next_entry) {
         if (bm->available_pages < page_count)
             continue;
@@ -183,10 +196,17 @@ paddr_t pmm_alloc_pages(size_t page_count) {
         paging_mark_entry_unavailable(bm, (size_t)start, page_count);
         uintptr_t paddr = bm->region_base
                         + (bm->header_pages + (size_t)start) * PAGE_SIZE;
+
+        spinlock_release(&pmm_lock);
+        irq_restore(irq);
         return (paddr_t)paddr;
     }
 
-    return (paddr_t)status_print_error(OUT_OF_MEMORY);
+    spinlock_release(&pmm_lock);
+    irq_restore(irq);
+
+    serial_printf(LOG_ERROR "PMM: out of memory\n");
+    return 0;
 }
 
 size_t pmm_available_pages(void) {
@@ -197,6 +217,9 @@ size_t pmm_available_pages(void) {
 }
 
 void pmm_free_pages(paddr_t paddr, size_t page_count) {
+    unsigned long irq = irq_push();
+    spinlock_acquire(&pmm_lock);
+
     for (bitmap_entry_t *bm = bitmap_head; bm != NULL; bm = bm->next_entry) {
         uintptr_t usable_start = bm->region_base + bm->header_pages * PAGE_SIZE;
         uintptr_t usable_end   = usable_start + bm->capacity * PAGE_SIZE;
@@ -213,8 +236,14 @@ void pmm_free_pages(paddr_t paddr, size_t page_count) {
 
         if (idx < bm->search_cursor)
             bm->search_cursor = idx;
+
+        spinlock_release(&pmm_lock);
+        irq_restore(irq);
         return;
     }
+
+    spinlock_release(&pmm_lock);
+    irq_restore(irq);
 
     serial_printf(LOG_WARN "PMM: pmm_free_pages called with unknown paddr 0x%lx\n",
                   (unsigned long)paddr);

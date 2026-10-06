@@ -10,6 +10,7 @@
 
 #include <cpu/features/simd.h>
 #include <cpu/features/features.h>
+#include <cpu/features/fpu.h>
 #include <gdt/gdt.h>
 #include <idt/idt.h>
 #include <tss/tss.h>
@@ -105,6 +106,8 @@ void init_processor_state(){
     simd_level_t sse_level = simd_enable();
     BLOG_OKF("SIMD is Ready\n\tYour Processor Supports %s", simd_level_name(sse_level));
     serial_printf(LOG_OK "%s Ready\n", simd_level_name(sse_level));
+
+    fpu_init();
 }
 
 void init_ramdisk(){
@@ -298,6 +301,7 @@ bool init_userspace(){
 
     INode_t *init_elf = elf_get_from_path(init_path);
     task_t *init = elf_sched(init_elf, 0, NULL);
+    vfs_drop(init_elf);
     if (init != NULL)
         BLOG_OK("Init Task started!");
     else

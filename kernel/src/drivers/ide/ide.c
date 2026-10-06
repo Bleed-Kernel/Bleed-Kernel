@@ -15,7 +15,7 @@
 static ide_drive_t ide_drives[IDE_MAX_DRIVES];
 static spinlock_t  ide_lock = {0};
 
-static inline void ide_io_wait() { wait_ns(400); }
+static inline void ide_io_wait(void) { wait_ns(400); }
 
 static int ide_poll(uint16_t base) {
     ide_io_wait();
@@ -68,10 +68,13 @@ static bool ide_identify(uint16_t base, uint16_t ctrl, bool slave, ide_drive_t *
     if (inb(base + ATA_REG_LBA_MID) || inb(base + ATA_REG_LBA_HI))
         return false;
 
+    // bounded, a drive that never raises DRQ shouldnt be able to hang the boot
+    timeout = 100000;
     for (;;) {
         status = inb(base + ATA_REG_STATUS);
         if (status & ATA_SR_ERR)  return false;
         if (status & ATA_SR_DRQ) break;
+        if (--timeout <= 0)      return false;
     }
 
     uint16_t identify[256];
@@ -152,7 +155,7 @@ int ide_write_sectors(ide_drive_t *drive, uint32_t lba, uint8_t count, const voi
                         | ((lba >> 24) & 0x0F);
 
     outb(drive->base + ATA_REG_DRIVE_HEAD, drive_sel);
-    ide_io_wait(drive->ctrl);
+    ide_io_wait();
 
     if (ide_wait_ready(drive->base) < 0) {
         serial_printf(LOG_ERROR "ide: drive not ready for write lba=%u\n", lba);
@@ -200,69 +203,11 @@ static int ide_read_sectors_wrapper(void *drive, uint64_t lba, uint16_t count, v
 
 // register the device within bleed, block device inode ops
 static long blk_inode_read(INode_t *inode, void *buf, size_t count, size_t offset) {
-    blk_device_t *blk = inode->internal_data;
-    if (!blk || count == 0) return 0;
-
-    uint32_t abs_lba   = blk->lba_start + (uint32_t)(offset / IDE_SECTOR_SIZE);
-    size_t   skip      = offset % IDE_SECTOR_SIZE;
-    size_t   total     = 0;
-    uint8_t  sector_buf[IDE_SECTOR_SIZE];
-
-    /* Clamp to partition boundary */
-    size_t max_bytes = (size_t)blk->sector_count * IDE_SECTOR_SIZE;
-    if (offset >= max_bytes) return 0;
-    if (count > max_bytes - offset) count = max_bytes - offset;
-
-    while (total < count) {
-        if (ide_read_sectors(blk->drive, abs_lba, 1, sector_buf) < 0)
-            return total > 0 ? (long)total : -1;
-
-        size_t copy_off  = (total == 0) ? skip : 0;
-        size_t available = IDE_SECTOR_SIZE - copy_off;
-        size_t to_copy   = count - total;
-        if (to_copy > available) to_copy = available;
-
-        memcpy((uint8_t *)buf + total, sector_buf + copy_off, to_copy);
-        total += to_copy;
-        abs_lba++;
-    }
-    return (long)total;
+    return blk_read(inode->internal_data, buf, count, offset);
 }
 
 static long blk_inode_write(INode_t *inode, const void *buf, size_t count, size_t offset) {
-    blk_device_t *blk = inode->internal_data;
-    if (!blk || count == 0) return 0;
-
-    uint32_t abs_lba = blk->lba_start + (uint32_t)(offset / IDE_SECTOR_SIZE);
-    size_t   skip    = offset % IDE_SECTOR_SIZE;
-    size_t   total   = 0;
-    uint8_t  sector_buf[IDE_SECTOR_SIZE];
-
-    size_t max_bytes = (size_t)blk->sector_count * IDE_SECTOR_SIZE;
-    if (offset >= max_bytes) return 0;
-    if (count > max_bytes - offset) count = max_bytes - offset;
-
-    while (total < count) {
-        size_t copy_off  = (total == 0) ? skip : 0;
-        size_t available = IDE_SECTOR_SIZE - copy_off;
-        size_t to_copy   = count - total;
-        if (to_copy > available) to_copy = available;
-
-        /* Read-modify-write if we're doing a partial sector */
-        if (copy_off != 0 || to_copy < IDE_SECTOR_SIZE) {
-            if (ide_read_sectors(blk->drive, abs_lba, 1, sector_buf) < 0)
-                return total > 0 ? (long)total : -1;
-        }
-
-        memcpy(sector_buf + copy_off, (const uint8_t *)buf + total, to_copy);
-
-        if (ide_write_sectors(blk->drive, abs_lba, 1, sector_buf) < 0)
-            return total > 0 ? (long)total : -1;
-
-        total += to_copy;
-        abs_lba++;
-    }
-    return (long)total;
+    return blk_write(inode->internal_data, buf, count, offset);
 }
 
 static size_t blk_inode_size(INode_t *inode) {

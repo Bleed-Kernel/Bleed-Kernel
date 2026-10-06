@@ -9,6 +9,7 @@
 #include <mm/paging.h>
 #include <ansii.h>
 #include <user/errno.h>
+#include <string.h>
 
 uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc) {
     if (!user_path_ptr)
@@ -17,7 +18,7 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
         return (uint64_t)-EFAULT;
 
     char kpath[EXEC_MAX_PATH_LEN];
-    for (size_t i = 0; i < sizeof(kpath); i++) kpath[i] = 0;
+    memset(kpath, 0, sizeof(kpath));
 
     task_t *caller = get_current_task();
     if (!caller)
@@ -34,8 +35,10 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
 
     exec_args_t args;
     long args_err = exec_args_copy_from_user(caller, user_argv_ptr, user_argc, kpath, &args);
-    if (args_err < 0)
+    if (args_err < 0) {
+        vfs_drop(file);
         return (uint64_t)args_err;
+    }
 
     child = elf_sched(file, args.argc, (const char *const *)args.argv);
     if (!child) {
@@ -53,9 +56,11 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
     if (child->current_directory)
         child->current_directory->shared++;
 
-    serial_printf("%sNew Task Created: PID %d\n", LOG_INFO, child->id);
+    serial_printf(LOG_INFO "New Task Created: PID %u\n", (unsigned)child->id);
 
 cleanup:
+    // elf_get_from_path took a ref for us
+    vfs_drop(file);
     exec_args_free(&args);
     return child ? child->id : err;
 }

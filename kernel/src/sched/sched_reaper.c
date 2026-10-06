@@ -1,17 +1,13 @@
 #include <sched/scheduler.h>
 #include <mm/kalloc.h>
 #include <ansii.h>
-#include <sched/scheduler.h>
 #include <kernel/exception/panic.h>
 #include <stdio.h>
 #include <mm/spinlock.h>
 #include <ipc/zero_copy.h>
+#include <cpu/features/fpu.h>
 
 #include "priv_scheduler.h"
-
-extern task_t *task_queue;
-extern task_t *task_list_head;
-extern task_t *current_task;
 
 static void unlink_from_list(task_t **head, task_t *task) {
     if (!*head || !task)
@@ -67,7 +63,6 @@ void sched_mark_task_dead(task_t *task) {
     task->state = TASK_DEAD;
     task->dead_next = NULL;
 
-
     __typeof__(task->current_directory) cwd = task->current_directory;
     task->current_directory = NULL;
 
@@ -100,12 +95,6 @@ void scheduler_reap(void) {
             }
 
             task_t *task = dead_task_head;
-            if (!task) {
-                spinlock_release(&sched_lock);
-                irq_restore(flags);
-                break;
-            }
-
             dead_task_head = task->dead_next;
             if (!dead_task_head)
                 dead_task_tail = NULL;
@@ -124,9 +113,6 @@ void scheduler_reap(void) {
                 continue;
             }
 
-            if (task_queue == task)
-                task_queue = (task->next == task) ? NULL : task->next;
-
             if (task_list_head)
                 unlink_from_list(&task_list_head, task);
 
@@ -139,11 +125,17 @@ void scheduler_reap(void) {
             spinlock_release(&sched_lock);
             irq_restore(flags);
 
+            fpu_task_free(task);
+
             if (task->kernel_stack)
                 kfree(task->kernel_stack);
 
             if (task->heap)
                 kfree(task->heap);
+
+            // a task killed before it reached exit() still owns these, exit() NULLs them when it got there first
+            vfs_fd_table_drop(task->fd_table);
+            sched_free_alloc_list(task->alloc_list);
 
             ipc_task_cleanup(task);
             paging_destroy_address_space(task->page_map);

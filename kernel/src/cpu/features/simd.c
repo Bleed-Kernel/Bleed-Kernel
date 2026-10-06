@@ -1,35 +1,7 @@
 #include <cpu/features/simd.h>
 #include <stdint.h>
-
-static inline void cpuid(uint32_t leaf, uint32_t subleaf,
-                         uint32_t *eax, uint32_t *ebx,
-                         uint32_t *ecx, uint32_t *edx) {
-    __asm__ volatile (
-        "cpuid"
-        : "=a"(*eax), "=b"(*ebx), "=c"(*ecx), "=d"(*edx)
-        : "a"(leaf),  "c"(subleaf)
-    );
-}
-
-static inline uint64_t read_cr0(void) {
-    uint64_t v;
-    __asm__ volatile ("mov %%cr0, %0" : "=r"(v));
-    return v;
-}
-
-static inline void write_cr0(uint64_t v) {
-    __asm__ volatile ("mov %0, %%cr0" :: "r"(v));
-}
-
-static inline uint64_t read_cr4(void) {
-    uint64_t v;
-    __asm__ volatile ("mov %%cr4, %0" : "=r"(v));
-    return v;
-}
-
-static inline void write_cr4(uint64_t v) {
-    __asm__ volatile ("mov %0, %%cr4" :: "r"(v));
-}
+#include <cpu/cpuid.h>
+#include <cpu/control_registers.h>
 
 static inline void xsetbv(uint32_t reg, uint64_t val) {
     __asm__ volatile (
@@ -69,12 +41,12 @@ static inline void xsetbv(uint32_t reg, uint64_t val) {
 simd_level_t simd_enable(void) {
     uint32_t eax, ebx, ecx, edx;
 
-    cpuid(0, 0, &eax, &ebx, &ecx, &edx);
+    cpuid(0, &eax, &ebx, &ecx, &edx);
     uint32_t max_leaf = eax;
 
     if (max_leaf < 1) return SIMD_NONE;
 
-    cpuid(1, 0, &eax, &ebx, &ecx, &edx);
+    cpuid(1, &eax, &ebx, &ecx, &edx);
     uint32_t leaf1_edx = edx;
     uint32_t leaf1_ecx = ecx;
 
@@ -82,7 +54,7 @@ simd_level_t simd_enable(void) {
 
     uint32_t leaf7_ebx = 0;
     if (max_leaf >= 7) {
-        cpuid(7, 0, &eax, &leaf7_ebx, &ecx, &edx);
+        cpuid_count(7, 0, &eax, &leaf7_ebx, &ecx, &edx);
     }
 
     uint64_t cr0 = read_cr0();
@@ -111,6 +83,12 @@ simd_level_t simd_enable(void) {
         if (has_avx512) {
             xcr0 |= XCR0_OPMASK | XCR0_ZMM_HI256 | XCR0_HI16_ZMM;
         }
+
+        // only ask for what CPUID says XCR0 can hold, anything else is a #GP
+        uint32_t xcr0_lo = 0, xcr0_hi = 0;
+        cpuid_count(0xD, 0, &xcr0_lo, &ebx, &ecx, &xcr0_hi);
+        xcr0 &= ((uint64_t)xcr0_hi << 32) | xcr0_lo;
+        has_avx512 = has_avx512 && (xcr0 & XCR0_ZMM_HI256);
 
         xsetbv(0, xcr0);
         if (has_avx512) {

@@ -1,7 +1,6 @@
 #include <fs/vfs.h>
 #include <sched/scheduler.h>
 #include <string.h>
-#include <status.h>
 #include <user/errno.h>
 #include <user/user_copy.h>
 
@@ -31,19 +30,5 @@ int sys_rename(const char *user_oldpath, const char *user_newpath) {
         return -EFAULT;
 
     int r = vfs_rename(oldpath, newpath);
-    if (r >= 0)
-        return 0;
-
-    if (r == -FILE_NOT_FOUND)
-        return -ENOENT;
-    if (r == -UNIMPLEMENTED)
-        return -ENOSYS;
-    if (r == -NAME_LIMITS)
-        return -E2BIG;
-    if (r == -OUT_OF_BOUNDS)
-        return -EEXIST;
-    if (r == -EXDEV)
-        return -EXDEV;
-
-    return -EIO;
+    return r < 0 ? r : 0;
 }

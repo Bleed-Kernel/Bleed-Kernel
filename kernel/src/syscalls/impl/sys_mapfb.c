@@ -8,9 +8,6 @@
 #include <user/errno.h>
 #include <user/user_copy.h>
 
-#define USER_MMAP_BASE  0x0000004000000000ULL
-#define USER_MMAP_LIMIT 0x00007fffffe00000ULL
-
 void* sys_mapfb(size_t *out_pages) {
     if (!out_pages)
         return (void *)(uintptr_t)-EFAULT;
@@ -31,41 +28,17 @@ void* sys_mapfb(size_t *out_pages) {
     if (copy_to_user(task, out_pages, &pages, sizeof(pages)) != 0)
         return (void *)(uintptr_t)-EFAULT;
 
-    uintptr_t base = USER_MMAP_BASE;
-    user_alloc_t *prev = NULL;
-    user_alloc_t *next = task->alloc_list;
-    for (user_alloc_t* a = task->alloc_list; a; prev = a, a = a->next) {
-        if (((uintptr_t)a->vaddr - base) / PAGE_SIZE >= pages) {
-            next = a;
-            break;
-        }
-        base = (uintptr_t)a->vaddr + (a->pages * PAGE_SIZE);
-        next = a->next;
-    }
-
-    if (base > USER_MMAP_LIMIT || pages > (USER_MMAP_LIMIT - base) / PAGE_SIZE)
+    uintptr_t base = (uintptr_t)task_mmap_reserve(task, pages);
+    if (!base)
         return (void *)(uintptr_t)-ENOMEM;
 
+    // NOFREE so unmap, fork and exit all know these frames are the device and not ram
     for (size_t i = 0; i < pages; i++) {
         uintptr_t p = fb_phys_aligned + (i * PAGE_SIZE);
         uintptr_t v = base + (i * PAGE_SIZE);
 
-        uintptr_t clean_p = p & 0x000FFFFFFFFFF000ULL;
-        
-        paging_map_page_wc(task->page_map, clean_p, v, PTE_WRITABLE | PTE_USER | PTE_NX);
+        paging_map_page_wc(task->page_map, p, v, PTE_WRITABLE | PTE_USER | PTE_NX | PTE_NOFREE);
     }
-
-    user_alloc_t* alloc = kmalloc(sizeof(user_alloc_t));
-    if (!alloc) {
-        vmm_unmap_pages(task->page_map, (void *)base, pages);
-        return (void *)(uintptr_t)-ENOMEM;
-    }
-
-    alloc->vaddr = (void*)base;
-    alloc->pages = pages;
-    alloc->next = next;
-    if (prev) prev->next = alloc;
-    else task->alloc_list = alloc;
 
     return (void*)(base + offset);
 }

@@ -96,31 +96,37 @@ void stack_trace_print(uint64_t *rbp) {
     for (int i = 0; i < 16 && rbp; i++) {
         if ((uint64_t)rbp < 0x1000 || ((uint64_t)rbp & 0xF)) break;
 
+        uint64_t *next_rbp = NULL;
+        uint64_t rip = 0;
+
+        // only the two reads go in here. a break inside SMAP_ALLOW leaves its loop and
+        // not ours, so the walk never ended and clac never ran
         SMAP_ALLOW{
-            uint64_t *next_rbp = (uint64_t *)rbp[0];
-            uint64_t rip = rbp[1];
-            if (!rip) break;
-            uint64_t sym_addr = 0;
-            const char *name = stack_trace_symbol_lookup(rip, &sym_addr);
-
-            bset_color(BCOL_GREY, BCOL_BLACK);
-            bprintf("  ");
-            
-            bset_color(BCOL_WHITE, BCOL_BLACK);
-            bprintf("%p ", (void *)rip);
-
-            bset_color(BCOL_YELLOW, BCOL_BLACK);
-            if (name) {
-                bprintf("<%s+0x%llu>\n", name, rip - sym_addr);
-            } else {
-                bprintf("<??:?>\n");
-            }
-            
-            breset_color();
-
-            if (!next_rbp || next_rbp <= rbp || ((uint64_t)next_rbp & 0xF))
-                break;
-            rbp = next_rbp;
+            next_rbp = (uint64_t *)rbp[0];
+            rip = rbp[1];
         }
+        if (!rip) break;
+
+        uint64_t sym_addr = 0;
+        const char *name = stack_trace_symbol_lookup(rip, &sym_addr);
+
+        bset_color(BCOL_GREY, BCOL_BLACK);
+        bprintf("  ");
+
+        bset_color(BCOL_WHITE, BCOL_BLACK);
+        bprintf("%p ", (void *)rip);
+
+        bset_color(BCOL_YELLOW, BCOL_BLACK);
+        if (name) {
+            bprintf("<%s+0x%llx>\n", name, rip - sym_addr);
+        } else {
+            bprintf("<??:?>\n");
+        }
+
+        breset_color();
+
+        if (!next_rbp || next_rbp <= rbp || ((uint64_t)next_rbp & 0xF))
+            break;
+        rbp = next_rbp;
     }
 }

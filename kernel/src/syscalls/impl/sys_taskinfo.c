@@ -13,7 +13,9 @@ uint64_t sys_taskinfo(uint64_t pid, uint64_t user_info_ptr) {
     if (!task)
         return (uint64_t)-ESRCH;
 
+    // zeroed first, the struct padding would otherwise carry kernel stack out to userspace
     user_task_info_t info;
+    memset(&info, 0, sizeof(info));
     info.id = task->id;
     info.ppid = task->ppid;
     info.pgid = task->pgid;

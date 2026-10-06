@@ -12,14 +12,8 @@ typedef enum {
     FS_TYPE_EXFAT = 2
 } fs_type_t;
 
-// mount block device at path, creates it if it doesnt exist
+// mount block device at path, creates it if it doesnt exist. 0 or a negative errno
 int vfs_mount(const char *path, INode_t *dev_inode);
 
-// unmount whatever is at path, will drop it too
+// unmount whatever is at path, -EBUSY while anything inside it is still in use
 int vfs_umount(const char *path);
-
-//returns the mount root if `inode` is a mount point, otherwise NULL.
-INode_t *vfs_mount_resolve(INode_t *inode);
-
-//Retrieve the blk_device_t from a /dev/hdXN inode (if it is one) or will return NULL
-blk_device_t *vfs_inode_to_blk(INode_t *inode);

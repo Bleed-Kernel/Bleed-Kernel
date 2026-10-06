@@ -12,7 +12,7 @@ static long mouse_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     (void)offset;
     mouse_device_t *mouse = inode->internal_data;
     if (!mouse)
-        return -1;
+        return -EIO;
 
     unsigned long irq = irq_push();
     spinlock_acquire(&mouse->lock);
@@ -63,6 +63,7 @@ static void mouse_listener(const mouse_event_t *ev) {
 
 void mouse_device_init(void) {
     mouse_device = kmalloc(sizeof(mouse_device_t));
+    if (!mouse_device) return;
     memset(mouse_device, 0, sizeof(mouse_device_t));
     spinlock_init(&mouse_device->lock);
 

@@ -9,14 +9,8 @@
 #include <user/errno.h>
 #include <drivers/serial/serial.h>
 #include <ansii.h>
-
-static void free_user_alloc_nodes(user_alloc_t *alloc) {
-    while (alloc) {
-        user_alloc_t *next = alloc->next;
-        kfree(alloc);
-        alloc = next;
-    }
-}
+#include <string.h>
+#include <cpu/features/fpu.h>
 
 static const char *exec_display_name(const char *path, const char *inode_name) {
     if (inode_name && inode_name[0] != '\0')
@@ -46,7 +40,7 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     }
 
     char kpath[EXEC_MAX_PATH_LEN];
-    for (size_t i = 0; i < sizeof(kpath); i++) kpath[i] = 0;
+    memset(kpath, 0, sizeof(kpath));
     if (copy_user_string(task, (const char *)user_path_ptr, kpath, sizeof(kpath)) != 0) {
         return -EFAULT;
     }
@@ -82,7 +76,7 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     }
 
     for (uint64_t page = USER_STACK_TOP - USER_STACK_SIZE; page < USER_STACK_TOP; page += PAGE_SIZE) {
-        paddr_t paddr = pmm_alloc_pages(1);
+        paddr_t paddr = paging_alloc_empty_frame(NULL);
         if (!paddr) {
             ret = -ENOMEM;
             goto fail_new_cr3;
@@ -96,25 +90,21 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
         goto fail_new_cr3;
     }
     new_heap->task = task;
-    new_heap->current = 0x0000004000000000ULL;
+    new_heap->current = USER_MMAP_BASE;
     new_heap->end = new_heap->current;
 
     task->page_map = new_cr3;
     task->alloc_list = NULL;
     task->heap = new_heap;
-    task->sig_pending = 0;
-    task->sig_blocked = 0;
-    task->sig_active_frame = 0;
-    memset(task->sig_handlers, 0, sizeof(task->sig_handlers));
-    memset(task->sig_masks, 0, sizeof(task->sig_masks));
-    memset(task->sig_flags, 0, sizeof(task->sig_flags));
-    memset(task->sig_restorers, 0, sizeof(task->sig_restorers));
 
+    // everything the rollback cant put back is saved first, a failed exec has to
+    // return into the old image exactly as it was
     cpu_context_t *ctx = task->context;
     if (!ctx) {
         ret = -EIO;
         goto rollback_task;
     }
+    cpu_context_t old_ctx = *ctx;
 
     ctx->rip = entry;
     ctx->rsp = USER_STACK_TOP;
@@ -122,9 +112,20 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     ctx->rax = 0;
 
     if (elf_setup_user_args(task, args.argc, (const char *const *)args.argv) != 0) {
+        *ctx = old_ctx;
         ret = -EFAULT;
         goto rollback_task;
     }
+
+    // past the point of no return, the old handlers point into an image that is about to go
+    task->sig_pending = 0;
+    task->sig_blocked = 0;
+    task->sig_active_frame = 0;
+    memset(task->sig_handlers, 0, sizeof(task->sig_handlers));
+    memset(task->sig_masks, 0, sizeof(task->sig_masks));
+    memset(task->sig_flags, 0, sizeof(task->sig_flags));
+    memset(task->sig_restorers, 0, sizeof(task->sig_restorers));
+    fpu_task_reset(task);
 
     paging_switch_address_space(new_cr3);
 
@@ -132,7 +133,7 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     strncpy(task->name, new_name, sizeof(task->name) - 1);
     task->name[sizeof(task->name) - 1] = '\0';
 
-    free_user_alloc_nodes(old_alloc_list);
+    sched_free_alloc_list(old_alloc_list);
     if (old_heap)
         kfree(old_heap);
     paging_destroy_address_space(old_cr3);
@@ -156,6 +157,8 @@ fail_new_cr3:
     if (new_cr3)
         paging_destroy_address_space(new_cr3);
 done:
+    // elf_get_from_path took a ref for us
+    vfs_drop(file);
     exec_args_free(&args);
     if (ret < 0) {
         serial_printf(LOG_ERROR "exec failed pid=%u err=%d path=%s\n",

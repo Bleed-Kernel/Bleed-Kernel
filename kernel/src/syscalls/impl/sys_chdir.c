@@ -1,7 +1,6 @@
 #include <fs/vfs.h>
 #include <sched/scheduler.h>
 #include <user/user_copy.h>
-#include <status.h>
 #include <mm/kalloc.h>
 #include <string.h>
 #include <user/errno.h>
@@ -10,23 +9,23 @@ long sys_chdir(const char *user_path) {
     if (!user_path)
         return -EFAULT;
 
-    char kbuf[PATH_MAX];
-    memset(kbuf, 0, PATH_MAX);
-
     task_t *caller = get_current_task();
     if (!caller)
         return -ESRCH;
 
+    // PATH_MAX is half of an 8K kernel stack before the vfs has even been called, keep it on the heap
+    char *kbuf = kmalloc(PATH_MAX);
+    if (!kbuf)
+        return -ENOMEM;
+
     long plen = copy_user_path(caller, user_path, kbuf, PATH_MAX);
-    if (plen == -2)
-        return -E2BIG;
-    if (plen < 0)
-        return -EFAULT;
+    if (plen < 0) {
+        kfree(kbuf);
+        return plen == -2 ? -E2BIG : -EFAULT;
+    }
 
     int r = vfs_chdir(kbuf);
-    if (r == 0)
-        return 0;
-    if (r == -FILE_NOT_FOUND)
-        return -ENOENT;
-    return -EIO;
+    kfree(kbuf);
+
+    return r;
 }

@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <drivers/serial/serial.h>
 #include <ansii.h>
-#include <status.h>
+#include <user/errno.h>
 #include <stddef.h>
 
 #include "exfat_priv.h"
@@ -370,12 +370,12 @@ static int exfat_lookup(INode_t *dir, const char *name, size_t namelen, INode_t 
     while (exfat_iter_next_entryset(&it, &es)) {
         if (exfat_name_matches(fs, es.name, es.name_len, name, namelen)) {
             INode_t *inode = exfat_make_inode(fs, &es, dir);
-            if (!inode) return status_print_error(OUT_OF_MEMORY);
+            if (!inode) return -ENOMEM;
             *result = inode;
             return 0;
         }
     }
-    return -FILE_NOT_FOUND;
+    return -ENOENT;
 }
 
 static long exfat_read(INode_t *inode, void *buf, size_t count, size_t offset) {
@@ -446,7 +446,7 @@ static long exfat_write(INode_t *inode, const void *buf, size_t count, size_t of
 
     if (fi->first_cluster < EXFAT_FIRST_DATA_CLUSTER) {
         uint32_t c = exfat_alloc_cluster(fs, 0);
-        if (!c) return status_print_error(OUT_OF_MEMORY);
+        if (!c) return -ENOMEM;
         fi->first_cluster = c;
         fi->no_fat_chain  = false;
         exfat_patch_entryset(fi);
@@ -472,14 +472,14 @@ static long exfat_write(INode_t *inode, const void *buf, size_t count, size_t of
 
         while (have_clusters < needed_clusters) {
             uint32_t nc = exfat_alloc_cluster(fs, prev);
-            if (!nc) return status_print_error(OUT_OF_MEMORY);
+            if (!nc) return -ENOMEM;
             prev = nc;
             have_clusters++;
         }
     }
 
     uint32_t cluster = exfat_cluster_at(fs, fi->first_cluster, fi->no_fat_chain, offset);
-    if (cluster < EXFAT_FIRST_DATA_CLUSTER) return status_print_error(OUT_OF_BOUNDS);
+    if (cluster < EXFAT_FIRST_DATA_CLUSTER) return -EINVAL;
 
     size_t written_total = 0;
     size_t cluster_off    = offset % fs->bytes_per_cluster;
@@ -578,14 +578,13 @@ static int exfat_readdir(INode_t *dir, size_t index, INode_t **result) {
     while (exfat_iter_next_entryset(&it, &es)) {
         if (visible == index) {
             INode_t *inode = exfat_make_inode(fs, &es, dir);
-            if (!inode) return status_print_error(OUT_OF_MEMORY);
-            inode->shared++;
+            if (!inode) return -ENOMEM;
             *result = inode;
             return 0;
         }
         visible++;
     }
-    return -FILE_NOT_FOUND;
+    return -ENOENT;
 }
 
 static bool exfat_slot_free(uint8_t entry_type) {
@@ -595,7 +594,7 @@ static bool exfat_slot_free(uint8_t entry_type) {
 static int exfat_find_free_run(exfat_inode_t *dirfi, int need, uint32_t *out_cluster, uint32_t *out_off) {
     exfat_fs_t *fs = dirfi->fs;
     if ((uint32_t)need * sizeof(exfat_raw_dentry_t) > fs->bytes_per_cluster)
-        return status_print_error(NAME_LIMITS);
+        return -ENAMETOOLONG;
 
     if (dirfi->no_fat_chain)
         exfat_chain_ify(dirfi); // directories we grow must be chain-walkable 
@@ -628,7 +627,7 @@ static int exfat_find_free_run(exfat_inode_t *dirfi, int need, uint32_t *out_clu
     }
 
     uint32_t nc = exfat_alloc_cluster(fs, prev);
-    if (!nc) return status_print_error(OUT_OF_MEMORY);
+    if (!nc) return -ENOMEM;
 
     *out_cluster = nc;
     *out_off     = 0;
@@ -680,7 +679,7 @@ static int exfat_create(INode_t *parent, const char *name, size_t namelen,
 
     uint16_t name16[EXFAT_MAX_NAME_CHARS];
     if (!exfat_utf8_to_utf16(name, namelen, name16, EXFAT_MAX_NAME_CHARS))
-        return status_print_error(NAME_LIMITS);
+        return -ENAMETOOLONG;
 
     uint8_t name_slots = (uint8_t)((namelen + EXFAT_NAME_CHARS_PER_ENTRY - 1) / EXFAT_NAME_CHARS_PER_ENTRY);
     uint8_t secondary_count = (uint8_t)(1 + name_slots); // stream + name entries 
@@ -705,7 +704,7 @@ static int exfat_create(INode_t *parent, const char *name, size_t namelen,
     uint32_t new_cluster = 0;
     if (node_type == INODE_DIRECTORY) {
         new_cluster = exfat_alloc_cluster(fs, 0);
-        if (!new_cluster) return status_print_error(OUT_OF_MEMORY);
+        if (!new_cluster) return -ENOMEM;
         stream.first_cluster     = new_cluster;
         stream.data_length       = fs->bytes_per_cluster;
         stream.valid_data_length = fs->bytes_per_cluster;
@@ -714,7 +713,7 @@ static int exfat_create(INode_t *parent, const char *name, size_t namelen,
     exfat_write_entryset(fs, slot_cluster, slot_off, &file, &stream, name16, namelen);
 
     exfat_inode_t *fi = kmalloc(sizeof(*fi));
-    if (!fi) return status_print_error(OUT_OF_MEMORY);
+    if (!fi) return -ENOMEM;
     fi->fs                = fs;
     fi->first_cluster     = new_cluster;
     fi->file_size         = stream.data_length;
@@ -726,7 +725,7 @@ static int exfat_create(INode_t *parent, const char *name, size_t namelen,
     fi->secondary_count   = secondary_count;
 
     INode_t *inode = kmalloc(sizeof(*inode));
-    if (!inode) { kfree(fi); return status_print_error(OUT_OF_MEMORY); }
+    if (!inode) { kfree(fi); return -ENOMEM; }
     memset(inode, 0, sizeof(*inode));
     inode->type          = (node_type == INODE_DIRECTORY) ? INODE_DIRECTORY : INODE_FILE;
     inode->ops           = (node_type == INODE_DIRECTORY) ? &exfat_dir_ops : &exfat_file_ops;
@@ -755,7 +754,7 @@ static int exfat_unlink(INode_t *dir, const char *name, size_t namelen) {
                              (es.stream.flags & EXFAT_FLAG_NO_FAT_CHAIN) != 0);
             exfat_entryset_t ces;
             if (exfat_iter_next_entryset(&cit, &ces))
-                return status_print_error(OUT_OF_BOUNDS); // not empty 
+                return -ENOTEMPTY;
         }
 
         if (es.stream.first_cluster >= EXFAT_FIRST_DATA_CLUSTER)
@@ -775,7 +774,7 @@ static int exfat_unlink(INode_t *dir, const char *name, size_t namelen) {
 
         return 0;
     }
-    return -FILE_NOT_FOUND;
+    return -ENOENT;
 }
 
 static int exfat_rename(INode_t *dir, const char *oldname, size_t oldlen,
@@ -785,7 +784,7 @@ static int exfat_rename(INode_t *dir, const char *oldname, size_t oldlen,
 
     uint16_t new16[EXFAT_MAX_NAME_CHARS];
     if (!exfat_utf8_to_utf16(newname, newlen, new16, EXFAT_MAX_NAME_CHARS))
-        return status_print_error(NAME_LIMITS);
+        return -ENAMETOOLONG;
 
     uint8_t new_name_slots = (uint8_t)((newlen + EXFAT_NAME_CHARS_PER_ENTRY - 1) / EXFAT_NAME_CHARS_PER_ENTRY);
     uint8_t new_secondary  = (uint8_t)(1 + new_name_slots);
@@ -798,7 +797,7 @@ static int exfat_rename(INode_t *dir, const char *oldname, size_t oldlen,
         if (!exfat_name_matches(fs, es.name, es.name_len, oldname, oldlen)) continue;
 
         if (new_secondary > es.file.secondary_count)
-            return status_print_error(NAME_LIMITS); // would need to grow the set 
+            return -ENAMETOOLONG; // would need to grow the set 
 
         uint32_t lba = exfat_cluster_to_lba(fs, es.prim_cluster);
 
@@ -842,7 +841,7 @@ static int exfat_rename(INode_t *dir, const char *oldname, size_t oldlen,
 
         return 0;
     }
-    return -FILE_NOT_FOUND;
+    return -ENOENT;
 }
 
 static const INodeOps_t exfat_dir_ops = {
@@ -865,14 +864,14 @@ static const INodeOps_t exfat_file_ops = {
 int exfat_mount(INode_t *dev_inode, INode_t **root) {
     if (!dev_inode || !dev_inode->ops || !dev_inode->ops->read) {
         serial_printf(LOG_ERROR "exfat: device inode missing read op\n");
-        return -1;
+        return -EIO;
     }
 
     uint8_t sector[512];
     long r = inode_read(dev_inode, sector, 512, 0);
     if (r < 512) {
         serial_printf(LOG_ERROR "exfat: failed to read boot sector (got %ld bytes)\n", r);
-        return -1;
+        return -EIO;
     }
 
     exfat_boot_sector_t bs;
@@ -880,23 +879,23 @@ int exfat_mount(INode_t *dev_inode, INode_t **root) {
 
     if (memcmp(bs.fs_name, "EXFAT   ", 8) != 0) {
         serial_printf(LOG_ERROR "exfat: bad fs_name signature\n");
-        return -1;
+        return -EIO;
     }
     if (bs.boot_signature != EXFAT_BOOT_SIGNATURE) {
         serial_printf(LOG_ERROR "exfat: missing boot signature (got %04x)\n", bs.boot_signature);
-        return -1;
+        return -EIO;
     }
     if (bs.bytes_per_sector_shift < 9 || bs.bytes_per_sector_shift > 12) {
         serial_printf(LOG_ERROR "exfat: invalid bytes_per_sector_shift %u\n", bs.bytes_per_sector_shift);
-        return -1;
+        return -EIO;
     }
     if (bs.number_of_fats == 0 || bs.number_of_fats > 2) {
         serial_printf(LOG_ERROR "exfat: invalid number_of_fats %u\n", bs.number_of_fats);
-        return -1;
+        return -EIO;
     }
 
     exfat_fs_t *fs = kmalloc(sizeof(*fs));
-    if (!fs) return -1;
+    if (!fs) return -ENOMEM;
     memset(fs, 0, sizeof(*fs));
 
     fs->dev                  = dev_inode;
@@ -952,21 +951,21 @@ int exfat_mount(INode_t *dev_inode, INode_t **root) {
     if (!have_bitmap) {
         serial_printf(LOG_ERROR "exfat: no allocation bitmap entry found in root dir\n");
         kfree(fs);
-        return -1;
+        return -EIO;
     }
     if (!have_upcase) {
         serial_printf(LOG_WARN "exfat: no up-case table found, falling back to ASCII case folding\n");
     }
 
     exfat_inode_t *root_fi = kmalloc(sizeof(*root_fi));
-    if (!root_fi) { kfree(fs); return -1; }
+    if (!root_fi) { kfree(fs); return -ENOMEM; }
     memset(root_fi, 0, sizeof(*root_fi));
     root_fi->fs            = fs;
     root_fi->first_cluster = fs->root_cluster;
     root_fi->no_fat_chain  = false;
 
     INode_t *root_inode = kmalloc(sizeof(*root_inode));
-    if (!root_inode) { kfree(root_fi); kfree(fs); return -1; }
+    if (!root_inode) { kfree(root_fi); kfree(fs); return -ENOMEM; }
     memset(root_inode, 0, sizeof(*root_inode));
     root_inode->type          = INODE_DIRECTORY;
     root_inode->ops           = &exfat_dir_ops;

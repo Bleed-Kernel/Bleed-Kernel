@@ -1,5 +1,5 @@
 #include <devices/devices.h>
-#include <status.h>
+#include <user/errno.h>
 #include <string.h>
 #include <fs/vfs.h>
 #include <stdio.h>
@@ -14,15 +14,16 @@ static spinlock_t device_list_lock = {0};
 
 /// @brief register a new device
 /// @param device device structure
-/// @return df
+/// @param name name it shows up as under /dev
+/// @return 0 on success, negative status code on failure
 long device_register(INode_t *device, char *name){
     if (!device || !name)
-        return -DEV_EXISTS;
+        return -EEXIST;
 
     spinlock_acquire(&device_list_lock);
     if (device_list_count >= MAX_DEVICES) {
         spinlock_release(&device_list_lock);
-        return -MAX_DEVICES_REACHED;
+        return -ENOSPC;
     }
 
     size_t devidx = device_list_count;
@@ -30,7 +31,7 @@ long device_register(INode_t *device, char *name){
     for (size_t i = 0; i < device_list_count; i++){
         if (strcmp(device_list[i].name, name) == 0){
             spinlock_release(&device_list_lock);
-            return -DEV_EXISTS;
+            return -EEXIST;
         }
     }
 
@@ -39,11 +40,11 @@ long device_register(INode_t *device, char *name){
     int lr = vfs_lookup(&devpath, &devdir);
     if (lr < 0 || !devdir) {
         spinlock_release(&device_list_lock);
-        return lr < 0 ? lr : -FILE_NOT_FOUND;
+        return lr < 0 ? lr : -ENOENT;
     }
 
     INode_t *devicenode = NULL;
-    char dev_path_buffer[4096] = {0};
+    char dev_path_buffer[128] = {0};
     snprintf(dev_path_buffer, sizeof(dev_path_buffer), "/dev/%s", name);
     path_t device_file = vfs_path_from_abs(dev_path_buffer);
 
@@ -51,7 +52,7 @@ long device_register(INode_t *device, char *name){
     if (cr < 0 || !devicenode) {
         vfs_drop(devdir);
         spinlock_release(&device_list_lock);
-        return cr < 0 ? cr : -OUT_OF_MEMORY;
+        return cr < 0 ? cr : -ENOMEM;
     }
 
     devicenode->ops = device->ops;
@@ -62,9 +63,16 @@ long device_register(INode_t *device, char *name){
     if (!device_list[devidx].name) {
         vfs_drop(devdir);
         spinlock_release(&device_list_lock);
-        return -OUT_OF_MEMORY;
+        return -ENOMEM;
     }
     device_list_count++;
+
+    // the list holds a ref of its own. a device that registered with shared = 0 would
+    // otherwise be freed by the first task to open and close it
+    device->shared++;
+
+    // the caller ref from vfs_create, the tree keeps the node alive
+    vfs_drop(devicenode);
     vfs_drop(devdir);
     spinlock_release(&device_list_lock);
     return 0;

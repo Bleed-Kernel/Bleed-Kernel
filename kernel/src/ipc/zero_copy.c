@@ -134,6 +134,14 @@ static int ipc_validate_send_range(task_t *sender, uintptr_t src_addr, size_t pa
         uint64_t *pte = paging_get_page(sender->page_map, page, 0);
         if (!pte || !(*pte & PTE_PRESENT) || !(*pte & PTE_USER))
             return -EFAULT;
+
+        // the framebuffer mapping sits in the alloc list too, its frames arent ours to give away
+        if (*pte & PTE_NOFREE)
+            return -EINVAL;
+
+        // a frame still shared with a fork has to become private before it can change owner
+        if ((*pte & PTE_COW) && !paging_handle_cow_fault(sender, page, 0x7))
+            return -ENOMEM;
     }
 
     return 0;
@@ -222,7 +230,9 @@ long ipc_recv(task_t *receiver, uint64_t user_msg_ptr) {
     if (!msg)
         return -EAGAIN;
 
-    void *target_addr = task_mmap(receiver, msg->pages);
+    // reserve only, task_mmap would back the range with fresh frames that the sent
+    // ones then get mapped over and leak
+    void *target_addr = task_mmap_reserve(receiver, msg->pages);
     if (!target_addr) {
         for (size_t i = 0; i < (size_t)msg->pages; i++)
             pmm_free_pages(msg->phys_pages[i], 1);

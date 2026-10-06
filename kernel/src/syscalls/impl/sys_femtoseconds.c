@@ -2,6 +2,6 @@
 #include <ACPI/acpi_hpet.h>
 #include <stdint.h>
 
-uint64_t sys_femtoseconds(){
+uint64_t sys_femtoseconds(void){
     return hpet_get_femtoseconds();
 }

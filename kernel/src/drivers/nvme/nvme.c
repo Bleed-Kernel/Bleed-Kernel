@@ -156,12 +156,17 @@ static bool nvme_controller_init(nvme_drive_t *d) {
     serial_printf(LOG_INFO "nvme: dstrd=%u mpsmin=%u mps=%u\n", dstrd, mpsmin, mps);
 
     // Admin queues MUST be 4096-byte aligned
-    d->asq = (nvme_sqe_t *)(uintptr_t)MMIO(pmm_alloc_pages(1));
-    d->acq = (nvme_cqe_t *)(uintptr_t)MMIO(pmm_alloc_pages(1));
-    if (!d->asq || !d->acq) {
+    // check the paddr, once the hhdm offset is added a failed alloc isnt NULL anymore
+    paddr_t asq_phys = pmm_alloc_pages(1);
+    paddr_t acq_phys = pmm_alloc_pages(1);
+    if (!asq_phys || !acq_phys) {
         serial_printf(LOG_ERROR "nvme: OOM allocating admin queues\n");
+        if (asq_phys) pmm_free_pages(asq_phys, 1);
+        if (acq_phys) pmm_free_pages(acq_phys, 1);
         return false;
     }
+    d->asq = (nvme_sqe_t *)(uintptr_t)MMIO(asq_phys);
+    d->acq = (nvme_cqe_t *)(uintptr_t)MMIO(acq_phys);
     memset(d->asq, 0, PAGE_SIZE_4K);
     memset(d->acq, 0, PAGE_SIZE_4K);
 
@@ -208,12 +213,16 @@ static bool nvme_set_num_queues(nvme_drive_t *d, uint16_t num_queues) {
 
 static bool nvme_create_io_queues(nvme_drive_t *d) {
     // IO queues also require page alignment
-    d->iosq = (nvme_sqe_t *)(uintptr_t)MMIO(pmm_alloc_pages(1));
-    d->iocq = (nvme_cqe_t *)(uintptr_t)MMIO(pmm_alloc_pages(1));
-    if (!d->iosq || !d->iocq) {
+    paddr_t iosq_phys = pmm_alloc_pages(1);
+    paddr_t iocq_phys = pmm_alloc_pages(1);
+    if (!iosq_phys || !iocq_phys) {
         serial_printf(LOG_ERROR "nvme: OOM allocating IO queues\n");
+        if (iosq_phys) pmm_free_pages(iosq_phys, 1);
+        if (iocq_phys) pmm_free_pages(iocq_phys, 1);
         return false;
     }
+    d->iosq = (nvme_sqe_t *)(uintptr_t)MMIO(iosq_phys);
+    d->iocq = (nvme_cqe_t *)(uintptr_t)MMIO(iocq_phys);
     memset(d->iosq, 0, PAGE_SIZE_4K);
     memset(d->iocq, 0, PAGE_SIZE_4K);
 
@@ -248,8 +257,9 @@ static bool nvme_create_io_queues(nvme_drive_t *d) {
 
 static bool nvme_identify_ns(nvme_drive_t *d, uint32_t nsid) {
     // Identify data buffer must be aligned to page
-    nvme_identify_ns_t *ns = (nvme_identify_ns_t *)(uintptr_t)MMIO(pmm_alloc_pages(1));
-    if (!ns) return false;
+    paddr_t ns_phys = pmm_alloc_pages(1);
+    if (!ns_phys) return false;
+    nvme_identify_ns_t *ns = (nvme_identify_ns_t *)(uintptr_t)MMIO(ns_phys);
     memset(ns, 0, PAGE_SIZE_4K);
 
     nvme_sqe_t cmd = {0};
@@ -275,8 +285,9 @@ static bool nvme_identify_ns(nvme_drive_t *d, uint32_t nsid) {
 
 // Identify Controller to pull the model string
 static bool nvme_identify_ctrl(nvme_drive_t *d) {
-    uint8_t *data = (uint8_t *)(uintptr_t)MMIO(pmm_alloc_pages(1));
-    if (!data) return false;
+    paddr_t data_phys = pmm_alloc_pages(1);
+    if (!data_phys) return false;
+    uint8_t *data = (uint8_t *)(uintptr_t)MMIO(data_phys);
     memset(data, 0, PAGE_SIZE_4K);
 
     nvme_sqe_t cmd = {0};
@@ -572,21 +583,9 @@ void nvme_init(void) {
     }
 
     // Map the MMIO region into the HHDM
-    paddr_t  cr3       = read_cr3();
-    uint64_t page_base = bar0_phys & ~(uint64_t)(PAGE_SIZE_4K - 1);
-    uint64_t page_end  = (bar0_phys + 0x10000 + PAGE_SIZE_4K - 1)
-                         & ~(uint64_t)(PAGE_SIZE_4K - 1);
-
-    for (uint64_t p = page_base; p < page_end; p += PAGE_SIZE_4K) {
-        uint64_t virt = p + nvme_hhdm_offset();
-        uint64_t *pte = paging_get_page(cr3, virt, 1);
-        if (pte) {
-            *pte = (p & PADDR_ENTRY_MASK) | PTE_PRESENT | PTE_WRITABLE | PTE_NX;
-            asm volatile("invlpg (%0)" :: "r"(virt) : "memory");
-        } else {
-            serial_printf(LOG_ERROR "nvme: failed to map MMIO page 0x%llx\n", p);
-            return;
-        }
+    if (paging_map_mmio(bar0_phys, 0x10000) < 0) {
+        serial_printf(LOG_ERROR "nvme: failed to map MMIO at 0x%llx\n", bar0_phys);
+        return;
     }
 
     uint64_t mmio_base = MMIO(bar0_phys);

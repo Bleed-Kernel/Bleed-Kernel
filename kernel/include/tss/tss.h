@@ -4,7 +4,9 @@
 typedef struct {
     uint32_t reserved;
     uint64_t rsp0;
-    uint32_t reserved2[23];
+    uint32_t reserved2[22];
+    uint16_t reserved3;
+    uint16_t iopb;          // offset of the io permission bitmap from the tss base
 } __attribute__((packed)) tss_t;
 
 typedef struct {
@@ -20,4 +22,4 @@ typedef struct {
 
 extern tss_t tss;
 
-void tss_init();
+void tss_init(void);

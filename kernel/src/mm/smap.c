@@ -3,6 +3,7 @@
 #include <drivers/serial/serial.h>
 #include <ansii.h>
 #include <cpu/control_registers.h>
+#include <cpu/cpuid.h>
 
 #define CPUID_LEAF_BASIC_MAX     0
 #define CPUID_LEAF_EXT_FEATURES  7
@@ -15,20 +16,13 @@
 
 int smap_supported = 0;
 
-static inline void cpuid(uint32_t leaf, uint32_t subleaf,
-                         uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *edx) {
-    __asm__ volatile("cpuid"
-                     : "=a"(*eax), "=b"(*ebx), "=c"(*ecx), "=d"(*edx)
-                     : "a"(leaf), "c"(subleaf));
-}
-
 int SMAP_init(void) {
-    uint32_t eax, ebx, ecx, edx = 0;
+    uint32_t eax = 0, ebx = 0, ecx = 0, edx = 0;
     uint32_t features = 0;
 
-    cpuid(CPUID_LEAF_BASIC_MAX, 0, &eax, &ebx, &ecx, &edx);
+    cpuid(CPUID_LEAF_BASIC_MAX, &eax, &ebx, &ecx, &edx);
     if (eax >= CPUID_LEAF_EXT_FEATURES) {
-        cpuid(CPUID_LEAF_EXT_FEATURES, 0, &eax, &ebx, &ecx, &edx);
+        cpuid_count(CPUID_LEAF_EXT_FEATURES, 0, &eax, &ebx, &ecx, &edx);
         features = ebx;
     }
 

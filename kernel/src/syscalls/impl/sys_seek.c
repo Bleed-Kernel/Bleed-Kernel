@@ -7,10 +7,5 @@ long sys_seek(int fd, long offset, int whence) {
     if (!caller)
         return -ESRCH;
 
-    long r = vfs_seek(fd, offset, whence);
-    if (r >= 0)
-        return r;
-    if (r == -2)
-        return -EINVAL;
-    return -EBADF;
+    return vfs_seek(fd, offset, whence);
 }
