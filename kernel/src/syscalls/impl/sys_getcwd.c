@@ -3,6 +3,7 @@
 #include <string.h>
 #include <user/user_copy.h>
 #include <user/errno.h>
+#include <mm/kalloc.h>
 
 long sys_getcwd(char *buf, long size) {
     if (!buf || size <= 0)
@@ -15,15 +16,12 @@ long sys_getcwd(char *buf, long size) {
         return -ENOENT;
 
     INode_t *inode = task->current_directory;
-    char kpath[PATH_MAX];
 
     // fast root
     if (inode == vfs_get_root()) {
         if (size < 2)
             return -ERANGE;
-        kpath[0] = '/';
-        kpath[1] = '\0';
-        if (copy_to_user(task, buf, kpath, 2) != 0)
+        if (copy_to_user(task, buf, "/", 2) != 0)
             return -EFAULT;
         return 0;
     }
@@ -40,8 +38,13 @@ long sys_getcwd(char *buf, long size) {
     }
 
     // +1 for null terminator, path itself starts with '/' already accounted for
-    if (total_len + 1 > (size_t)size || total_len + 1 > sizeof(kpath))
+    if (total_len + 1 > (size_t)size || total_len + 1 > PATH_MAX)
         return -ERANGE;
+
+    // sized to the path, a PATH_MAX array is half of an 8K kernel stack
+    char *kpath = kmalloc(total_len + 1);
+    if (!kpath)
+        return -ENOMEM;
 
     kpath[total_len] = '\0';
     cur = inode;
@@ -55,8 +58,8 @@ long sys_getcwd(char *buf, long size) {
         cur = cur->parent;
     }
 
-    if (copy_to_user(task, buf, kpath, total_len + 1) != 0)
-        return -EFAULT;
+    int rc = copy_to_user(task, buf, kpath, total_len + 1);
+    kfree(kpath);
 
-    return 0;
+    return rc != 0 ? -EFAULT : 0;
 }

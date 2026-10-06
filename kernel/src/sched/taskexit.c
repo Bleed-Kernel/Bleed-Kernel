@@ -35,6 +35,12 @@ void exit(void) {
 
     current_task->wait_queue = NULL;
 
+    // our children outlive us. they go to the reaper, and any that already exited were
+    // only being kept around for a wait we are never going to make
+    task_t *orphan;
+    while ((orphan = sched_reparent_children(current_task)))
+        sched_mark_task_dead(orphan);
+
     task_t *parent = NULL;
     if (current_task->ppid > 0)
         parent = sched_get_task(current_task->ppid);
@@ -42,7 +48,10 @@ void exit(void) {
     if (parent && parent->task_privilege == PRIVILEGE_USER)
         signal_send(parent, SIGCHLD);
 
-    if (!parent || parent->state == TASK_DEAD || parent->state == TASK_ZOMBIE || parent->state == TASK_FREE) {
+    // only a live user task can wait for us. a kernel parent (the reaper, for an orphan)
+    // never will, so theres no point in leaving a zombie behind for it
+    if (!parent || parent->task_privilege != PRIVILEGE_USER ||
+        parent->state == TASK_DEAD || parent->state == TASK_ZOMBIE || parent->state == TASK_FREE) {
         sched_mark_task_dead(current_task);
     } else {
         current_task->state = TASK_ZOMBIE;

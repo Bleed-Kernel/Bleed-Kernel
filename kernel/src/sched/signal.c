@@ -8,8 +8,13 @@
 #include <user/user_copy.h>
 #include <user/errno.h>
 #include <string.h>
+#include <gdt/gdt.h>
 
 #include "priv_scheduler.h"
+
+// the only rflags bits a task gets to pick for itself on sigreturn (status flags, TF and DF)
+#define RFLAGS_USER_MASK    0xDD5ULL
+#define RFLAGS_IF           0x200ULL
 
 typedef struct sigframe {
     cpu_context_t saved_ctx;
@@ -69,13 +74,19 @@ int signal_send(task_t *task, int sig) {
     if (!valid_signal(sig))
         return -EINVAL;
 
+    // nothing left to deliver to, and flipping it back to READY would stop it ever being reaped
+    if (task->state == TASK_ZOMBIE || task->state == TASK_DEAD || task->state == TASK_FREE)
+        return 0;
+
     if (sig == SIGCONT) {
         task->sig_pending &= ~sig_bit(SIGSTOP);
         task->sig_pending &= ~sig_bit(SIGTSTP);
         task->sig_pending &= ~sig_bit(SIGTTIN);
         task->sig_pending &= ~sig_bit(SIGTTOU);
-        if (task->state == TASK_STOPPED)
+        if (task->state == TASK_STOPPED) {
             task->state = TASK_READY;
+            ready_enqueue(task);
+        }
     }
     if (signal_default_stop(sig))
         task->sig_pending &= ~sig_bit(SIGCONT);
@@ -204,6 +215,15 @@ int signal_handle_sigreturn(task_t *task, cpu_context_t *ctx) {
     if (copy_from_user(task, &frame, (const void *)task->sig_active_frame, sizeof(frame)) != 0)
         return -EFAULT;
 
+    // the frame lives in user memory so it cant be trusted, without this a task
+    // could sigreturn itself straight into ring 0
+    if (!user_ptr_valid(frame.saved_ctx.rip))
+        return -EFAULT;
+
+    frame.saved_ctx.cs     = USER_CS;
+    frame.saved_ctx.ss     = USER_SS;
+    frame.saved_ctx.rflags = (frame.saved_ctx.rflags & RFLAGS_USER_MASK) | RFLAGS_IF;
+
     *ctx = frame.saved_ctx;
     task->sig_blocked = frame.old_mask;
     task->sig_active_frame = frame.prev_frame;
@@ -228,7 +248,10 @@ void signal_deliver_pending(task_t *task, cpu_context_t *ctx) {
 
         task->sig_pending &= ~bit;
 
+        // an ignored signal shouldnt hold up whatever is queued behind it
         int default_action = signal_apply_default_action(task, sig, bit);
+        if (default_action == 0)
+            continue;
         if (default_action != -1)
             return;
 
@@ -260,7 +283,11 @@ int signal_should_interrupt(task_t *task) {
         if (handler == SIG_DFL && signal_default_ignored(sig))
             continue;
 
-        task->sig_pending &= ~bit;
+        // a handler cant be entered while another is on the stack, so it cant interrupt anything yet
+        if (handler != SIG_DFL && task->sig_active_frame)
+            continue;
+
+        // leave it pending when theres a handler, signal_deliver_pending still has to run it
         int default_action = signal_apply_default_action(task, sig, bit);
         if (default_action != -1)
             return default_action;

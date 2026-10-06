@@ -1,6 +1,6 @@
 #include <devices/devices.h>
 #include <fs/vfs.h>
-#include <status.h>
+#include <user/errno.h>
 #include <string.h>
 #include <mm/kalloc.h>
 #include <drivers/serial/serial.h>
@@ -33,7 +33,7 @@ static const INodeOps_t serial_ops = {
 
 int serial_device_register() {
     INode_t* dev_inode = kmalloc(sizeof(INode_t));
-    if (!dev_inode) return status_print_error(OUT_OF_MEMORY);
+    if (!dev_inode) return -ENOMEM;
 
     memset(dev_inode, 0, sizeof(INode_t));
     dev_inode->ops = &serial_ops;

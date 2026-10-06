@@ -186,18 +186,20 @@ int vmm_unmap_free_pages(vmm_cr3_t cr3, void *virt, size_t page_count) {
     uintptr_t va = PAGE_ALIGN_DOWN((uintptr_t)virt);
     for (size_t i = 0; i < page_count; i++) {
         uintptr_t vpage = va + i * PAGE_SIZE;
-        paddr_t   ppage = 0;
+        uint64_t *pte   = paging_get_page(cr3, vpage, 0);
+        if (!pte || !(*pte & PTE_PRESENT))
+            continue;
 
-        if (vmm_page_paddr(cr3, vpage, &ppage) == 0) {
-            uint64_t *pte = paging_get_page(cr3, vpage, 0);
-            if (pte && (*pte & PTE_COW)) {
-                if (cow_unref_page(ppage & PADDR_ENTRY_MASK) == 0)
-                    pmm_free_pages(ppage & PADDR_ENTRY_MASK, 1);
-            } else {
-                pmm_free_pages(ppage & PADDR_ENTRY_MASK, 1);
-            }
-            paging_unmap_page(cr3, vpage);
+        paddr_t ppage = *pte & PADDR_ENTRY_MASK;
+        if (*pte & PTE_NOFREE) {
+            // mmio, never came from the pmm
+        } else if (*pte & PTE_COW) {
+            if (cow_unref_page(ppage) == 0)
+                pmm_free_pages(ppage, 1);
+        } else {
+            pmm_free_pages(ppage, 1);
         }
+        paging_unmap_page(cr3, vpage);
     }
     return 0;
 }

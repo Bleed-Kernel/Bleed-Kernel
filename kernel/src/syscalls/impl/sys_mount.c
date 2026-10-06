@@ -3,7 +3,6 @@
 #include <devices/devices.h>
 #include <sched/scheduler.h>
 #include <string.h>
-#include <status.h>
 #include <user/errno.h>
 #include <user/user_copy.h>
 
@@ -53,14 +52,5 @@ int sys_mount(const char *user_source,
     if (!dev_inode)
         return -ENODEV;
 
-    int r = vfs_mount(ktarget, dev_inode);
-    if (r >= 0)
-        return 0;
-
-    if (r == -FILE_NOT_FOUND)  return -ENOENT;
-    if (r == -UNIMPLEMENTED)   return -ENOSYS;
-    if (r == -NAME_LIMITS)     return -ENAMETOOLONG;
-    if (r == -OUT_OF_MEMORY)   return -ENOMEM;
-
-    return -EIO;
+    return vfs_mount(ktarget, dev_inode);
 }

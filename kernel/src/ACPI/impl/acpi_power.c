@@ -143,18 +143,11 @@ void acpi_reboot(void) {
         if (reset_space == 1) {
             outb((uint16_t)reset_address, reset_value);
         } else {
-            paddr_t phys_page = reset_address & ~(PAGE_SIZE_4K - 1);
-            size_t offset = reset_address & (PAGE_SIZE_4K - 1);
-
-            void *vpage = NULL;
-            paging_alloc_empty_frame(&vpage);
-            if (!vpage)
-                ke_panic(NULL, "Failed to allocate virtual page for ACPI reset MMIO");
-
-            paging_map_page(read_cr3(), phys_page, (paddr_t)vpage, PAGE_KERNEL_RW);
-
-            volatile uint8_t *reset_mmio = (volatile uint8_t *)((uintptr_t)vpage + offset);
-            *reset_mmio = reset_value;
+            // reach the register through the hhdm, if it wont map the 0xCF9 fallback below still runs
+            if (paging_map_mmio((paddr_t)reset_address, 1) == 0) {
+                volatile uint8_t *reset_mmio = (volatile uint8_t *)paddr_to_vaddr((paddr_t)reset_address);
+                *reset_mmio = reset_value;
+            }
         }
     }
 

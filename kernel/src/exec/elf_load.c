@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <ansii.h>
 #include <string.h>
-#include <status.h>
+#include <user/errno.h>
 #include <user/user_copy.h>
 #include <syscalls/syscall.h>
 
@@ -84,7 +84,7 @@ fail:
 }
 
 int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
-    if (!elf_file || !entry) return -INVALID_MAGIC;
+    if (!elf_file || !entry) return -ENOEXEC;
 
     ELF64_EHDR ehdr;
     memset(&ehdr, 0, sizeof(ehdr));
@@ -92,19 +92,19 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
     long r = vfs_read_exact(elf_file, &ehdr, sizeof(ehdr), 0);
     if (r != 0) return r;
 
-    if (memcmp(ELF_MAGIC, ehdr.e_ident, 4) != 0)    return -INVALID_MAGIC;
-    if (ehdr.e_type != ET_EXEC)                     return -INVALID_MAGIC;
-    if (ehdr.e_ident[4] != EI_CLASS64)              return -INVALID_MAGIC;
-    if (ehdr.e_ident[5] != EI_LITTLE_ENDIAN)        return -INVALID_MAGIC;
-    if (ehdr.e_phentsize != sizeof(ELF64_Phdr))     return -INVALID_MAGIC;
-    if (ehdr.e_phnum == 0)                          return -INVALID_MAGIC;
-    if (ehdr.e_phoff < sizeof(ELF64_EHDR))          return -INVALID_MAGIC;
+    if (memcmp(ELF_MAGIC, ehdr.e_ident, 4) != 0)    return -ENOEXEC;
+    if (ehdr.e_type != ET_EXEC)                     return -ENOEXEC;
+    if (ehdr.e_ident[4] != EI_CLASS64)              return -ENOEXEC;
+    if (ehdr.e_ident[5] != EI_LITTLE_ENDIAN)        return -ENOEXEC;
+    if (ehdr.e_phentsize != sizeof(ELF64_Phdr))     return -ENOEXEC;
+    if (ehdr.e_phnum == 0)                          return -ENOEXEC;
+    if (ehdr.e_phoff < sizeof(ELF64_EHDR))          return -ENOEXEC;
 
     size_t phdr_size = ehdr.e_phentsize * ehdr.e_phnum;
-    if (phdr_size / ehdr.e_phentsize != ehdr.e_phnum) return -INVALID_MAGIC;
+    if (phdr_size / ehdr.e_phentsize != ehdr.e_phnum) return -ENOEXEC;
 
     ELF64_Phdr *phdr = kmalloc(phdr_size);
-    if (!phdr) return -OUT_OF_MEMORY;
+    if (!phdr) return -ENOMEM;
 
     r = vfs_read_exact(elf_file, phdr, phdr_size, ehdr.e_phoff);
     if (r != 0) goto out_phdr;
@@ -115,29 +115,35 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
 
         if (phdr[i].p_memsz < 0 ||
             phdr[i].p_filesz > (ELF64_LONG)phdr[i].p_memsz) {
-            r = -INVALID_MAGIC;
+            r = -ENOEXEC;
             goto out_phdr;
         }
-
 
         uint64_t pflags = PTE_USER | PTE_PRESENT;
         if (phdr[i].p_flags & PF_W) pflags |= PTE_WRITABLE;
 
         uintptr_t seg_start = PAGE_ALIGN_DOWN(phdr[i].p_vaddr);
         uintptr_t seg_end;
-        if (__builtin_add_overflow(phdr[i].p_vaddr, phdr[i].p_memsz, &seg_end)) { r = -INVALID_MAGIC; goto out_phdr; }
+        if (__builtin_add_overflow(phdr[i].p_vaddr, phdr[i].p_memsz, &seg_end)) { r = -ENOEXEC; goto out_phdr; }
         seg_end = PAGE_ALIGN_UP(seg_end);
+
+        // a segment aimed at the higher half would get mapped straight over the kernel,
+        // those tables are shared by every address space
+        if (!user_ptr_valid(seg_start) || seg_end <= seg_start || !user_ptr_valid(seg_end - 1)) {
+            r = -ENOEXEC;
+            goto out_phdr;
+        }
 
         uintptr_t segment_bytes = seg_end - seg_start;
         if (segment_bytes == 0) continue;
 
         char *load_buffer = kmalloc(segment_bytes);
-        if (!load_buffer) { r = -OUT_OF_MEMORY; goto out_phdr; }
+        if (!load_buffer) { r = -ENOMEM; goto out_phdr; }
 
         memset(load_buffer, 0, segment_bytes);
 
         uintptr_t vert_offset = phdr[i].p_vaddr - seg_start;
-        if (phdr[i].p_filesz > segment_bytes - vert_offset) { r = -INVALID_MAGIC; goto out_buf; }
+        if (phdr[i].p_filesz > segment_bytes - vert_offset) { r = -ENOEXEC; goto out_buf; }
 
         r = vfs_read_exact(elf_file,
                            load_buffer + vert_offset,
@@ -145,19 +151,35 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
                            phdr[i].p_offset);
         if (r != 0) goto out_buf;
 
+        uintptr_t data_start = phdr[i].p_vaddr;
+        uintptr_t data_end   = phdr[i].p_vaddr + phdr[i].p_memsz;
+
         for (uintptr_t off = 0; off < segment_bytes; off += PAGE_SIZE){
+            uintptr_t page = seg_start + off;
+
+            // segments are allowed to share a page, mapping a fresh frame over it would
+            // throw away what the earlier segment put there so only copy our own bytes in
+            uint64_t *pte = paging_get_page(cr3, page, 0);
+            if (pte && (*pte & PTE_PRESENT)) {
+                uintptr_t lo = data_start > page ? data_start : page;
+                uintptr_t hi = data_end < page + PAGE_SIZE ? data_end : page + PAGE_SIZE;
+
+                memcpy((uint8_t *)paddr_to_vaddr(*pte & PADDR_ENTRY_MASK) + (lo - page),
+                       load_buffer + (lo - seg_start),
+                       hi - lo);
+                *pte |= pflags & PTE_WRITABLE;
+                continue;
+            }
+
             paddr_t phys = pmm_alloc_pages(1);
-            if (!phys) { r = -OUT_OF_MEMORY; goto out_buf; }
+            if (!phys) { r = -ENOMEM; goto out_buf; }
 
-            paging_map_page_invl(cr3, phys, seg_start + off, pflags, 0);
+            paging_map_page_invl(cr3, phys, page, pflags, 0);
 
-            size_t copy_size = PAGE_SIZE;
-            if (off + copy_size > segment_bytes)
-                copy_size = segment_bytes - off;
-
+            // segment_bytes is page aligned so this is always a whole page
             memcpy((void*)paddr_to_vaddr(phys),
                    load_buffer + off,
-                   copy_size);
+                   PAGE_SIZE);
         }
 
         kfree(load_buffer);
@@ -165,6 +187,12 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
 
 out_buf:
         kfree(load_buffer);
+        goto out_phdr;
+    }
+
+    // returning to a non canonical rip faults in ring 0, not in the task
+    if (!user_ptr_valid(ehdr.e_entry)) {
+        r = -ENOEXEC;
         goto out_phdr;
     }
 
@@ -200,8 +228,12 @@ task_t *elf_sched(INode_t *file, int argc, const char *const argv[]){
     paddr_t cr3 = paging_create_address_space();
     if (!cr3) return NULL;
 
+    // a half loaded image still owns its frames, hand them back
     uintptr_t entry = 0;
-    if (elf_load(file, cr3, &entry) != 0) return NULL;
+    if (elf_load(file, cr3, &entry) != 0) {
+        paging_destroy_address_space(cr3);
+        return NULL;
+    }
 
     task_t *task = sched_create_task(cr3, entry, USER_CS, USER_SS, file->internal_data);
     if (!task) return NULL;

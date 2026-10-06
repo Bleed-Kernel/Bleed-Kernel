@@ -9,7 +9,7 @@
 #include <devices/device_io.h>
 #include <mm/spinlock.h>
 #include <mm/kalloc.h>
-#include <mm/smap.h>
+#include <user/user_copy.h>
 #include <console/console.h>
 #include <fonts/utf-8.h>
 #include <fonts/psf.h>
@@ -252,13 +252,9 @@ long tty_read(INode_t *dev, void *buf, size_t len, size_t offset) {
     size_t min_required = (tty->flags & TTY_CANNONICAL) ? 1 : tty->termios.c_cc[TTY_VMIN];
     if (min_required == 0) min_required = 1;
 
+    // no signal check in here, a fatal one never returns and would take in_lock with it.
+    // the loop cant block anyway, the check before the lock is enough
     while (bytes_read < len && tty->in_tail != tty->in_head) {
-        if (signal_should_interrupt(current)) {
-            spinlock_release(&tty->in_lock);
-            irq_restore(irq);
-            return bytes_read ? (long)bytes_read : -EINTR;
-        }
-
         char c = tty->inbuffer[tty->in_tail];
         tty->in_tail = (tty->in_tail + 1) % TTY_BUFFER_SZ;
         user_buf[bytes_read++] = c;
@@ -281,118 +277,132 @@ long tty_inode_write(INode_t *inode, const void *in_buffer, size_t size, size_t 
     return (long)size;
 }
 
+// arg is a raw user pointer, everything in and out of an ioctl goes through these two
+static int tty_arg_in(void *arg, void *dst, size_t len) {
+    if (!arg) return -EINVAL;
+    return copy_from_user(get_current_task(), dst, arg, len) == 0 ? 0 : -EFAULT;
+}
+
+static int tty_arg_out(void *arg, const void *src, size_t len) {
+    if (!arg) return -EINVAL;
+    return copy_to_user(get_current_task(), arg, src, len) == 0 ? 0 : -EFAULT;
+}
+
 int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
     tty_t *tty = dev->internal_data;
+    tty_fb_backend_t *b = tty->backend;
+    int r;
 
-    SMAP_ALLOW {
-        switch (req) {
-            case TTY_IOCTL_SET_FLAGS:
-                if (!arg) return -EINVAL;
-                tty->flags = *(uint32_t *)arg;
-                tty_sync_termios_from_flags(tty);
-                return 0;
-
-            case TTY_IOCTL_GET_FLAGS:
-                if (!arg) return -EINVAL;
-                tty_sync_flags_from_termios(tty);
-                *(uint32_t *)arg = tty->flags;
-                return 0;
-
-            case TTY_IOCTL_GET_CURSOR: {
-                if (!arg) return -EINVAL;
-                tty_fb_backend_t *b = tty->backend;
-                tty_cursor_t *cursor = (tty_cursor_t *)arg;
-                cursor->x = b->fb.cursor_x;
-                cursor->y = b->fb.cursor_y;
-                return 0;
-            }
-
-            case TTY_IOCTL_SET_CURSOR: {
-                if (!arg) return -EINVAL;
-                tty_fb_backend_t *b = tty->backend;
-                tty_cursor_t *cursor = (tty_cursor_t *)arg;
-                uint32_t cols = 1, rows = 1;
-                tty_fill_winsize(tty, &cols, &rows);
-                if (cursor->x < cols && cursor->y < rows) {
-                    b->fb.cursor_x = cursor->x;
-                    b->fb.cursor_y = cursor->y;
-                }
-                return 0;
-            }
-
-            case TTY_IOCTL_GET_WINSIZE: {
-                if (!arg) return -EINVAL;
-                tty_winsize_t *ws = (tty_winsize_t *)arg;
-                tty_fill_winsize(tty, &ws->cols, &ws->rows);
-                return 0;
-            }
-
-            case TTY_IOCTL_GET_INDEX:
-                if (!arg) return -EINVAL;
-                *(uint32_t *)arg = 0;
-                return 0;
-
-            case TTY_IOCTL_TCGETS:
-                if (!arg) return -EINVAL;
-                tty_sync_termios_from_flags(tty);
-                *(tty_termios_t *)arg = tty->termios;
-                return 0;
-
-            case TTY_IOCTL_TCSETS:
-            case TTY_IOCTL_TCSETSW:
-            case TTY_IOCTL_TCSETSF:
-                if (!arg) return -EINVAL;
-                tty->termios = *(tty_termios_t *)arg;
-                tty_sync_flags_from_termios(tty);
-                if (req == TTY_IOCTL_TCSETSF) {
-                    tty->in_tail    = tty->in_head;
-                    tty->line_start = tty->in_head;
-                }
-                return 0;
-
-            case TTY_IOCTL_TIOCGWINSZ: {
-                if (!arg) return -EINVAL;
-                tty_linux_winsize_t *ws = (tty_linux_winsize_t *)arg;
-                uint32_t cols = 1, rows = 1;
-                tty_fill_winsize(tty, &cols, &rows);
-                ws->ws_col    = (uint16_t)cols;
-                ws->ws_row    = (uint16_t)rows;
-                ws->ws_xpixel = 0;
-                ws->ws_ypixel = 0;
-                return 0;
-            }
-
-            case TTY_IOCTL_TIOCSWINSZ:
-                return 0;
-
-            case TTY_IOCTL_FIONBIO:
-                if (!arg) return -EINVAL;
-                if (*(int *)arg) tty->flags |=  TTY_NONBLOCK;
-                else             tty->flags &= ~TTY_NONBLOCK;
-                tty_sync_termios_from_flags(tty);
-                return 0;
-
-            case TTY_IOCTL_SCROLL: 
-                if (!arg) return -EINVAL;
-                int lines_to_scroll = *(int *)arg;
-                tty_fb_backend_t *b = tty->backend;
-
-                unsigned long irq = irq_push();
-                spinlock_acquire(&b->fb_lock);
-
-                fb_console_scroll(&b->fb, lines_to_scroll);
-                *(int *)arg = (int)b->fb.scrollback_view;
-
-                spinlock_release(&b->fb_lock);
-                irq_restore(irq);
-
-                return 0;
-
-            default:
-                return -ENOTTY;
+    switch (req) {
+        case TTY_IOCTL_SET_FLAGS: {
+            uint32_t flags;
+            if ((r = tty_arg_in(arg, &flags, sizeof(flags))) < 0) return r;
+            tty->flags = flags;
+            tty_sync_termios_from_flags(tty);
+            return 0;
         }
+
+        case TTY_IOCTL_GET_FLAGS:
+            if (!arg) return -EINVAL;
+            tty_sync_flags_from_termios(tty);
+            return tty_arg_out(arg, &tty->flags, sizeof(tty->flags));
+
+        case TTY_IOCTL_GET_CURSOR: {
+            tty_cursor_t cursor = {
+                .x = b->fb.cursor_x,
+                .y = b->fb.cursor_y,
+            };
+            return tty_arg_out(arg, &cursor, sizeof(cursor));
+        }
+
+        case TTY_IOCTL_SET_CURSOR: {
+            tty_cursor_t cursor;
+            if ((r = tty_arg_in(arg, &cursor, sizeof(cursor))) < 0) return r;
+
+            uint32_t cols = 1, rows = 1;
+            tty_fill_winsize(tty, &cols, &rows);
+            if (cursor.x < cols && cursor.y < rows) {
+                b->fb.cursor_x = cursor.x;
+                b->fb.cursor_y = cursor.y;
+            }
+            return 0;
+        }
+
+        case TTY_IOCTL_GET_WINSIZE: {
+            tty_winsize_t ws;
+            tty_fill_winsize(tty, &ws.cols, &ws.rows);
+            return tty_arg_out(arg, &ws, sizeof(ws));
+        }
+
+        case TTY_IOCTL_GET_INDEX: {
+            uint32_t index = 0;
+            return tty_arg_out(arg, &index, sizeof(index));
+        }
+
+        case TTY_IOCTL_TCGETS:
+            if (!arg) return -EINVAL;
+            tty_sync_termios_from_flags(tty);
+            return tty_arg_out(arg, &tty->termios, sizeof(tty->termios));
+
+        case TTY_IOCTL_TCSETS:
+        case TTY_IOCTL_TCSETSW:
+        case TTY_IOCTL_TCSETSF: {
+            tty_termios_t term;
+            if ((r = tty_arg_in(arg, &term, sizeof(term))) < 0) return r;
+
+            tty->termios = term;
+            tty_sync_flags_from_termios(tty);
+            if (req == TTY_IOCTL_TCSETSF) {
+                tty->in_tail    = tty->in_head;
+                tty->line_start = tty->in_head;
+            }
+            return 0;
+        }
+
+        case TTY_IOCTL_TIOCGWINSZ: {
+            uint32_t cols = 1, rows = 1;
+            tty_fill_winsize(tty, &cols, &rows);
+
+            tty_linux_winsize_t ws = {
+                .ws_row = (uint16_t)rows,
+                .ws_col = (uint16_t)cols,
+            };
+            return tty_arg_out(arg, &ws, sizeof(ws));
+        }
+
+        case TTY_IOCTL_TIOCSWINSZ:
+            return 0;
+
+        case TTY_IOCTL_FIONBIO: {
+            int nonblock;
+            if ((r = tty_arg_in(arg, &nonblock, sizeof(nonblock))) < 0) return r;
+
+            if (nonblock) tty->flags |=  TTY_NONBLOCK;
+            else          tty->flags &= ~TTY_NONBLOCK;
+            tty_sync_termios_from_flags(tty);
+            return 0;
+        }
+
+        case TTY_IOCTL_SCROLL: {
+            int lines_to_scroll;
+            if ((r = tty_arg_in(arg, &lines_to_scroll, sizeof(lines_to_scroll))) < 0) return r;
+
+            unsigned long irq = irq_push();
+            spinlock_acquire(&b->fb_lock);
+
+            fb_console_scroll(&b->fb, lines_to_scroll);
+            int view = (int)b->fb.scrollback_view;
+
+            spinlock_release(&b->fb_lock);
+            irq_restore(irq);
+
+            // copied out after the lock is gone, the copy can fault
+            return tty_arg_out(arg, &view, sizeof(view));
+        }
+
+        default:
+            return -ENOTTY;
     }
-    return -ENOTTY;
 }
 
 static struct tty_ops tty0_ops = {
@@ -448,13 +458,17 @@ void tty_device_init(void) {
     file_t *f = kmalloc(sizeof(file_t));
     if (f) {
         memset(f, 0, sizeof(*f));
+        f->type   = FD_TYPE_DEV;
         f->inode  = &tty->device;
         f->flags  = O_RDWR;
         f->shared = 2;
         fd_table_t *boot_fds = vfs_get_kernel_table();
         if (boot_fds) {
+            f->inode->shared++;
             boot_fds->fds[1] = f;
             boot_fds->fds[2] = f;
+        } else {
+            kfree(f);
         }
     }
 

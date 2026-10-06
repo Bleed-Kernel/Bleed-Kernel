@@ -6,8 +6,8 @@
 #include <mm/smap.h>
 #include <cpu/control_registers.h>
 #include <string.h>
+#include <user/user_copy.h>
 
-#define PAGE_SIZE 4096
 #define USER_MIN 0x0000000000001000ULL
 #define USER_MAX 0x00007fffffffffffULL
 
@@ -25,8 +25,8 @@ static int user_range_mapped(task_t *task, uintptr_t addr, size_t len) {
     for (uintptr_t p = start; p <= end; p += PAGE_SIZE) {
         uint64_t *pte = paging_get_page(task->page_map, p, 0);
         if (!pte) return 0;
-        if (!(*pte & 0x1)) return 0; // present
-        if (!(*pte & 0x4)) return 0; // user
+        if (!(*pte & PTE_PRESENT)) return 0;
+        if (!(*pte & PTE_USER)) return 0;
     }
 
     return 1;
@@ -79,21 +79,6 @@ int copy_from_user(task_t *user_task, void *kernel_dst, const void *user_src, si
     return 0;
 }
 
-int copy_user_string(task_t *caller, const char *user_src, char *kernel_dst, size_t dst_len) {
-    if (!caller || !user_src || !kernel_dst || dst_len < 2) return -1;
-
-    for (size_t i = 0; i < dst_len; i++) {
-        if (copy_from_user(caller, &kernel_dst[i], user_src + i, 1) != 0)
-            return -1;
-        if (kernel_dst[i] == '\0')
-            return 0;
-    }
-
-    kernel_dst[dst_len - 1] = '\0';
-    return -1;
-}
-
-
 /// @brief length of a user string, scanned a page at a time instead of byte by byte
 /// @return length without the terminator, -1 if unmapped, -2 if no terminator within max_len
 long user_strnlen(task_t *caller, const char *user_src, size_t max_len) {
@@ -133,4 +118,13 @@ long copy_user_path(task_t *caller, const char *user_src, char *kernel_dst, size
     if (copy_from_user(caller, kernel_dst, user_src, (size_t)len + 1) != 0) return -1;
     kernel_dst[len] = '\0';
     return len;
+}
+
+/// @brief copy a user string into a fixed kernel buffer
+/// @return 0 on success, -1 if its unmapped or doesnt fit
+int copy_user_string(task_t *caller, const char *user_src, char *kernel_dst, size_t dst_len) {
+    if (dst_len < 2) return -1;
+
+    // used to be a page walk per byte, copy_user_path finds the terminator first
+    return copy_user_path(caller, user_src, kernel_dst, dst_len) < 0 ? -1 : 0;
 }

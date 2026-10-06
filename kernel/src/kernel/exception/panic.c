@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <ansii.h>
 #include <mm/cow.h>
+#include <cpu/features/fpu.h>
 #include <sched/scheduler.h>
 #include <drivers/serial/serial.h>
 #include <kernel/exception/panic.h>
@@ -11,8 +12,10 @@
 #include <boot/bootlogger/bootlogger.h>
 #include <drivers/framebuffer/framebuffer.h>
 
+// interrupts off first, otherwise the next timer tick wakes us and the scheduler carries on
 #define hcf() do { \
-    __asm__ volatile ("hlt"); \
+    __asm__ volatile ("cli"); \
+    for (;;) __asm__ volatile ("hlt"); \
 } while (0)
 
 #define PRINT_REG(name, val) do { \
@@ -150,6 +153,7 @@ static inline void print_separator(const char* title) {
 
 __attribute__((noreturn))
 void ke_panic(struct isr_stackframe *sf, const char *pstring){
+    __asm__ volatile ("cli");
     if (!sf && !pstring) hcf();
     bconsole_init(); //users who dont enable verbose will never see a panic unless we do this.
     panic_fill_screen(PANIC_SCREEN_COLOR);
@@ -274,15 +278,18 @@ there is nothing more to be done here, feel free to restart your computer via it
     }
 
     hcf();
-    for (;;) {}
 }
 
 extern void* ke_processor_exception(void *frame){
     struct isr_stackframe *sf = (struct isr_stackframe *)frame;
     task_t *responsible_task = get_current_task();
     
+    // device not available is how lazy fpu switching gets told a task wants its registers
+    if (sf && sf->vector == 7 && fpu_handle_nm())
+        return frame;
+
     if (sf){
-        if (((sf->cs & P_USER) == P_USER))
+        if ((sf->cs & 0x3) == 0x3)  // came from ring 3
             return ke_user_program_exception(sf, responsible_task);
     }
 
@@ -293,7 +300,6 @@ extern void* ke_processor_exception(void *frame){
         serial_write(" RIP:");
         serial_write_hex(sf ? sf->rip : 0);
         serial_write("\nSystem halted.\n");
-        asm volatile ("cli");
         hcf();
     }
 

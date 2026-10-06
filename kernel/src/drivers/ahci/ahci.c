@@ -543,21 +543,9 @@ void ahci_init(void) {
     }
 
     // map the mmio region
-    paddr_t cr3 = read_cr3();
-    uint64_t abar_page  = abar_phys & ~(uint64_t)(PAGE_SIZE_4K - 1);
-    uint64_t abar_end   = (abar_phys + 0x2000 + PAGE_SIZE_4K - 1)
-                          & ~(uint64_t)(PAGE_SIZE_4K - 1);
-
-    for (uint64_t p = abar_page; p < abar_end; p += PAGE_SIZE_4K) {
-        uint64_t virt = p + ahci_hhdm_offset();
-        uint64_t *pte = paging_get_page(cr3, virt, 1);
-        if (pte) {
-            *pte = (p & PADDR_ENTRY_MASK) | PTE_PRESENT | PTE_WRITABLE | PTE_NX;
-            asm volatile("invlpg (%0)" :: "r"(virt) : "memory");
-        } else {
-            serial_printf(LOG_ERROR "ahci: failed to map MMIO page 0x%llx\n", p);
-            return;
-        }
+    if (paging_map_mmio(abar_phys, 0x2000) < 0) {
+        serial_printf(LOG_ERROR "ahci: failed to map MMIO at 0x%llx\n", abar_phys);
+        return;
     }
 
     uint64_t abar = MMIO(abar_phys);

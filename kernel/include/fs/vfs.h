@@ -51,13 +51,24 @@ typedef struct INodeOps{
     size_t (*size)    (INode_t* inode);
 } INodeOps_t;
 
+/*
+ * An INode doubles as its own dentry, theres no hard links so the two would always be 1:1.
+ * Ownership runs up the tree: a child holds a ref on its parent for as long as it lives, so
+ * holding any inode keeps every directory above it alive. lookup, create and readdir all hand
+ * the caller one ref, vfs_drop gives it back and the last one out frees the inode and lets go
+ * of the parent in turn.
+ */
 typedef struct INode {
     long    shared;
     int     type;
     const   INodeOps_t* ops;
     void*   internal_data;
-    struct  INode* parent;
-    char    name[256]; // decided by whoever makes it
+    struct  INode* parent;      // the vfs holds a ref on this once attached is set
+    char    name[256];          // name under parent, set by the vfs when it attaches us
+    struct  INode* mounted;     // root of the filesystem mounted on this directory, NULL if none
+    struct  INode* dcache_next; // next in the dentry cache bucket
+    uint8_t attached;           // we hold a ref on parent
+    uint8_t hashed;             // findable in the dentry cache
 } INode_t;
 
 typedef struct file {
@@ -93,22 +104,26 @@ typedef struct dirent {
 /// @return success?
 int tempfs_mount_root(INode_t** root);
 
-/// @brief decrement shared, min 0, cannot drop VFS root
-/// @param inode target
-INode_t* vfs_get_root();
+/// @brief get the root inode of the VFS
+/// @return root inode, NULL before vfs_mount_root
+INode_t* vfs_get_root(void);
 
 /// @brief VFS Mount the root directory
 /// @return success?
-int vfs_mount_root();
+int vfs_mount_root(void);
 
-/// @brief decrement shared, min 0, cannot drop VFS root
+/// @brief take a ref on an inode, the VFS root is pinned and never counted
+/// @param inode target
+void vfs_hold(INode_t* inode);
+
+/// @brief give a ref back, the last one frees the inode and drops its hold on the parent
 /// @param inode target
 void vfs_drop(INode_t* inode);
 
 /// @brief get an inode at a path
 /// @param path target path
-/// @param inode OUT inode
-/// @return success?
+/// @param inode OUT inode, the caller owns one ref and has to vfs_drop it
+/// @return 0 or a negative errno
 int vfs_lookup(const path_t* path, INode_t** inode);
 
 long vfs_read_exact(INode_t *inode, void *out_buffer, size_t exact_count, size_t offset);

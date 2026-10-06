@@ -3,7 +3,7 @@
 #include <ansii.h>
 #include <stdint.h>
 #include <fs/archive/tar.h>
-#include <status.h>
+#include <user/errno.h>
 #include <string.h>
 
 #define TAR_BLOCK_SIZE  512
@@ -107,10 +107,12 @@ int tar_extract(const void* tar_data, size_t tar_size){
                             // doesnt exist logic
                             if (vfs_create(&comp_path, &next, INODE_DIRECTORY) < 0) {
                                 kprintf(LOG_ERROR "Tar: failed to create directory %s\n", component);
-                                return status_print_error(TAR_EXTRACT_FAILURE);
+                                return -EIO;
                             }
                         }
 
+                        // only the ref on the directory we are standing in is ours to keep
+                        vfs_drop(parent);
                         parent = next;
                         ci = 0;
                     }
@@ -121,6 +123,9 @@ int tar_extract(const void* tar_data, size_t tar_size){
                 }
             }
         }
+
+        // root is pinned so this is a no-op when the entry lives at the top level
+        vfs_drop(parent);
 
         path_t final_path = vfs_path_from_abs(full_path);
 
@@ -135,45 +140,51 @@ int tar_extract(const void* tar_data, size_t tar_size){
         } else {
             kprintf(LOG_ERROR "Tar extract failure: duplicate file %s (offset %lu)\n",
                     header->name, offset);
-            return status_print_error(TAR_EXTRACT_FAILURE);
+            return -EIO;
         }
 
         if (res < 0){
             kprintf(LOG_ERROR "Tar extract failure: %s (offset %lu)\n",
                     header->name, offset);
-            return status_print_error(TAR_EXTRACT_FAILURE);
+            return -EIO;
         }
 
         // Write file contents
         if (!is_dir && file_size > 0){
             if (offset > tar_size - TAR_BLOCK_SIZE) {
                 kprintf(LOG_ERROR "Tar: invalid header offset for %s\n", full_path);
-                return status_print_error(TAR_EXTRACT_FAILURE);
+                vfs_drop(inode);
+                return -EIO;
             }
             size_t content_offset = offset + TAR_BLOCK_SIZE;
             if (file_size > tar_size - content_offset) {
                 kprintf(LOG_ERROR "Tar: truncated entry %s (size=%lu)\n", full_path, file_size);
-                return status_print_error(TAR_EXTRACT_FAILURE);
+                vfs_drop(inode);
+                return -EIO;
             }
             if (inode_write(inode,
                             (uint8_t*)tar_data + content_offset,
                             file_size,
                             0) < 0) {
                 kprintf(LOG_ERROR "Tar: write failed for %s\n", full_path);
-                return status_print_error(TAR_EXTRACT_FAILURE);
+                vfs_drop(inode);
+                return -EIO;
             }
         }
+
+        // the tree keeps its own ref, ours was only for the write
+        vfs_drop(inode);
 
         // Advance
         size_t blocks = (file_size + TAR_BLOCK_SIZE - 1) / TAR_BLOCK_SIZE;
         if (blocks > (SIZE_MAX - TAR_BLOCK_SIZE - offset) / TAR_BLOCK_SIZE) {
             kprintf(LOG_ERROR "Tar: block overflow while parsing %s\n", full_path);
-            return status_print_error(TAR_EXTRACT_FAILURE);
+            return -EIO;
         }
         size_t next_offset = offset + TAR_BLOCK_SIZE + blocks * TAR_BLOCK_SIZE;
         if (next_offset > tar_size) {
             kprintf(LOG_ERROR "Tar: entry beyond archive bounds %s\n", full_path);
-            return status_print_error(TAR_EXTRACT_FAILURE);
+            return -EIO;
         }
         offset = next_offset;
     }

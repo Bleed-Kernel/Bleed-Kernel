@@ -3,6 +3,6 @@
 #include <syscalls/syscall.h>
 #include <sched/scheduler.h>
 
-void sys_exit(){
+void sys_exit(void){
     exit();
 }

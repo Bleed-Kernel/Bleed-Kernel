@@ -87,18 +87,8 @@ static uint64_t usb_map_bar0(const pci_device_t *pci_dev, uint64_t size) {
     if (phys == 0)
         return 0;
 
-    paddr_t  cr3  = read_cr3();
-    uint64_t page = phys & ~(uint64_t)(PAGE_SIZE_4K - 1);
-    uint64_t end  = (phys + size + PAGE_SIZE_4K - 1) & ~(uint64_t)(PAGE_SIZE_4K - 1);
-
-    for (uint64_t p = page; p < end; p += PAGE_SIZE_4K) {
-        uint64_t virt = MMIO(p);
-        uint64_t *pte = paging_get_page(cr3, virt, 1);
-        if (!pte)
-            return 0;
-        *pte = (p & PADDR_ENTRY_MASK) | PTE_PRESENT | PTE_WRITABLE | PTE_NX;
-        asm volatile("invlpg (%0)" :: "r"(virt) : "memory");
-    }
+    if (paging_map_mmio(phys, size) < 0)
+        return 0;
     return MMIO(phys);
 }
 

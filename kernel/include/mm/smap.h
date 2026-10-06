@@ -1,5 +1,6 @@
 #pragma once
 
+// never return, break or goto out of the block, clac only runs when it falls off the end
 #define SMAP_ALLOW for (int _i = (stac(), 0); !_i; clac(), _i++)
 
 int SMAP_init(void);

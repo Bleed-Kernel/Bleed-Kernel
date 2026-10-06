@@ -10,7 +10,7 @@
 #include <limits.h>
 #include <drivers/serial/serial.h>
 #include <ansii.h>
-#include <status.h>
+#include <user/errno.h>
 #include <stddef.h>
 
 #include "ext2_priv.h"
@@ -53,12 +53,12 @@ static int ext2_write_bgd(ext2_fs_t *fs, uint32_t group, const ext2_bgd_t *bgd) 
 
 // inode operation helpers
 static int ext2_read_disk_inode(ext2_fs_t *fs, uint32_t ino, ext2_disk_inode_t *out) {
-    if (ino < 1) return -1;
+    if (ino < 1) return -EIO;
     uint32_t group = (ino - 1) / fs->inodes_per_group;
     uint32_t local = (ino - 1) % fs->inodes_per_group;
 
     ext2_bgd_t bgd;
-    if (ext2_read_bgd(fs, group, &bgd) < 0) return -1;
+    if (ext2_read_bgd(fs, group, &bgd) < 0) return -EIO;
 
     size_t off = (size_t)bgd.bg_inode_table * fs->block_size
                + (size_t)local * fs->inode_size;
@@ -68,12 +68,12 @@ static int ext2_read_disk_inode(ext2_fs_t *fs, uint32_t ino, ext2_disk_inode_t *
 }
 
 static int ext2_write_disk_inode(ext2_fs_t *fs, uint32_t ino, const ext2_disk_inode_t *in) {
-    if (ino < 1) return -1;
+    if (ino < 1) return -EIO;
     uint32_t group = (ino - 1) / fs->inodes_per_group;
     uint32_t local = (ino - 1) % fs->inodes_per_group;
 
     ext2_bgd_t bgd;
-    if (ext2_read_bgd(fs, group, &bgd) < 0) return -1;
+    if (ext2_read_bgd(fs, group, &bgd) < 0) return -EIO;
 
     size_t off = (size_t)bgd.bg_inode_table * fs->block_size
                + (size_t)local * fs->inode_size;
@@ -237,11 +237,11 @@ static int ext2_set_data_block(ext2_fs_t *fs, ext2_disk_inode_t *di,
     if (logical_block < ptrs_per_block) {
         if (!di->i_block[12]) {
             di->i_block[12] = ext2_alloc_block(fs);
-            if (!di->i_block[12]) return -1;
+            if (!di->i_block[12]) return -EIO;
             ext2_write_disk_inode(fs, ino, di);
         }
         uint32_t *ind = kmalloc(fs->block_size);
-        if (!ind) return -1;
+        if (!ind) return -ENOMEM;
         ext2_read_block(fs, di->i_block[12], ind);
         ind[logical_block] = phys;
         ext2_write_block(fs, di->i_block[12], ind);
@@ -253,25 +253,25 @@ static int ext2_set_data_block(ext2_fs_t *fs, ext2_disk_inode_t *di,
     if (logical_block < ptrs_per_block * ptrs_per_block) {
         if (!di->i_block[13]) {
             di->i_block[13] = ext2_alloc_block(fs);
-            if (!di->i_block[13]) return -1;
+            if (!di->i_block[13]) return -EIO;
             ext2_write_disk_inode(fs, ino, di);
         }
         uint32_t idx1 = logical_block / ptrs_per_block;
         uint32_t idx2 = logical_block % ptrs_per_block;
 
         uint32_t *dind = kmalloc(fs->block_size);
-        if (!dind) return -1;
+        if (!dind) return -ENOMEM;
         ext2_read_block(fs, di->i_block[13], dind);
         if (!dind[idx1]) {
             dind[idx1] = ext2_alloc_block(fs);
-            if (!dind[idx1]) { kfree(dind); return -1; }
+            if (!dind[idx1]) { kfree(dind); return -EIO; }
             ext2_write_block(fs, di->i_block[13], dind);
         }
         uint32_t ind_blk = dind[idx1];
         kfree(dind);
 
         uint32_t *ind = kmalloc(fs->block_size);
-        if (!ind) return -1;
+        if (!ind) return -ENOMEM;
         ext2_read_block(fs, ind_blk, ind);
         ind[idx2] = phys;
         ext2_write_block(fs, ind_blk, ind);
@@ -280,7 +280,7 @@ static int ext2_set_data_block(ext2_fs_t *fs, ext2_disk_inode_t *di,
     }
 
     serial_printf(LOG_ERROR "ext2: triple-indirect write not supported\n");
-    return -1;
+    return -EIO;
 }
 
 // Free all data blocks referenced by an inode's block map
@@ -432,7 +432,7 @@ static long ext2_read(INode_t *inode, void *buf, size_t count, size_t offset) {
     if (count == 0) return 0;
 
     uint8_t *block_buf = kmalloc(fs->block_size);
-    if (!block_buf) return -1;
+    if (!block_buf) return -ENOMEM;
 
     size_t total = 0;
     while (total < count) {
@@ -462,7 +462,7 @@ static long ext2_write(INode_t *inode, const void *buf, size_t count, size_t off
     if (count == 0) return 0;
 
     uint8_t *block_buf = kmalloc(fs->block_size);
-    if (!block_buf) return -1;
+    if (!block_buf) return -ENOMEM;
 
     size_t total = 0;
     while (total < count) {
@@ -636,14 +636,14 @@ static int ext2_lookup(INode_t *dir, const char *name, size_t namelen, INode_t *
 
     lookup_ctx_t lc = { name, namelen, 0 };
     ext2_dir_iterate(fs, &ei->disk, lookup_cb, &lc);
-    if (!lc.found_ino) return -FILE_NOT_FOUND;
+    if (!lc.found_ino) return -ENOENT;
 
     ext2_disk_inode_t disk;
     if (ext2_read_disk_inode(fs, lc.found_ino, &disk) < 0)
-        return -FILE_NOT_FOUND;
+        return -ENOENT;
 
     INode_t *child = ext2_make_vfs_inode(fs, lc.found_ino, &disk, dir);
-    if (!child) return status_print_error(OUT_OF_MEMORY);
+    if (!child) return -ENOMEM;
 
     // Copy the name into the inode so getcwd can walk up 
     size_t copy_len = namelen < sizeof(child->name) - 1
@@ -683,21 +683,20 @@ static int ext2_readdir(INode_t *dir, size_t index, INode_t **result) {
 
     readdir_ctx_t rc = { index, 0, 0, {0}, 0 };
     ext2_dir_iterate(fs, &ei->disk, readdir_cb, &rc);
-    if (!rc.found_ino) return -FILE_NOT_FOUND;
+    if (!rc.found_ino) return -ENOENT;
 
     ext2_disk_inode_t disk;
     if (ext2_read_disk_inode(fs, rc.found_ino, &disk) < 0)
-        return -FILE_NOT_FOUND;
+        return -ENOENT;
 
     INode_t *child = ext2_make_vfs_inode(fs, rc.found_ino, &disk, dir);
-    if (!child) return status_print_error(OUT_OF_MEMORY);
+    if (!child) return -ENOMEM;
 
     size_t nl = strlen(rc.name);
     size_t copy_len = nl < sizeof(child->name) - 1 ? nl : sizeof(child->name) - 1;
     memcpy(child->name, rc.name, copy_len);
     child->name[copy_len] = '\0';
 
-    child->shared++;
     *result = child;
     return 0;
 }
@@ -712,7 +711,7 @@ static int ext2_dir_add_entry(ext2_fs_t *fs, ext2_disk_inode_t *parent_di,
     needed = (uint16_t)((needed + 3) & ~3u);
 
     uint8_t *block_buf = kmalloc(fs->block_size);
-    if (!block_buf) return -1;
+    if (!block_buf) return -ENOMEM;
 
     // Search existing blocks for slack space in the last entry of each block 
     uint32_t file_size = parent_di->i_size;
@@ -725,18 +724,18 @@ static int ext2_dir_add_entry(ext2_fs_t *fs, ext2_disk_inode_t *parent_di,
 
         if (new_block) {
             phys = ext2_alloc_block(fs);
-            if (!phys) { kfree(block_buf); return -1; }
+            if (!phys) { kfree(block_buf); return -EIO; }
             if (ext2_set_data_block(fs, parent_di, parent_ino, lb, phys) < 0) {
                 ext2_free_block(fs, phys);
                 kfree(block_buf);
-                return -1;
+                return -EIO;
             }
             ext2_read_disk_inode(fs, parent_ino, parent_di);
             memset(block_buf, 0, fs->block_size);
         } else {
             if (ext2_read_block(fs, phys, block_buf) < 0) {
                 kfree(block_buf);
-                return -1;
+                return -EIO;
             }
         }
 
@@ -794,14 +793,14 @@ static int ext2_dir_add_entry(ext2_fs_t *fs, ext2_disk_inode_t *parent_di,
 
 static int ext2_create(INode_t *parent, const char *name, size_t namelen,
                         INode_t **result, inode_type node_type) {
-    if (namelen > 255) return status_print_error(NAME_LIMITS);
+    if (namelen > 255) return -ENAMETOOLONG;
 
     ext2_inode_t     *pei = parent->internal_data;
     ext2_fs_t        *fs  = pei->fs;
 
     bool is_dir = (node_type == INODE_DIRECTORY);
     uint32_t new_ino = ext2_alloc_inode(fs, is_dir);
-    if (!new_ino) return status_print_error(OUT_OF_MEMORY);
+    if (!new_ino) return -ENOMEM;
 
     // Initialise the on-disk inode 
     ext2_disk_inode_t new_di;
@@ -810,7 +809,7 @@ static int ext2_create(INode_t *parent, const char *name, size_t namelen,
     new_di.i_links_count = is_dir ? 2 : 1; // dir: self + parent's entry 
     if (ext2_write_disk_inode(fs, new_ino, &new_di) < 0) {
         ext2_free_inode(fs, new_ino, is_dir);
-        return status_print_error(OUT_OF_MEMORY);
+        return -ENOMEM;
     }
 
     // Add the entry in the parent directory 
@@ -818,7 +817,7 @@ static int ext2_create(INode_t *parent, const char *name, size_t namelen,
     if (ext2_dir_add_entry(fs, &pei->disk, pei->ino,
                            new_ino, name, (uint8_t)namelen, ft) < 0) {
         ext2_free_inode(fs, new_ino, is_dir);
-        return -1;
+        return -EIO;
     }
 
     // For directories: add . and .. entries and increment parent link count 
@@ -836,13 +835,13 @@ static int ext2_create(INode_t *parent, const char *name, size_t namelen,
     ext2_disk_inode_t final_di;
     if (ext2_read_disk_inode(fs, new_ino, &final_di) < 0) {
         ext2_free_inode(fs, new_ino, is_dir);
-        return -1;
+        return -EIO;
     }
 
     INode_t *child_inode = ext2_make_vfs_inode(fs, new_ino, &final_di, parent);
     if (!child_inode) {
         ext2_free_inode(fs, new_ino, is_dir);
-        return status_print_error(OUT_OF_MEMORY);
+        return -ENOMEM;
     }
 
     size_t copy_len = namelen < sizeof(child_inode->name) - 1
@@ -883,26 +882,26 @@ static int ext2_unlink(INode_t *dir, const char *name, size_t namelen) {
 
     unlink_ctx_t uc = { name, namelen, 0, 0, 0, UINT32_MAX, 0 };
     ext2_dir_iterate(fs, &ei->disk, unlink_cb, &uc);
-    if (!uc.found_ino) return -FILE_NOT_FOUND;
+    if (!uc.found_ino) return -ENOENT;
 
     // Check whether it's a non-empty directory 
     ext2_disk_inode_t target_di;
     if (ext2_read_disk_inode(fs, uc.found_ino, &target_di) < 0)
-        return -FILE_NOT_FOUND;
+        return -ENOENT;
 
     bool target_is_dir = ((target_di.i_mode & EXT2_S_IFMT) == EXT2_S_IFDIR);
     if (target_is_dir) {
         readdir_ctx_t rc = { 0, 0, 0, {0}, 0 };
         ext2_dir_iterate(fs, &target_di, readdir_cb, &rc);
-        if (rc.found_ino != 0) return status_print_error(OUT_OF_BOUNDS); // not empty ?
+        if (rc.found_ino != 0) return -ENOTEMPTY;
     }
 
     uint8_t *block_buf = kmalloc(fs->block_size);
-    if (!block_buf) return -1;
+    if (!block_buf) return -ENOMEM;
 
     if (ext2_read_block(fs, uc.phys_block, block_buf) < 0) {
         kfree(block_buf);
-        return -1;
+        return -EIO;
     }
 
     // Walk the block to find the entry before ours so we can coalesce 
@@ -951,19 +950,19 @@ static int ext2_rename(INode_t *dir, const char *oldname, size_t oldlen,
     ext2_inode_t     *ei = dir->internal_data;
     ext2_fs_t        *fs = ei->fs;
 
-    if (newlen > 255) return status_print_error(NAME_LIMITS);
+    if (newlen > 255) return -ENAMETOOLONG;
 
     // Find the old entry 
     unlink_ctx_t uc = { oldname, oldlen, 0, 0, 0, UINT32_MAX, 0 };
     ext2_dir_iterate(fs, &ei->disk, unlink_cb, &uc);
-    if (!uc.found_ino) return -FILE_NOT_FOUND;
+    if (!uc.found_ino) return -ENOENT;
 
     uint8_t *block_buf = kmalloc(fs->block_size);
-    if (!block_buf) return -1;
+    if (!block_buf) return -ENOMEM;
 
     if (ext2_read_block(fs, uc.phys_block, block_buf) < 0) {
         kfree(block_buf);
-        return -1;
+        return -EIO;
     }
 
     ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + uc.entry_off);
@@ -1026,7 +1025,7 @@ static const INodeOps_t ext2_file_ops = {
 int ext2_mount(INode_t *dev_inode, INode_t **root) {
     if (!dev_inode || !dev_inode->ops || !dev_inode->ops->read) {
         serial_printf(LOG_ERROR "ext2: null or invalid device inode\n");
-        return -1;
+        return -EIO;
     }
 
     // Read the superblock (byte offset 1024, size 1024) 
@@ -1034,13 +1033,13 @@ int ext2_mount(INode_t *dev_inode, INode_t **root) {
     long r = inode_read(dev_inode, &sb, sizeof(sb), EXT2_SUPERBLOCK_OFFSET);
     if (r != (long)sizeof(sb)) {
         serial_printf(LOG_ERROR "ext2: failed to read superblock (got %ld)\n", r);
-        return -1;
+        return -EIO;
     }
 
     if (sb.s_magic != EXT2_SUPER_MAGIC) {
         serial_printf(LOG_ERROR "ext2: bad magic 0x%04x (expected 0x%04x)\n",
                       sb.s_magic, EXT2_SUPER_MAGIC);
-        return -1;
+        return -EIO;
     }
 
     // Reject features we haven't implemented 
@@ -1048,11 +1047,11 @@ int ext2_mount(INode_t *dev_inode, INode_t **root) {
         // bit 1 = filetype field in dirents anything else, we tell it no
         serial_printf(LOG_ERROR "ext2: unsupported incompat features 0x%x\n",
                       sb.s_feature_incompat);
-        return -1;
+        return -EIO;
     }
 
     ext2_fs_t *fs = kmalloc(sizeof(*fs));
-    if (!fs) return -1;
+    if (!fs) return -ENOMEM;
     memset(fs, 0, sizeof(*fs));
 
     fs->dev              = dev_inode;
@@ -1076,20 +1075,20 @@ int ext2_mount(INode_t *dev_inode, INode_t **root) {
     if (ext2_read_disk_inode(fs, EXT2_ROOT_INO, &root_di) < 0) {
         serial_printf(LOG_ERROR "ext2: failed to read root inode\n");
         kfree(fs);
-        return -1;
+        return -EIO;
     }
 
     if ((root_di.i_mode & EXT2_S_IFMT) != EXT2_S_IFDIR) {
         serial_printf(LOG_ERROR "ext2: inode 2 is not a directory (mode=0x%x)\n",
                       root_di.i_mode);
         kfree(fs);
-        return -1;
+        return -EIO;
     }
 
     INode_t *root_inode = ext2_make_vfs_inode(fs, EXT2_ROOT_INO, &root_di, NULL);
     if (!root_inode) {
         kfree(fs);
-        return -1;
+        return -EIO;
     }
 
     serial_printf(LOG_OK "ext2: mounted - %u blocks, %u inodes, block_size=%u\n",

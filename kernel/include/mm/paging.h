@@ -14,6 +14,7 @@
 #define PTE_PAT_4K          (1ULL << 7)
 #define PTE_GLOBAL          (1ULL << 8)
 #define PTE_COW             (1ULL << 9)
+#define PTE_NOFREE          (1ULL << 10)    // frame isnt ram we own (mmio), never freed, copied or cow'd
 #define PTE_PAT             (1ULL << 12)
 #define PTE_NX              (1ULL << 63)
 
@@ -35,11 +36,10 @@
 #define PAGE_ALIGN_UP(n)   (((n) + (PAGE_SIZE-1))/PAGE_SIZE*PAGE_SIZE)
 #define PAGE_ALIGN_DOWN(n) ((n)/PAGE_SIZE*PAGE_SIZE)
 
-extern paddr_t cr3_paddr;
 extern paddr_t kernel_page_map;
 struct task;
 
-void init_paging();
+void init_paging(void);
 void paging_map_page_wc(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags);
 
 /// @brief map a physical page at a vaddr using a pd entry
@@ -49,8 +49,8 @@ void paging_map_page_wc(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t fl
 void paging_map_page(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags);
 void paging_map_page_invl(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags, int invalidate_tlb);
 
-/// @brief reinitalise paging so we can access a full memory range, not just the
-/// default from limine
+/// @brief create a new address space that shares the kernels higher half
+/// @return paddr of the new pml4, 0 on failure
 paddr_t paging_create_address_space(void);
 
 /// @brief switch the current CR3 address space context
@@ -64,6 +64,9 @@ void paging_release_user_space(paddr_t cr3);
 
 uint64_t paging_alloc_empty_frame(void **vaddr);
 
+// make sure a physical mmio range can be reached through the hhdm, 0 on success
+int paging_map_mmio(paddr_t phys, size_t size);
+
 uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create);
 
 void paging_unmap_page(paddr_t cr3, uint64_t vaddr);
@@ -71,4 +74,4 @@ void paging_unmap_page(paddr_t cr3, uint64_t vaddr);
 int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3);
 int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_error);
 
-void pat_init(void);
+void pat_enable_wc(void);

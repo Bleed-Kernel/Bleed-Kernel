@@ -34,13 +34,7 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
         if (r < 0) {
             if (copied)
                 return copied;
-            if (r == -3 || r == -2 || r == -1)
-                return (uint64_t)-EBADF;
-            if (r == -EAGAIN)
-                return (uint64_t)-EAGAIN;
-            if (r == -EINTR)
-                return (uint64_t)-EINTR;
-            return (uint64_t)-EIO;
+            return (uint64_t)r;
         }
         if (r == 0)
             break;

@@ -63,6 +63,19 @@ static void psf_build_unicode_map(psf_font_t *font) {
     }
 }
 
+// the unicode table is whatever is left after the glyphs, the font still works without it
+static void psf_load_unicode_table(psf_font_t *font, const uint8_t *b, size_t size, size_t off) {
+    if (off >= size) return;
+
+    font->unicode_table = kmalloc(size - off);
+    if (!font->unicode_table) return;
+
+    font->has_unicode_table = true;
+    font->unicode_table_size = size - off;
+    memcpy(font->unicode_table, b + off, font->unicode_table_size);
+    psf_build_unicode_map(font);
+}
+
 static psf_font_t *psf_parse_psf1(const uint8_t *b, size_t size) {
     if (size < 4) return NULL;
     uint8_t mode = b[2];
@@ -70,7 +83,11 @@ static psf_font_t *psf_parse_psf1(const uint8_t *b, size_t size) {
     size_t glyph_count = (mode & 0x01) ? 512 : 256;
     size_t glyph_bytes = glyph_count * charsize;
 
+    // the header says how many glyphs follow, make sure the file really has them
+    if (size < 4 + glyph_bytes) return NULL;
+
     psf_font_t *font = kmalloc(sizeof(*font));
+    if (!font) return NULL;
     memset(font, 0, sizeof(*font));
     font->width = 8;
     font->height = charsize;
@@ -80,18 +97,14 @@ static psf_font_t *psf_parse_psf1(const uint8_t *b, size_t size) {
     font->is_psf2 = false;
 
     font->glyphs = kmalloc(glyph_bytes);
+    if (!font->glyphs) {
+        kfree(font);
+        return NULL;
+    }
     memcpy(font->glyphs, b + 4, glyph_bytes);
 
-    if (mode & 0x02) {
-        size_t off = 4 + glyph_bytes;
-        if (off < size) {
-            font->has_unicode_table = true;
-            font->unicode_table_size = size - off;
-            font->unicode_table = kmalloc(font->unicode_table_size);
-            memcpy(font->unicode_table, b + off, font->unicode_table_size);
-            psf_build_unicode_map(font);
-        }
-    }
+    if (mode & 0x02)
+        psf_load_unicode_table(font, b, size, 4 + glyph_bytes);
     return font;
 }
 
@@ -100,8 +113,11 @@ static psf_font_t *psf_parse_psf2(const uint8_t *b, size_t size) {
     const psf2_header_t *h = (const psf2_header_t *)b;
     if (h->magic != PSF2_MAGIC) return NULL;
 
-    size_t glyph_bytes = h->glyph_count * h->bytes_per_glyph;
+    size_t glyph_bytes = (size_t)h->glyph_count * h->bytes_per_glyph;
+    if (h->header_size > size || glyph_bytes > size - h->header_size) return NULL;
+
     psf_font_t *font = kmalloc(sizeof(*font));
+    if (!font) return NULL;
     memset(font, 0, sizeof(*font));
     font->width = h->width;
     font->height = h->height;
@@ -111,18 +127,14 @@ static psf_font_t *psf_parse_psf2(const uint8_t *b, size_t size) {
     font->is_psf2 = true;
 
     font->glyphs = kmalloc(glyph_bytes);
+    if (!font->glyphs) {
+        kfree(font);
+        return NULL;
+    }
     memcpy(font->glyphs, b + h->header_size, glyph_bytes);
 
-    if (h->flags & 0x01) {
-        size_t off = h->header_size + glyph_bytes;
-        if (off < size) {
-            font->has_unicode_table = true;
-            font->unicode_table_size = size - off;
-            font->unicode_table = kmalloc(font->unicode_table_size);
-            memcpy(font->unicode_table, b + off, font->unicode_table_size);
-            psf_build_unicode_map(font);
-        }
-    }
+    if (h->flags & 0x01)
+        psf_load_unicode_table(font, b, size, h->header_size + glyph_bytes);
     return font;
 }
 
@@ -150,8 +162,12 @@ uint16_t psf_lookup_glyph(const psf_font_t *font, uint32_t codepoint) {
 psf_font_t *psf_load_font(INode_t *inode) {
     size_t size = vfs_filesize(inode);
     uint8_t *buf = kmalloc(size);
-    inode_read(inode, buf, size, 0);
-    psf_font_t *font = psf_parse_font(buf, size);
+    if (!buf) return NULL;
+
+    // a short read would leave the parser looking at whatever kmalloc handed back
+    psf_font_t *font = NULL;
+    if (vfs_read_exact(inode, buf, size, 0) == 0)
+        font = psf_parse_font(buf, size);
     kfree(buf);
     return font;
 }
@@ -165,7 +181,12 @@ bool psf_init(const char *font_path_abs) {
     path_t path = vfs_path_from_abs(font_path_abs);
     INode_t *inode;
     if (vfs_lookup(&path, &inode) < 0) return false;
-    current_font = psf_load_font(inode);
+
+    // only swap the font in once it loaded, a bad file shouldnt take the old one down with it
+    psf_font_t *font = psf_load_font(inode);
     vfs_drop(inode);
+    if (!font) return false;
+
+    current_font = font;
     return true;
 }

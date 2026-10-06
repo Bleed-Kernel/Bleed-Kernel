@@ -47,5 +47,3 @@ static inline void wp_enable(void){
     cr0 |= CR0_WP;
     write_cr0(cr0);
 }
-
-void avx_enable(void);

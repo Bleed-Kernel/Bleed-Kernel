@@ -3,7 +3,6 @@
 #include <devices/devices.h>
 #include <sched/scheduler.h>
 #include <string.h>
-#include <status.h>
 #include <user/errno.h>
 #include <user/user_copy.h>
 
@@ -25,12 +24,5 @@ int sys_umount2(const char *user_target, int flags) {
     if (tlen < 0)
         return -EFAULT;
 
-    int r = vfs_umount(ktarget);
-    if (r >= 0)
-        return 0;
-
-    if (r == -FILE_NOT_FOUND)  return -ENOENT;
-    if (r == -UNIMPLEMENTED)   return -ENOSYS;
-
-    return -EINVAL;
+    return vfs_umount(ktarget);
 }

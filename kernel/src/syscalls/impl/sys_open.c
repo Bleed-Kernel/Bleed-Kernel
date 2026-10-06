@@ -4,7 +4,6 @@
 #include <user/user_copy.h>
 #include <sched/scheduler.h>
 #include <string.h>
-#include <status.h>
 #include <user/errno.h>
 
 int sys_open(char *path_str, int flags) {
@@ -24,14 +23,5 @@ int sys_open(char *path_str, int flags) {
     if (plen < 0)
         return -EFAULT;
 
-    int fd = vfs_open(kpath, flags);
-    if (fd >= 0)
-        return fd;
-
-    if (fd == -FILE_NOT_FOUND)
-        return -ENOENT;
-    if (fd == -OUT_OF_BOUNDS)
-        return -EMFILE;
-
-    return -EIO;
+    return vfs_open(kpath, flags);
 }

@@ -22,14 +22,22 @@ void partition_probe(void *drive_obj, int drive_idx, sector_reader_t reader, par
     if (is_gpt) {
         serial_printf(LOG_OK "Current Drive identified as GPT\n");
         part_gpt_header_t gpt_hdr;
-        
-        // Read LBA 1 header
-        if (reader(drive_obj, 1, 1, &gpt_hdr) < 0) return;
+
+        // Read LBA 1 header. the reader fills a whole sector and the header struct is
+        // only 92 bytes, so it goes through the sector buffer
+        if (reader(drive_obj, 1, 1, sector) < 0) return;
+        memcpy(&gpt_hdr, sector, sizeof(gpt_hdr));
         if (memcmp(gpt_hdr.signature, "EFI PART", 8) != 0) return; // Invalid GPT signature
 
+        // both come straight off the disk, dont let them size the allocation or the walk
         size_t entry_size = gpt_hdr.entry_size;
+        if (entry_size < sizeof(part_gpt_entry_t) || entry_size > 512) return;
+        if (gpt_hdr.entry_count > PART_GPT_MAX_ENTRIES)
+            gpt_hdr.entry_count = PART_GPT_MAX_ENTRIES;
+
         uint32_t sectors_to_read = (gpt_hdr.entry_count * entry_size + 511) / 512;
-        
+        if (sectors_to_read == 0) return;
+
         uint8_t *table = kmalloc(sectors_to_read * 512);
         if (!table) return;
 
@@ -47,6 +55,7 @@ void partition_probe(void *drive_obj, int drive_idx, sector_reader_t reader, par
                 if (e->type_guid[j] != 0) { empty = false; break; }
             }
             if (empty) continue;
+            if (e->last_lba < e->first_lba) continue;
 
             uint64_t size = e->last_lba - e->first_lba + 1;
             

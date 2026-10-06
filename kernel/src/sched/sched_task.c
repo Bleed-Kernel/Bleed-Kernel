@@ -7,11 +7,9 @@
 #include <ansii.h>
 #include <mm/spinlock.h>
 #include <user/errno.h>
+#include <cpu/features/fpu.h>
 
 #include "priv_scheduler.h"
-
-extern task_t *task_queue;
-extern task_t *task_list_head;
 
 uint8_t pid_list[MAX_PIDS] = {0};
 spinlock_t sched_lock;
@@ -50,7 +48,8 @@ static void free_pid(int pid) {
     irq_restore(flags);
 }
 
-static void free_user_alloc_list(user_alloc_t *list) {
+// frees the tracking nodes only, the pages themselves go with the address space
+void sched_free_alloc_list(user_alloc_t *list) {
     while (list) {
         user_alloc_t *next = list->next;
         kfree(list);
@@ -65,7 +64,7 @@ static user_alloc_t *clone_user_alloc_list(const user_alloc_t *src) {
     while (src) {
         user_alloc_t *node = kmalloc(sizeof(user_alloc_t));
         if (!node) {
-            free_user_alloc_list(head);
+            sched_free_alloc_list(head);
             return NULL;
         }
 
@@ -125,6 +124,36 @@ task_t *sched_get_task(uint64_t pid) {
     return NULL;
 }
 
+/// @brief hand the children of a dying task to the reaper, the way linux gives orphans to init
+/// @param parent the task thats going away
+/// @return a child that had already exited and can be buried now, NULL once there are none left
+task_t *sched_reparent_children(task_t *parent) {
+    if (!parent || !task_list_head) return NULL;
+
+    task_t *zombie = NULL;
+    unsigned long flags = irq_push();
+    spinlock_acquire(&sched_lock);
+
+    task_t *t = task_list_head;
+    do {
+        if (t != parent && t->ppid == parent->id) {
+            t->ppid = REAPER_PID;
+
+            // nobody is left to wait for it. handed back one at a time because
+            // sched_mark_task_dead takes the lock we are holding
+            if (t->state == TASK_ZOMBIE) {
+                zombie = t;
+                break;
+            }
+        }
+        t = t->next;
+    } while (t != task_list_head);
+
+    spinlock_release(&sched_lock);
+    irq_restore(flags);
+    return zombie;
+}
+
 task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, char *task_name) {
     task_t *task = kmalloc(sizeof(task_t));
     if (!task) ke_panic(NULL, "Failed to allocate task");
@@ -165,7 +194,7 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     kernel_stack_top &= ~0xFULL; // this should ensure we are 16 byte aligned
 
     for (uint64_t page = USER_STACK_TOP - USER_STACK_SIZE; page < USER_STACK_TOP; page += PAGE_SIZE) {
-        paddr_t paddr = pmm_alloc_pages(1);
+        paddr_t paddr = paging_alloc_empty_frame(NULL);
         if (!paddr) ke_panic(NULL, "Failed to allocate user stack page");
         paging_map_page_invl(task->page_map, paddr, page, PTE_USER | PTE_WRITABLE, 0);
     }
@@ -180,7 +209,8 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     
     task->task_privilege = (cs & 0x3) ? P_USER : P_KERNEL;
     task->context = ctx;
-    FP_Init(task->fx_state);
+    if (fpu_task_init(task) != 0)
+        ke_panic(NULL, "Failed to allocate task FPU state");
 
     sched_init_task_heap(task);
 
@@ -188,14 +218,16 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     if (!task->fd_table)
         ke_panic(NULL, "Failed to allocate task fd table");
 
+    task->current_directory = vfs_get_root();
+    if (task->current_directory)
+        task->current_directory->shared++;
+
+    // queue it last, the moment its on the list a tick can run it
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
     queue_task(task);
     spinlock_release(&sched_lock);
     irq_restore(flags);
-
-    task->current_directory = vfs_get_root();
-    task->current_directory->shared++;
 
     return task;
 }
@@ -239,8 +271,9 @@ uint64_t get_task_count(void) {
 void sched_init_task_heap(task_t* task) {
     if (!task) return;
     user_heap_t* heap = kmalloc(sizeof(user_heap_t));
+    if (!heap) return;
     heap->task = task;
-    heap->current = 0x0000004000000000ULL;
+    heap->current = USER_MMAP_BASE;
     heap->end = heap->current;
     task->heap = heap;
 }
@@ -300,49 +333,33 @@ task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
     child->name[sizeof(child->name) - 1] = '\0';
 
     child->kernel_stack = kmalloc(KERNEL_STACK_SIZE);
-    if (!child->kernel_stack) {
-        free_pid((int)pid);
-        kfree(child);
-        paging_destroy_address_space(child_cr3);
-        return NULL;
-    }
+    if (!child->kernel_stack)
+        goto fail;
 
     uint64_t kernel_stack_top = (uint64_t)child->kernel_stack + KERNEL_STACK_SIZE;
+    kernel_stack_top &= ~0xFULL; // has to match what sched_switch_task puts in rsp0
     child->context = (cpu_context_t *)(kernel_stack_top - sizeof(cpu_context_t));
     memcpy(child->context, parent_ctx, sizeof(cpu_context_t));
     child->context->rax = 0;
-    FP_Init(child->fx_state);
+
+    // fork is meant to carry the fpu state over, not hand the child a blank one
+    if (fpu_task_init(child) != 0)
+        goto fail;
+    fpu_task_copy(child, parent);
 
     child->fd_table = vfs_fd_table_clone(parent->fd_table);
-    if (!child->fd_table) {
-        free_pid((int)pid);
-        kfree(child->kernel_stack);
-        kfree(child);
-        paging_destroy_address_space(child_cr3);
-        return NULL;
-    }
+    if (!child->fd_table)
+        goto fail;
 
     child->alloc_list = clone_user_alloc_list(parent->alloc_list);
-    if (parent->alloc_list && !child->alloc_list) {
-        free_pid((int)pid);
-        vfs_fd_table_drop(child->fd_table);
-        kfree(child->kernel_stack);
-        kfree(child);
-        paging_destroy_address_space(child_cr3);
-        return NULL;
-    }
+    if (parent->alloc_list && !child->alloc_list)
+        goto fail;
 
     if (parent->heap) {
         child->heap = kmalloc(sizeof(user_heap_t));
-        if (!child->heap) {
-            free_pid((int)pid);
-            free_user_alloc_list(child->alloc_list);
-            vfs_fd_table_drop(child->fd_table);
-            kfree(child->kernel_stack);
-            kfree(child);
-            paging_destroy_address_space(child_cr3);
-            return NULL;
-        }
+        if (!child->heap)
+            goto fail;
+
         child->heap->current = parent->heap->current;
         child->heap->end = parent->heap->end;
         child->heap->task = child;
@@ -359,4 +376,15 @@ task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
     irq_restore(flags);
 
     return child;
+
+fail:
+    // child was zeroed so whatever we didnt get to is still NULL
+    free_pid((int)pid);
+    sched_free_alloc_list(child->alloc_list);
+    vfs_fd_table_drop(child->fd_table);
+    fpu_task_free(child);
+    kfree(child->kernel_stack);
+    kfree(child);
+    paging_destroy_address_space(child_cr3);
+    return NULL;
 }

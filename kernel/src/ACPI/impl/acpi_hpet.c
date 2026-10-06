@@ -80,8 +80,15 @@ void wait_fs(uint64_t femtoseconds) {
     uint64_t start  = hpet_read_counter();
     uint64_t target = start + ticks;
 
+    // short waits spin: they are over before a switch would be, and drivers do them with a
+    // lock held or before theres a scheduler at all. only a long one is worth giving the cpu up for
+    int can_yield = femtoseconds >= femtosecondsPerMillisecond && get_current_task() != NULL;
+
     while (hpet_read_counter() < target) {
-        sched_yield(get_current_task());
+        if (can_yield)
+            sched_yield(get_current_task());
+        else
+            asm volatile("pause");
     }
 }
 

@@ -10,7 +10,7 @@
 #include <stdarg.h>
 #include <format.h>
 #include <string.h>
-#include <status.h>
+#include <user/errno.h>
 #include <mm/spinlock.h>
 
 #define PORT_COM1   0x3F8
@@ -59,7 +59,7 @@ int serial_init(void) {
     uint8_t test = inb(PORT_COM1 + 4);
     if (test != 0x0F) {
         serial_available = 0;
-        return status_print_error(SERIAL_NOT_AVAILABLE);
+        return -ENODEV;
     }
 
     outb(PORT_COM1 + 1, 0x00);
@@ -74,7 +74,7 @@ int serial_init(void) {
 
     if (inb(PORT_COM1 + 0) != 0xAE) {
         serial_available = 0;
-        return status_print_error(SERIAL_NOT_AVAILABLE);
+        return -ENODEV;
     }
 
     outb(PORT_COM1 + 4, 0x0F);
