@@ -239,10 +239,12 @@ there is nothing more to be done here, feel free to restart your computer via it
         print_separator("BACKTRACE");
         stack_trace_print((uint64_t*)sf->rbp);
 
+        /*
         print_separator("DEBUG SIGNATURE");
         bset_color(BCOL_GREY, BCOL_BLACK);
         bprintf("  Put this code into https://bleedkernel.com/panic.html or share it to report the issue\n\n");
         bset_color(BCOL_YELLOW, BCOL_BLACK);
+        */
         bprintf("");
 
     } else {
