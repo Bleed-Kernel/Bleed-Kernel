@@ -85,6 +85,7 @@ USER_REPOS := \
 	"https://github.com/Bleed-Kernel/Bleed-SpecSeek specseek" \
     "https://github.com/Bleed-Kernel/Bleed-Taskman taskman" \
     "https://github.com/Bleed-Kernel/Bleed-tvi tvi" \
+	"https://github.com/Bleed-Kernel/Bleed-Tetris tetris" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils cat" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils echo" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils write" \
