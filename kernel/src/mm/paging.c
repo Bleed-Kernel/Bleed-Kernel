@@ -400,6 +400,13 @@ int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
                         continue;
                     }
 
+                    // shared memory stays shared, the child is just one more holder of the frame
+                    if (pte & PTE_SHARED) {
+                        cow_ref_page(phys);
+                        paging_map_page_invl(child_cr3, phys, vaddr, flags, 0);
+                        continue;
+                    }
+
                     if ((pte & PTE_WRITABLE) || (pte & PTE_COW)) {
                         if (!(pte & PTE_COW)) {
                             pt[pti] = (pte & ~PTE_WRITABLE) | PTE_COW;
@@ -509,7 +516,7 @@ void paging_release_user_space(paddr_t cr3) {
                     paddr_t phys = pte & PADDR_ENTRY_MASK;
                     if (pte & PTE_NOFREE) {
                         // never came from the pmm
-                    } else if (pte & PTE_COW) {
+                    } else if (pte & (PTE_COW | PTE_SHARED)) {
                         if (cow_unref_page(phys) == 0)
                             pmm_free_pages(phys, 1);
                     } else {

@@ -15,6 +15,7 @@
 #define PTE_GLOBAL          (1ULL << 8)
 #define PTE_COW             (1ULL << 9)
 #define PTE_NOFREE          (1ULL << 10)    // frame isnt ram we own (mmio), never freed, copied or cow'd
+#define PTE_SHARED          (1ULL << 11)
 #define PTE_PAT             (1ULL << 12)
 #define PTE_NX              (1ULL << 63)
 

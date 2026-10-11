@@ -122,6 +122,7 @@ void tty_process_input(tty_t *tty, char c);
 void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, fb_console_t *fb, uint32_t flags);
 int tty_create_framebuffer(uint32_t *out_index);
 int tty_set_active_index(uint32_t index);
+void tty_set_graphics(int on);
 
 void fb_clear(fb_console_t *fb);
 void tty_device_init(void);

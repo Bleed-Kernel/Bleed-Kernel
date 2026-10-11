@@ -12,6 +12,9 @@ cpu_context_t *timer_handle(cpu_context_t *ctx) {
     ohci_poll();
     usb_keyboard_tick();
 
+    // before the tick so a task whose sleep just ran out can be picked straight away
+    sched_event_tick();
+
     cpu_context_t *next = sched_tick(ctx);
     timer_ticks++;
     return next;

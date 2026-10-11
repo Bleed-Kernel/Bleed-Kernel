@@ -9,6 +9,7 @@ typedef struct {
     uint32_t *shadow_pixels;
     size_t shadow_pixels_size;
     uint8_t shadow_initialized;
+    uint8_t detached;           // only the shadow gets drawn to if something else owns the screen
     uint64_t width;
     uint64_t height;
     uint64_t pitch;

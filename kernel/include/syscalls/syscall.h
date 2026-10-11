@@ -33,6 +33,7 @@ enum {
     SYS_READDIR         = 89,
     SYS_PIPE            = 293,
     SYS_GETPID          = 39,
+    SYS_POLL            = 7,
     SYS_SIGACTION       = 13,
     SYS_SIGPROCMASK     = 14,
     SYS_SIGRETURN       = 15,
@@ -51,6 +52,9 @@ enum {
     SYS_MAPFB           = 519,
     SYS_IPC_SEND        = 520,
     SYS_IPC_RECV        = 521,
+    SYS_SHM_CREATE      = 522,
+    SYS_SHM_MAP         = 523,
+    SYS_SHM_DESTROY     = 524,
 };
 
 int sys_open(char *path_str, int flags);
@@ -103,5 +107,11 @@ uint64_t sys_femtoseconds(void);
 
 long sys_ipc_send(uint64_t target_pid, uint64_t src_addr, uint64_t pages);
 long sys_ipc_recv(uint64_t user_msg_ptr);
+
+long sys_shm_create(uint64_t pages);
+long sys_shm_map(uint64_t id, uint64_t user_pages_ptr);
+long sys_shm_destroy(uint64_t id);
+
+long sys_poll(uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms);
 
 void syscall_init(void);

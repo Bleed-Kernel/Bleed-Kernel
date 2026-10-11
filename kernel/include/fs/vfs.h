@@ -49,6 +49,7 @@ typedef struct INodeOps{
     void   (*drop)    (INode_t* inode);
     int    (*readdir) (INode_t* dir, size_t index, INode_t** result);
     size_t (*size)    (INode_t* inode);
+    int    (*poll)    (INode_t* inode);   // POLL* bits ready right now
 } INodeOps_t;
 
 /*

@@ -25,5 +25,13 @@ struct fb_info {
 
 #define FB_IOC_GET_INFO 0x5001
 #define FB_IOC_FLIP     0x5002
+#define FB_IOC_ACQUIRE  0x5003
+#define FB_IOC_RELEASE  0x5004
+#define FB_IOC_GET_OWNER 0x5005 // uint64_t pid out, 0 when the tty has it
+
+struct task;
 
 void fb_device_init();
+
+// gives the screen back to the tty if task was the one holding it
+void fb_device_task_exit(struct task *task);

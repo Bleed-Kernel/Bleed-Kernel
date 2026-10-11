@@ -156,6 +156,7 @@ static void fb_console_clear_row_block(fb_console_t *fb, size_t row, uint32_t co
 
 void fb_console_render_view(fb_console_t *fb) {
     if (!fb || !fb->pixels || !fb->font) return;
+    if (fb->detached) return;
 
     size_t visible_rows = fb->height / fb->font->height;
     size_t lw = fb->scrollback_line_words;

@@ -4,6 +4,7 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <drivers/framebuffer/blit.h>
 #include <devices/type/fb_device.h>
+#include <devices/type/tty_device.h>
 #include <sched/scheduler.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -13,6 +14,7 @@
 
 static fb_device_t  *fb0;
 static uint8_t      *fb_backbuffer;
+static uint64_t     fb_owner_pid;   // task that took the screen with FB_IOC_ACQUIRE
 
 // ideally this become more flexable soon?
 
@@ -56,8 +58,29 @@ static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
     task_t *task = get_current_task();
     if (!task)
         return -ESRCH;
+
+    // one owner at a time, it always gets cleared on exit so a set pid is a live task
+    if (request == FB_IOC_ACQUIRE) {
+        if (fb_owner_pid && fb_owner_pid != task->id)
+            return -EBUSY;
+        fb_owner_pid = task->id;
+        tty_set_graphics(1);
+        return 0;
+    }
+
+    if (request == FB_IOC_RELEASE) {
+        if (fb_owner_pid != task->id)
+            return -EPERM;
+        fb_owner_pid = 0;
+        tty_set_graphics(0);
+        return 0;
+    }
+
     if (!arg)
         return -EFAULT;
+
+    if (request == FB_IOC_GET_OWNER)
+        return copy_to_user(task, arg, &fb_owner_pid, sizeof(fb_owner_pid)) == 0 ? 0 : -EFAULT;
 
     if (request == FB_IOC_GET_INFO) {
         struct fb_info info = {
@@ -83,6 +106,13 @@ static struct INodeOps fb_inode_ops = {
     .size  = fb_size,
     .ioctl = fb_ioctl,
 };
+
+void fb_device_task_exit(task_t *task) {
+    if (!task || !fb_owner_pid || fb_owner_pid != task->id) return;
+
+    fb_owner_pid = 0;
+    tty_set_graphics(0);
+}
 
 void fb_device_init(void) {
     fb0 = kmalloc(sizeof(fb_device_t));

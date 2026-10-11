@@ -84,6 +84,9 @@ typedef struct task {
     uint8_t         ready_queued;
     uint64_t        wait_target_pid;
 
+    uint8_t         event_wait;
+    uint64_t        event_deadline; // hpet count to give up at, 0 = no timeout
+
     struct task     *next;
     struct task     *dead_next;
 
@@ -119,6 +122,13 @@ uint64_t get_task_count(void);
 task_t *get_current_task(void);
 void sched_yield(task_t *task);
 void sched_block(task_t *task);
+
+// sleep until sched_wake_event_waiters, a signal or the deadline. interrupts must be off
+void sched_wait_event(uint64_t deadline);
+void sched_wake_event_waiters(void);
+void sched_event_tick(void);
+uint64_t sched_deadline_ms(uint64_t ms);
+int sched_deadline_passed(uint64_t deadline);
 task_t *sched_reparent_children(task_t *parent);
 
 void itterate_each_task(task_itteration_fn fn, void *userdata);

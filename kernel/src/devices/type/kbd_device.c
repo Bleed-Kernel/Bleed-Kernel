@@ -14,6 +14,7 @@
 #include <user/user_copy.h>
 #include <sched/signal.h>
 #include <sched/scheduler.h>
+#include <user/user_poll.h>
 
 static kbd_device_t *keyboard_device = NULL;
 extern struct INodeOps tty_inode_ops;
@@ -164,9 +165,16 @@ static int kbd_ioctl(INode_t *inode, unsigned long request, void *arg) {
     }
 }
 
+static int kbd_poll(INode_t *inode) {
+    kbd_device_t *kbd = inode->internal_data;
+    if (!kbd) return POLLERR;
+    return kbd->head != kbd->tail ? POLLIN : 0;
+}
+
 static struct INodeOps kbd_inode_ops = {
     .read = kbd_read,
     .ioctl = kbd_ioctl,
+    .poll = kbd_poll,
 };
 
 static void kbd_listener(const keyboard_event_t *ev) {
@@ -187,6 +195,8 @@ static void kbd_listener(const keyboard_event_t *ev) {
 
     spinlock_release(&keyboard_device->lock);
     irq_restore(irq);
+
+    sched_wake_event_waiters();
 }
 
 void kbd_device_init(void) {

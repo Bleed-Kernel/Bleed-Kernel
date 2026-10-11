@@ -4,6 +4,8 @@
 #include <mm/vmm.h>
 #include <mm/kalloc.h>
 #include <sched/signal.h>
+#include <ipc/shm.h>
+#include <devices/type/fb_device.h>
 
 #include "priv_scheduler.h"
 
@@ -11,6 +13,10 @@ __attribute__((noreturn))
 void exit(void) {
     task_t *current_task = get_current_task();
     task_t *w = current_task->wait_queue;
+
+    // done here and not in the reaper, the screen should come back the moment its owner is gone
+    fb_device_task_exit(current_task);
+    shm_task_cleanup(current_task);
 
     user_alloc_t *alloc = current_task->alloc_list;
     while (alloc) {

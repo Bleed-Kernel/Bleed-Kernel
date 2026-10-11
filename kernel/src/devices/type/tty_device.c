@@ -19,6 +19,7 @@
 #include <sched/signal.h>
 #include <user/signal.h>
 #include <user/errno.h>
+#include <user/user_poll.h>
 #include <kernel/kmain.h>
 #include <stdio.h>
 
@@ -109,7 +110,7 @@ void fb_clear(fb_console_t *fb) {
         for (uint64_t x = 0; x < fb->width; x++)
             dst[y * fb->pitch + x] = fb->bg;
 
-    if (dst != fb->pixels)
+    if (dst != fb->pixels && !fb->detached)
         framebuffer_blit(dst, fb->pixels, fb->width, fb->height, fb->pitch);
 
     fb_scrollback_reset(fb);
@@ -160,6 +161,8 @@ void tty_process_input(tty_t *tty, char c) {
 
     spinlock_release(&tty->in_lock);
     irq_restore(irq);
+
+    sched_wake_event_waiters();
 }
 
 typedef struct { task_t *picked; } tty_sig_pick_ctx_t;
@@ -178,6 +181,9 @@ static void tty_pick_sigint_target(task_t *candidate, void *userdata) {
 static void tty_input_listener(const keyboard_event_t *ev) {
     if (ev->action != KEY_DOWN) return;
     if (!g_tty0_ready) return;
+
+    // whoever took the screen reads the keyboard device itself, no echo and no ^C from us
+    if (g_tty0_backend.fb.detached) return;
 
     tty_t *tty = &g_tty0;
 
@@ -405,6 +411,40 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
     }
 }
 
+// same rules tty_read uses to decide whether it has anything to hand over
+static int tty_poll(INode_t *dev) {
+    tty_t *tty = dev->internal_data;
+    if (!tty) return POLLERR;
+
+    int ready = POLLOUT;
+    if (!(tty->flags & TTY_CANNONICAL)) {
+        if (tty->in_head != tty->in_tail) ready |= POLLIN;
+        return ready;
+    }
+
+    // canonical only gives out whole lines
+    for (size_t i = tty->in_tail; i != tty->in_head; i = (i + 1) % TTY_BUFFER_SZ) {
+        if (tty->inbuffer[i] == '\n') { ready |= POLLIN; break; }
+    }
+    return ready;
+}
+
+/// @brief hand the screen to userspace or take it back
+// while its on, tty0 only draws into its shadow 
+void tty_set_graphics(int on) {
+    if (!g_tty0_ready) return;
+    tty_fb_backend_t *b = &g_tty0_backend;
+
+    unsigned long irq = irq_push();
+    spinlock_acquire(&b->fb_lock);
+
+    b->fb.detached = on ? 1 : 0;
+    if (!on) fb_console_render_view(&b->fb);
+
+    spinlock_release(&b->fb_lock);
+    irq_restore(irq);
+}
+
 static struct tty_ops tty0_ops = {
     .putchar = tty_fb_putchar,
 };
@@ -413,6 +453,7 @@ struct INodeOps tty_inode_ops = {
     .write = tty_inode_write,
     .read  = tty_read,
     .ioctl = tty_ioctl,
+    .poll  = tty_poll,
 };
 
 void tty_device_init(void) {

@@ -6,6 +6,7 @@
 #include <sched/signal.h>
 #include <string.h>
 #include <user/errno.h>
+#include <user/user_poll.h>
 
 #define PIPE_BUFFER_SIZE 4096
 
@@ -61,8 +62,11 @@ static long pipe_read_inode(INode_t *inode, void *out_buffer, size_t size, size_
         spinlock_release(&state->lock);
         irq_restore(flags);
 
-        if (copied > 0)
+        // theres room again, a writer might be polling for it
+        if (copied > 0) {
+            sched_wake_event_waiters();
             return (long)copied;
+        }
         if (writers == 0)
             return 0;
 
@@ -119,6 +123,9 @@ static long pipe_write_inode(INode_t *inode, const void *in_buffer, size_t size,
         spinlock_release(&state->lock);
         irq_restore(flags);
 
+        if (copied > 0)
+            sched_wake_event_waiters();
+
         if (copied == size)
             return (long)copied;
         if (!full)
@@ -131,6 +138,25 @@ static long pipe_write_inode(INode_t *inode, const void *in_buffer, size_t size,
     }
 }
 
+static int pipe_read_poll(INode_t *inode) {
+    pipe_state_t *state = (pipe_state_t *)inode->internal_data;
+    if (!state) return POLLERR;
+
+    int ready = 0;
+    if (state->count > 0)    ready |= POLLIN;
+    if (state->writers == 0) ready |= POLLHUP;
+    return ready;
+}
+
+static int pipe_write_poll(INode_t *inode) {
+    pipe_state_t *state = (pipe_state_t *)inode->internal_data;
+    if (!state) return POLLERR;
+
+    // nobody left to read it, a write would only get EPIPE
+    if (state->readers == 0) return POLLERR;
+    return state->count < PIPE_BUFFER_SIZE ? POLLOUT : 0;
+}
+
 static const INodeOps_t pipe_read_ops = {
     .create = NULL,
     .read = pipe_read_inode,
@@ -139,7 +165,8 @@ static const INodeOps_t pipe_read_ops = {
     .ioctl = NULL,
     .drop = NULL,
     .readdir = NULL,
-    .size = NULL
+    .size = NULL,
+    .poll = pipe_read_poll
 };
 
 static const INodeOps_t pipe_write_ops = {
@@ -150,7 +177,8 @@ static const INodeOps_t pipe_write_ops = {
     .ioctl = NULL,
     .drop = NULL,
     .readdir = NULL,
-    .size = NULL
+    .size = NULL,
+    .poll = pipe_write_poll
 };
 
 int pipe_create_file_pair(file_t **out_read, file_t **out_write) {
@@ -233,6 +261,9 @@ void pipe_file_release(file_t *f) {
     int free_state = (state->readers <= 0 && state->writers <= 0);
     spinlock_release(&state->lock);
     irq_restore(flags);
+
+    // whoever is polling the other end needs to see the hangup
+    sched_wake_event_waiters();
 
     kfree(f->inode);
     if (free_state)

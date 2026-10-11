@@ -5,6 +5,8 @@
 #include <mm/spinlock.h>
 #include <string.h>
 #include <user/errno.h>
+#include <user/user_poll.h>
+#include <sched/scheduler.h>
 
 static mouse_device_t *mouse_device = NULL;
 
@@ -37,8 +39,15 @@ static long mouse_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     return (long)bytes_read;
 }
 
+static int mouse_poll(INode_t *inode) {
+    mouse_device_t *mouse = inode->internal_data;
+    if (!mouse) return POLLERR;
+    return mouse->head != mouse->tail ? POLLIN : 0;
+}
+
 static struct INodeOps mouse_inode_ops = {
     .read = mouse_read,
+    .poll = mouse_poll,
 };
 
 static void mouse_listener(const mouse_event_t *ev) {
@@ -59,6 +68,8 @@ static void mouse_listener(const mouse_event_t *ev) {
 
     spinlock_release(&mouse_device->lock);
     irq_restore(irq);
+
+    sched_wake_event_waiters();
 }
 
 void mouse_device_init(void) {

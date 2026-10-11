@@ -135,8 +135,8 @@ static int ipc_validate_send_range(task_t *sender, uintptr_t src_addr, size_t pa
         if (!pte || !(*pte & PTE_PRESENT) || !(*pte & PTE_USER))
             return -EFAULT;
 
-        // the framebuffer mapping sits in the alloc list too, its frames arent ours to give away
-        if (*pte & PTE_NOFREE)
+        // the framebuffer and shared memory sit in the alloc list too, those frames arent ours to give away
+        if (*pte & (PTE_NOFREE | PTE_SHARED))
             return -EINVAL;
 
         // a frame still shared with a fork has to become private before it can change owner
@@ -210,6 +210,8 @@ long ipc_send_pages(task_t *sender, uint64_t target_pid, uint64_t src_addr, uint
     ipc_queue_push(target, msg);
     spinlock_release(&ipc_lock);
     irq_restore(irq_flags);
+
+    sched_wake_event_waiters();
 
     return 0;
 }

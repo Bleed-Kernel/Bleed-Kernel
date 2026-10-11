@@ -193,7 +193,7 @@ int vmm_unmap_free_pages(vmm_cr3_t cr3, void *virt, size_t page_count) {
         paddr_t ppage = *pte & PADDR_ENTRY_MASK;
         if (*pte & PTE_NOFREE) {
             // mmio, never came from the pmm
-        } else if (*pte & PTE_COW) {
+        } else if (*pte & (PTE_COW | PTE_SHARED)) {
             if (cow_unref_page(ppage) == 0)
                 pmm_free_pages(ppage, 1);
         } else {

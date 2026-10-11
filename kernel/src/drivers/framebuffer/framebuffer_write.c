@@ -57,6 +57,9 @@ void framebuffer_flush(fb_console_t *fb) {
     uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
     if (!fb_buffer) return;
 
+    // the shadow keeps up on its own, tty_set_graphics repaints from it when the screen returns
+    if (fb->detached) return;
+
     if (fb->scrollback_view != 0) {
         fb_console_render_view(fb);
         fb->dirty_top = fb->height;
