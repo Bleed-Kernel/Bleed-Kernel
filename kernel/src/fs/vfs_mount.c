@@ -215,3 +215,23 @@ int vfs_umount(const char *path) {
     serial_printf(LOG_ERROR "vfs_umount: %s is not mounted\n", path);
     return -EINVAL;
 }
+
+int vfs_umount_all(void) {
+    int busy = 0;
+
+    for (int i = VFS_MAX_MOUNTS - 1; i >= 0; i--) {
+        char path[PATH_MAX];
+
+        spinlock_acquire(&mount_lock);
+        bool active = mount_table[i].active && mount_table[i].fs_root;
+        if (active)
+            strncpy(path, mount_table[i].mount_path, PATH_MAX);
+        spinlock_release(&mount_lock);
+
+        if (!active) continue;
+        path[PATH_MAX - 1] = '\0';
+        if (vfs_umount(path) != 0)
+            busy++;
+    }
+    return busy;
+}

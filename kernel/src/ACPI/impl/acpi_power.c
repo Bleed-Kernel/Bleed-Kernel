@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdbool.h>
+#include <cpu/io.h>
 #include <mm/paging.h>
 #include <stdio.h>
 #include <kernel/exception/panic.h>
@@ -12,6 +13,7 @@
 #include "../acpi_priv.h"
 
 #define FADT_FLAG_RESET_REG_SUP (1u << 10)
+#define PM1_PWRBTN_STS          (1u << 8)
 
 void acpi_poweroff_fallback(){
     // ideally we never get here, but if we do so be it
@@ -44,6 +46,56 @@ void acpi_poweroff_fallback(){
     kprintf_pos(x1, y,     "%s", line1);
     kprintf_pos(x2, y + 1, "%s", line2);
     kprintf(RESET);
+}
+
+// the PM1 event registers can be split over two blocks, the real register is both of them
+// together. most machines only have the first and give 0 for the second
+#define PM1_BLOCKS 2
+
+static uint32_t acpi_pm1_block(int i) {
+    return i == 0 ? fadt->pm1a_evt_blk : fadt->pm1b_evt_blk;
+}
+
+// 1 if bit was set in the status half of either block. written back as a 1 for clear
+static int acpi_pm1_take(uint16_t bit) {
+    int taken = 0;
+
+    for (int i = 0; i < PM1_BLOCKS; i++) {
+        uint16_t status = (uint16_t)acpi_pm1_block(i);
+        if (!status || !(inw(status) & bit)) continue;
+
+        outw(status, bit);
+        taken = 1;
+    }
+    return taken;
+}
+
+// the enable half sits after the status half
+static void acpi_pm1_enable(uint16_t bit) {
+    if (fadt->pm1_evt_len < 4) return;
+
+    for (int i = 0; i < PM1_BLOCKS; i++) {
+        uint32_t block = acpi_pm1_block(i);
+        if (!block) continue;
+
+        uint16_t enable = (uint16_t)(block + fadt->pm1_evt_len / 2);
+        outw(enable, inw(enable) | bit);
+    }
+}
+
+// the press is latched in PM1 status. some machines (qemu is one) only latch it once the event
+// is enabled, the interrupt that comes with that is never unmasked
+void acpi_power_button_enable(void) {
+    if (!fadt) return;
+
+    acpi_pm1_enable(PM1_PWRBTN_STS);
+
+    // whatever turning the machine on left latched
+    acpi_pm1_take(PM1_PWRBTN_STS);
+}
+
+int acpi_power_button_pressed(void) {
+    return fadt ? acpi_pm1_take(PM1_PWRBTN_STS) : 0;
 }
 
 static uint16_t SLP_TYPa = 0;

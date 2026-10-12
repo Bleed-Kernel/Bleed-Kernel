@@ -17,3 +17,6 @@ int vfs_mount(const char *path, INode_t *dev_inode);
 
 // unmount whatever is at path, -EBUSY while anything inside it is still in use
 int vfs_umount(const char *path);
+
+// unmount everything, for when the power is about to go. returns how many wouldnt come off
+int vfs_umount_all(void);

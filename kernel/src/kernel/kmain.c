@@ -307,6 +307,10 @@ bool init_userspace(){
     else
         ke_panic(NULL, "Failure to Start listed init task");
 
+    // after init so it keeps the pid it always had
+    if (sched_create_task(read_cr3(), (uint64_t)power_button_watch, KERNEL_CS, KERNEL_SS, "power watchdog"))
+        BLOG_OK("Power watchdog started");
+
     return true;
 }
 

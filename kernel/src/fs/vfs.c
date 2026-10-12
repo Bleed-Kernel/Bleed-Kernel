@@ -957,3 +957,13 @@ int vfs_readdir(INode_t* dir, size_t index, INode_t** result){
     *result = vfs_adopt(dir, *result, (*result)->name, strlen((*result)->name));
     return 0;
 }
+
+void vfs_chdir_root(struct task *task) {
+    if (!task) return;
+
+    INode_t *old = task->current_directory;
+    task->current_directory = vfs_root;
+    if (vfs_root)
+        vfs_root->shared++;
+    vfs_drop(old);
+}

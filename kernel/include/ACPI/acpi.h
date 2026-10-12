@@ -38,6 +38,12 @@ void rtc_get_time(struct rtc_time *t);
 
 struct acpi_sdt *acpi_find_sdt(const char sig[4]);
 
+// start noticing the power button, anything pressed before this is forgotten
+void acpi_power_button_enable(void);
+
+// 1 if the power button has been pressed since this was last asked
+int acpi_power_button_pressed(void);
+
 __attribute__((noreturn)) void acpi_shutdown(void);
 __attribute__((noreturn)) void acpi_reboot(void);
 

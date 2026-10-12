@@ -55,6 +55,11 @@ void exit(void) {
     while ((orphan = sched_reparent_children(current_task)))
         sched_mark_task_dead(orphan);
 
+    // a zombie has no use for where it was, and holding on keeps that filesystem busy
+    INode_t *cwd = current_task->current_directory;
+    current_task->current_directory = NULL;
+    vfs_drop(cwd);
+
     task_t *parent = NULL;
     if (current_task->ppid > 0)
         parent = sched_get_task(current_task->ppid);

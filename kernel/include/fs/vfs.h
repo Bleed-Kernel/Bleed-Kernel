@@ -147,6 +147,10 @@ int vfs_mkdir(const char *path_str);
 int vfs_pipe(int out_fds[2]);
 int vfs_dup2(int oldfd, int newfd);
 int vfs_chdir(const char *path_str);
+
+// put a task back at the root, letting go of wherever it was
+struct task;
+void vfs_chdir_root(struct task *task);
 int vfs_close(int fd);
 long vfs_seek(int fd, long offset, int whence);
 int vfs_ioctl(int fd, unsigned long request, void* arg);
