@@ -469,6 +469,64 @@ int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_
     return 1;
 }
 
+// the user stack is only backed where its been touched, this fills in the page under addr
+int paging_handle_stack_fault(struct task *task, uint64_t fault_addr) {
+    if (!task || task->task_privilege != P_USER)
+        return 0;
+    if (fault_addr < USER_STACK_TOP - USER_STACK_SIZE || fault_addr >= USER_STACK_TOP)
+        return 0;
+
+    uint64_t page = PAGE_ALIGN_DOWN(fault_addr);
+    uint64_t *pte = paging_get_page(task->page_map, page, 0);
+    if (pte && (*pte & PTE_PRESENT))
+        return 0;
+
+    paddr_t phys = paging_alloc_empty_frame(NULL);
+    if (!phys)
+        return 0;
+    paging_map_page_invl(task->page_map, phys, page, PTE_USER | PTE_WRITABLE, 0);
+
+    // the tables on the way down can fail to allocate too
+    pte = paging_get_page(task->page_map, page, 0);
+    if (!pte || !(*pte & PTE_PRESENT)) {
+        pmm_free_pages(phys, 1);
+        return 0;
+    }
+    return 1;
+}
+
+// only the leaves count, and mmio isnt ram so it doesnt
+size_t paging_count_user_pages(paddr_t cr3) {
+    if ((cr3 & PADDR_ENTRY_MASK) == 0) return 0;
+
+    uint64_t *pml4 = (uint64_t *)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
+    size_t count = 0;
+
+    for (size_t pml4i = 0; pml4i < 256; pml4i++) {
+        if (!(pml4[pml4i] & PTE_PRESENT))
+            continue;
+        uint64_t *pdpt = (uint64_t *)paddr_to_vaddr(pml4[pml4i] & PADDR_ENTRY_MASK);
+
+        for (size_t pdpti = 0; pdpti < 512; pdpti++) {
+            if (!(pdpt[pdpti] & PTE_PRESENT) || (pdpt[pdpti] & PTE_PAT_4K))
+                continue;
+            uint64_t *pd = (uint64_t *)paddr_to_vaddr(pdpt[pdpti] & PADDR_ENTRY_MASK);
+
+            for (size_t pdi = 0; pdi < 512; pdi++) {
+                if (!(pd[pdi] & PTE_PRESENT) || (pd[pdi] & PTE_PAT_4K))
+                    continue;
+                uint64_t *pt = (uint64_t *)paddr_to_vaddr(pd[pdi] & PADDR_ENTRY_MASK);
+
+                for (size_t pti = 0; pti < 512; pti++) {
+                    if ((pt[pti] & PTE_PRESENT) && !(pt[pti] & PTE_NOFREE))
+                        count++;
+                }
+            }
+        }
+    }
+    return count;
+}
+
 void paging_release_user_space(paddr_t cr3) {
     uint64_t *pml4 = (uint64_t *)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
     if (!pml4)

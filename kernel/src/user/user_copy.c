@@ -24,6 +24,10 @@ static int user_range_mapped(task_t *task, uintptr_t addr, size_t len) {
 
     for (uintptr_t p = start; p <= end; p += PAGE_SIZE) {
         uint64_t *pte = paging_get_page(task->page_map, p, 0);
+
+        // a bit of stack the task hasnt touched yet is still its to be handed
+        if ((!pte || !(*pte & PTE_PRESENT)) && paging_handle_stack_fault(task, p))
+            pte = paging_get_page(task->page_map, p, 0);
         if (!pte) return 0;
         if (!(*pte & PTE_PRESENT)) return 0;
         if (!(*pte & PTE_USER)) return 0;

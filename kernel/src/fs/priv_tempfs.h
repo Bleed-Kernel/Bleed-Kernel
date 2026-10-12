@@ -20,6 +20,7 @@ typedef struct tempfs_INode{
     char name[TEMPFS_MAX_NAME_LEN];
     size_t capacity;
     tempfs_data_t* data;
+    const uint8_t* borrowed;
 }tempfs_INode_t;
 
 extern const INodeOps_t dir_ops;
@@ -39,6 +40,7 @@ void tempfs_drop(INode_t* inode);
 /// @brief create chunk of data and return its structure pointer
 /// @return new structure pointer
 tempfs_data_t* tempfs_new_data_chunk();
+void tempfs_free_data_chunk(tempfs_data_t* data);
 
 /// @brief Look for an inode given as a child of an inode directory
 /// @param dir parent

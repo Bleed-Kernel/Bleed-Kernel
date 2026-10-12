@@ -67,6 +67,7 @@ typedef struct task {
 
     uint8_t         *kernel_stack;
     uint32_t        quantum_remaining;
+    uint64_t        cpu_time;       // tsc cycles spent on the cpu, up to the last switch away
 
     paddr_t         page_map;
     user_alloc_t    *alloc_list;
@@ -119,6 +120,7 @@ void sched_mark_task_dead(task_t *task);
 task_t *sched_get_task(uint64_t pid);
 
 uint64_t get_task_count(void);
+uint64_t sched_task_cpu_time(task_t *task);
 task_t *get_current_task(void);
 void sched_yield(task_t *task);
 void sched_block(task_t *task);

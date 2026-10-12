@@ -83,7 +83,7 @@ USER_REPOS := \
     "https://github.com/Bleed-Kernel/Bleed-Doom doom" \
 	"https://github.com/Bleed-Kernel/Bleed-Quake2 quake2" \
 	"https://github.com/Bleed-Kernel/Bleed-SpecSeek specseek" \
-    "https://github.com/Bleed-Kernel/Bleed-Taskman taskman" \
+    "https://github.com/Bleed-Kernel/Bleed-Taskv taskv" \
     "https://github.com/Bleed-Kernel/Bleed-tvi tvi" \
 	"https://github.com/Bleed-Kernel/Bleed-Tetris tetris" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils cat" \
@@ -98,8 +98,8 @@ INITRD_BIN := initrd/bin
 # e.g. `make run USERPROG_SRC=..` picks up ../Verdict-Shell, ../Bleed-coreutils and ../blibc.
 # repos without a local checkout still come from GitHub
 
-#there is also make runlocal for this which is nice
-USERPROG_SRC ?=
+#there is also make runlocal for this which is nice, change this to where you keep ur userprograms
+USERPROG_SRC ?= ..
 
 .PHONY: all
 all: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)

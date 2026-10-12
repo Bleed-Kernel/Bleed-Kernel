@@ -115,6 +115,32 @@ void fb_scrollback_reset(fb_console_t *fb);
 /// based on the current scrollback_view offset. Does not modify shadow_pixels.
 void fb_console_render_view(fb_console_t *fb);
 
+/// @brief start keeping the text of fb as well as its pixels, 0 on success
+int  fb_text_attach(fb_console_t *fb, size_t max_cols, size_t max_rows);
+void fb_text_detach(fb_console_t *fb);
+
+// the console calls these as it draws, they do nothing on a console with no text kept
+void fb_text_put(fb_console_t *fb, size_t row, size_t col, uint32_t cp, uint32_t fg, uint32_t bg);
+void fb_text_wrap(fb_console_t *fb, size_t row, int wrapped);
+void fb_text_scroll(fb_console_t *fb);
+void fb_text_clear(fb_console_t *fb);
+
+/// @brief lay every line out again for the size fb has now and move the cursor with it
+void fb_text_reflow(fb_console_t *fb);
+
+// the rows a reflow builds the new layout in, only held around the reflow itself
+int  fb_text_spare_alloc(fb_console_t *fb);
+void fb_text_spare_free(fb_console_t *fb);
+
+/// @brief draw the screen into the shadow buffer from the text
+void fb_text_repaint(fb_console_t *fb);
+
+/// @brief draw fb->pixels from the text with the history scrolled back by scrollback_view
+void fb_text_render_view(fb_console_t *fb);
+
+/// @brief note that rows y to y + height of fb->pixels changed, for the next grab
+void framebuffer_mark_grab(fb_console_t *fb, size_t y, size_t height);
+
 /// @brief Draw multiple lines centered vertically and horizontally
 /// @param fb framebuffer console
 /// @param ansi ansi state

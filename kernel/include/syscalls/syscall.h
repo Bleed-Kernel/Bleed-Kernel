@@ -55,6 +55,7 @@ enum {
     SYS_SHM_CREATE      = 522,
     SYS_SHM_MAP         = 523,
     SYS_SHM_DESTROY     = 524,
+    SYS_TASKUSAGE       = 525,
 };
 
 int sys_open(char *path_str, int flags);
@@ -94,6 +95,7 @@ long sys_getcwd(char *buf, long size);
 
 uint64_t sys_taskinfo(uint64_t pid, uint64_t user_info_ptr);
 uint64_t sys_taskcount(void);
+long sys_taskusage(uint64_t pid, uint64_t user_usage_ptr);
 
 int sys_stat(int fd, user_file_t *user_buf);
 

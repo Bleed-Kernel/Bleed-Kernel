@@ -7,6 +7,8 @@
 #include <string.h>
 #include <user/errno.h>
 #include <user/user_poll.h>
+#include <user/user_copy.h>
+#include <devices/type/tty_device.h>
 
 #define PIPE_BUFFER_SIZE 4096
 
@@ -17,6 +19,7 @@ typedef struct pipe_state {
     size_t count;
     int readers;
     int writers;
+    uint8_t nonblock;
     char buffer[PIPE_BUFFER_SIZE];
 } pipe_state_t;
 
@@ -59,6 +62,7 @@ static long pipe_read_inode(INode_t *inode, void *out_buffer, size_t size, size_
         }
 
         int writers = state->writers;
+        int nonblock = state->nonblock;
         spinlock_release(&state->lock);
         irq_restore(flags);
 
@@ -69,6 +73,8 @@ static long pipe_read_inode(INode_t *inode, void *out_buffer, size_t size, size_
         }
         if (writers == 0)
             return 0;
+        if (nonblock)
+            return -EAGAIN;
 
         // checked with the lock dropped, a fatal signal never comes back from this
         if (signal_should_interrupt(get_current_task()))
@@ -138,6 +144,36 @@ static long pipe_write_inode(INode_t *inode, const void *in_buffer, size_t size,
     }
 }
 
+// the same flag ioctls a tty and the keyboard answer, so a program that reads key events
+// off stdin sets itself up the same way when stdin is a pipe from a terminal window
+static int pipe_read_ioctl(INode_t *inode, unsigned long request, void *arg) {
+    pipe_state_t *state = (pipe_state_t *)inode->internal_data;
+    task_t *task = get_current_task();
+    if (!state) return -EIO;
+    if (!arg)   return -EINVAL;
+
+    switch (request) {
+        case TTY_IOCTL_FIONBIO: {
+            int nonblock;
+            if (copy_from_user(task, &nonblock, arg, sizeof(nonblock)) != 0) return -EFAULT;
+            state->nonblock = nonblock ? 1 : 0;
+            return 0;
+        }
+        case TTY_IOCTL_SET_FLAGS: {
+            uint32_t flags;
+            if (copy_from_user(task, &flags, arg, sizeof(flags)) != 0) return -EFAULT;
+            state->nonblock = (flags & TTY_NONBLOCK) ? 1 : 0;
+            return 0;
+        }
+        case TTY_IOCTL_GET_FLAGS: {
+            uint32_t flags = state->nonblock ? TTY_NONBLOCK : 0;
+            return copy_to_user(task, arg, &flags, sizeof(flags)) == 0 ? 0 : -EFAULT;
+        }
+        default:
+            return -ENOTTY;
+    }
+}
+
 static int pipe_read_poll(INode_t *inode) {
     pipe_state_t *state = (pipe_state_t *)inode->internal_data;
     if (!state) return POLLERR;
@@ -162,7 +198,7 @@ static const INodeOps_t pipe_read_ops = {
     .read = pipe_read_inode,
     .write = NULL,
     .lookup = NULL,
-    .ioctl = NULL,
+    .ioctl = pipe_read_ioctl,
     .drop = NULL,
     .readdir = NULL,
     .size = NULL,

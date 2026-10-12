@@ -63,6 +63,9 @@ void paging_switch_address_space(paddr_t cr3);
 void paging_destroy_address_space(paddr_t cr3);
 void paging_release_user_space(paddr_t cr3);
 
+// how many pages of ram the user half of cr3 has mapped
+size_t paging_count_user_pages(paddr_t cr3);
+
 uint64_t paging_alloc_empty_frame(void **vaddr);
 
 // make sure a physical mmio range can be reached through the hhdm, 0 on success
@@ -74,5 +77,6 @@ void paging_unmap_page(paddr_t cr3, uint64_t vaddr);
 
 int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3);
 int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_error);
+int paging_handle_stack_fault(struct task *task, uint64_t fault_addr);
 
 void pat_enable_wc(void);

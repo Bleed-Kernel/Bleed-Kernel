@@ -3,6 +3,7 @@
 #include <ansii.h>
 #include <stdint.h>
 #include <fs/archive/tar.h>
+#include <fs/tempfs.h>
 #include <user/errno.h>
 #include <string.h>
 
@@ -162,10 +163,10 @@ int tar_extract(const void* tar_data, size_t tar_size){
                 vfs_drop(inode);
                 return -EIO;
             }
-            if (inode_write(inode,
-                            (uint8_t*)tar_data + content_offset,
-                            file_size,
-                            0) < 0) {
+            // the archive stays in memory for good, a tempfs file can just read out of it
+            const uint8_t* contents = (uint8_t*)tar_data + content_offset;
+            if (tempfs_adopt(inode, contents, file_size) != 0 &&
+                inode_write(inode, contents, file_size, 0) < 0) {
                 kprintf(LOG_ERROR "Tar: write failed for %s\n", full_path);
                 vfs_drop(inode);
                 return -EIO;

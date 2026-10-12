@@ -5,7 +5,7 @@
 
 typedef struct INode INode_t;
 
-#define MAX_DEVICES 64  // change this up later for now im avoiding flexable array members
+#define DEVICES_GROW 64  // the list starts with room for this many and doubles when its full
 
 long device_register(INode_t *device, char *name);
 INode_t *device_get_by_name(const char *name);

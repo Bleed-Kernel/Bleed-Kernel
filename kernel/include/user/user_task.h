@@ -13,3 +13,8 @@ typedef struct user_task_info {
     uint32_t        quantum_remaining;
     char            name[128];
 } user_task_info_t;
+
+typedef struct user_task_usage {
+    uint64_t        cpu_time;       // tsc cycles on the cpu so far, only good for comparing
+    uint64_t        mem_pages;      // pages of ram mapped into the task
+} user_task_usage_t;

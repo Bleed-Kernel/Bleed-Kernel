@@ -1,5 +1,6 @@
 #include <fs/vfs.h>
 #include <mm/kalloc.h>
+#include <mm/vmm.h>
 #include <string.h>
 #include <stdio.h>
 #include <user/errno.h>
@@ -59,6 +60,7 @@ INode_t* tempfs_create_inode(int type, const INodeOps_t* ops){
 
             data->capacity = 0;
             data->data = NULL;
+            data->borrowed = NULL;
         }else{
             kfree(inode);
         }
@@ -73,13 +75,58 @@ void tempfs_drop(INode_t* inode){
     tempfs_INode_t* tempfs_inode = inode->internal_data;
     tempfs_data_t* data = tempfs_inode->data;
 
+    // borrowed contents were never ours to free
     while(data){
         tempfs_data_t* next = data->next_chunk;
-        kfree(data);
+        tempfs_free_data_chunk(data);
         data = next;
     }
     kfree(tempfs_inode);
     inode->internal_data = NULL;
+}
+
+// a file thats still reading out of someone elses memory gets its own copy before anything changes it
+static int tempfs_own(INode_t* inode){
+    tempfs_INode_t* tempfs_inode = inode->internal_data;
+    if (!tempfs_inode->borrowed)
+        return 0;
+
+    const uint8_t* contents = tempfs_inode->borrowed;
+    size_t size = tempfs_inode->capacity;
+
+    tempfs_inode->borrowed = NULL;
+    tempfs_inode->capacity = 0;
+    if (size == 0 || tempfs_write(inode, contents, size, 0) == (long)size)
+        return 0;
+
+    // ran out of memory halfway, put it back how it was
+    tempfs_data_t* data = tempfs_inode->data;
+    while(data){
+        tempfs_data_t* next = data->next_chunk;
+        tempfs_free_data_chunk(data);
+        data = next;
+    }
+    tempfs_inode->data = NULL;
+    tempfs_inode->borrowed = contents;
+    tempfs_inode->capacity = size;
+    return -ENOMEM;
+}
+
+/// @brief point an empty file at contents that already sit in memory instead of copying them in
+/// @param inode an empty tempfs file
+/// @param contents has to stay where it is for as long as the file exists
+/// @return 0 on success, negative if this inode cant do it
+int tempfs_adopt(INode_t* inode, const void* contents, size_t size){
+    if (!inode || !inode->internal_data || !contents || inode->ops != &file_ops)
+        return -EINVAL;
+
+    tempfs_INode_t* tempfs_inode = inode->internal_data;
+    if (tempfs_inode->data || tempfs_inode->capacity)
+        return -EINVAL;
+
+    tempfs_inode->borrowed = contents;
+    tempfs_inode->capacity = size;
+    return 0;
 }
 
 /// @brief truncate a file inode to new_size bytes, freeing excess chunks
@@ -94,6 +141,10 @@ static int tempfs_truncate(INode_t* inode, size_t new_size){
 
     if (new_size == tempfs_inode->capacity)
         return 0;
+
+    int owned = tempfs_own(inode);
+    if (owned < 0)
+        return owned;
 
     if (new_size > tempfs_inode->capacity) {
         // tempfs_write refuses to start past the end of the file, so move the end first.
@@ -135,7 +186,7 @@ static int tempfs_truncate(INode_t* inode, size_t new_size){
     *prev_next = NULL;
     while (chunk) {
         tempfs_data_t* next = chunk->next_chunk;
-        kfree(chunk);
+        tempfs_free_data_chunk(chunk);
         chunk = next;
     }
 
@@ -146,9 +197,13 @@ static int tempfs_truncate(INode_t* inode, size_t new_size){
 /// @brief create chunk of data and return its structure pointer
 /// @return new structure pointer
 tempfs_data_t* tempfs_new_data_chunk(){
-    tempfs_data_t* data = kmalloc(TEMPFS_DATA_CHUNK_SIZE);
-    if(data) memset(data, 0, TEMPFS_DATA_CHUNK_SIZE);
-    return data;
+    // a page exactly. kmalloc puts a header in front of anything this size and that
+    // pushed every chunk into a second page
+    return vmm_alloc_pages(TEMPFS_DATA_CHUNK_SIZE / PAGE_SIZE);
+}
+
+void tempfs_free_data_chunk(tempfs_data_t* data){
+    vmm_free_pages(data, TEMPFS_DATA_CHUNK_SIZE / PAGE_SIZE);
 }
 
 /// @brief Look for an inode given as a child of an inode directory
@@ -204,6 +259,11 @@ long tempfs_read(INode_t* inode, void* out_buffer, size_t count, size_t offset){
     if (offset >= tempfs_inode->capacity) return 0; // EOF
     if (count > tempfs_inode->capacity - offset) count = tempfs_inode->capacity - offset;
 
+    if (tempfs_inode->borrowed) {
+        memcpy(out_buffer, tempfs_inode->borrowed + offset, count);
+        return (long)count;
+    }
+
     if (count > 0 && !data)
         return 0;
 
@@ -255,6 +315,9 @@ long tempfs_write(INode_t* inode, const void* in_buffer, size_t count, size_t of
         return 0;
 
     tempfs_INode_t* tempfs_inode = inode->internal_data;
+    if (tempfs_own(inode) < 0)
+        return -ENOMEM;
+
     size_t start_offset = offset;
     tempfs_data_t** previous_next = &tempfs_inode->data;
     tempfs_data_t* data = tempfs_inode->data;

@@ -25,8 +25,24 @@ task_t *dead_task_tail = NULL;
 task_t *ready_head     = NULL;
 task_t *ready_tail     = NULL;
 
+// when the current task was given the cpu
+static uint64_t switch_tsc = 0;
+
+static inline uint64_t rdtsc(void) {
+    uint32_t lo, hi;
+    asm volatile ("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
 task_t *get_current_task(void) {
     return current_task;
+}
+
+/// @brief tsc cycles task has had the cpu for, counting the turn its in the middle of
+uint64_t sched_task_cpu_time(task_t *task) {
+    if (task != current_task)
+        return task->cpu_time;
+    return task->cpu_time + (rdtsc() - switch_tsc);
 }
 
 void ready_enqueue(task_t *task) {
@@ -87,6 +103,10 @@ static task_t *ready_pop(void) {
 
 void* sched_switch_task(task_t *next_task, void* old_context) {
     current_task->context = (cpu_context_t*)old_context;
+
+    uint64_t now = rdtsc();
+    current_task->cpu_time += now - switch_tsc;
+    switch_tsc = now;
 
     if (current_task->state == TASK_RUNNING)
         current_task->state = TASK_READY;
@@ -167,6 +187,7 @@ void sched_bootstrap(void *rsp) {
 
     current_task   = kernel_task;
     task_list_head = kernel_task;
+    switch_tsc     = rdtsc();
 
     serial_printf(LOG_OK "Kernel Task Created, tid:0\n");
 }

@@ -6,6 +6,7 @@
 #include <user/errno.h>
 #include <user/user_copy.h>
 #include <user/user_poll.h>
+#include <mm/kalloc.h>
 
 static short poll_one(task_t *task, const pollfd_t *p) {
     if (p->fd == POLL_FD_IPC)
@@ -28,6 +29,8 @@ static short poll_one(task_t *task, const pollfd_t *p) {
     return (short)(f->inode->ops->poll(f->inode) & (p->events | POLLERR | POLLHUP));
 }
 
+static long sys_poll_wait(task_t *current, pollfd_t *fds, uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms);
+
 /// @brief wait until one of fds is ready, a signal arrives or the timeout runs out
 long sys_poll(uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms) {
     task_t *current = get_current_task();
@@ -38,8 +41,24 @@ long sys_poll(uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms) {
     if (nfds && (!user_fds_ptr || !user_ptr_valid(user_fds_ptr)))
         return -EFAULT;
 
-    pollfd_t fds[POLL_MAX_FDS];
-    size_t   bytes = (size_t)nfds * sizeof(pollfd_t);
+    // most callers watch a handful, those stay on the stack
+    pollfd_t  few[POLL_STACK_FDS];
+    pollfd_t *fds   = few;
+    size_t    bytes = (size_t)nfds * sizeof(pollfd_t);
+    if (nfds > POLL_STACK_FDS) {
+        fds = kmalloc(bytes);
+        if (!fds)
+            return -ENOMEM;
+    }
+
+    long ret = sys_poll_wait(current, fds, user_fds_ptr, nfds, timeout_ms);
+    if (fds != few)
+        kfree(fds);
+    return ret;
+}
+
+static long sys_poll_wait(task_t *current, pollfd_t *fds, uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms) {
+    size_t bytes = (size_t)nfds * sizeof(pollfd_t);
     if (nfds && copy_from_user(current, fds, (void *)user_fds_ptr, bytes) != 0)
         return -EFAULT;
 

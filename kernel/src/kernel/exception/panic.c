@@ -59,6 +59,8 @@ void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
     __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
     if (sf->vector == 14 && paging_handle_cow_fault(task, cr2, sf->error_code))
         return sf;
+    if (sf->vector == 14 && !(sf->error_code & 0x1) && paging_handle_stack_fault(task, cr2))
+        return sf;
 
     if (sf->vector == 14)
         serial_printf("Page Fault info: error code: %p, cr2: %p\n", sf->error_code, cr2);

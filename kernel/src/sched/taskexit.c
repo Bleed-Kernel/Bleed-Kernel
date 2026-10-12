@@ -6,6 +6,7 @@
 #include <sched/signal.h>
 #include <ipc/shm.h>
 #include <devices/type/fb_device.h>
+#include <devices/type/tty_device.h>
 
 #include "priv_scheduler.h"
 
@@ -16,6 +17,7 @@ void exit(void) {
 
     // done here and not in the reaper, the screen should come back the moment its owner is gone
     fb_device_task_exit(current_task);
+    tty_task_exit(current_task);
     shm_task_cleanup(current_task);
 
     user_alloc_t *alloc = current_task->alloc_list;
@@ -28,6 +30,12 @@ void exit(void) {
         alloc = next;
     }
     current_task->alloc_list = NULL;
+
+    // the rest goes now too, a zombie can sit a long time before anyone waits on it
+    if (current_task->task_privilege == PRIVILEGE_USER) {
+        paging_release_user_space(current_task->page_map);
+        paging_switch_address_space(current_task->page_map);
+    }
     vfs_fd_table_drop(current_task->fd_table);
     current_task->fd_table = NULL;
 

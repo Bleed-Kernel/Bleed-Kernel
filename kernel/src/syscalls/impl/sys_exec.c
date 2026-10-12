@@ -17,7 +17,7 @@ static const char *exec_display_name(const char *path, const char *inode_name) {
         return inode_name;
 
     if (!path || path[0] == '\0')
-        return "Bleed Program";
+        return "Unknown Program";
 
     const char *base = path;
     for (const char *p = path; *p; p++) {
@@ -25,7 +25,7 @@ static const char *exec_display_name(const char *path, const char *inode_name) {
             base = p + 1;
     }
 
-    return (*base) ? base : "Bleed Program";
+    return (*base) ? base : "Unknown Program";
 }
 
 long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc) {
@@ -73,15 +73,6 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     if (elf_load(file, new_cr3, &entry) != 0) {
         ret = -ENOEXEC;
         goto fail_new_cr3;
-    }
-
-    for (uint64_t page = USER_STACK_TOP - USER_STACK_SIZE; page < USER_STACK_TOP; page += PAGE_SIZE) {
-        paddr_t paddr = paging_alloc_empty_frame(NULL);
-        if (!paddr) {
-            ret = -ENOMEM;
-            goto fail_new_cr3;
-        }
-        paging_map_page_invl(new_cr3, paddr, page, PTE_USER | PTE_WRITABLE, 0);
     }
 
     new_heap = kmalloc(sizeof(user_heap_t));

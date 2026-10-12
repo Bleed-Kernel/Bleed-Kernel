@@ -18,8 +18,9 @@ static uint32_t *framebuffer_get_shadow_buffer(fb_console_t *fb) {
         return NULL;
 
     size_t size = fb->pitch * fb->height * sizeof(uint32_t);
-    if (!fb->shadow_pixels || fb->shadow_pixels_size != size) {
-        // the old one is the wrong size now, dont leave it behind
+    // one thats bigger than it has to be is fine, an offscreen tty keeps room to grow into
+    if (!fb->shadow_pixels || fb->shadow_pixels_size < size) {
+        // the old one is too small now, dont leave it behind
         if (fb->shadow_pixels)
             kfree(fb->shadow_pixels);
 
@@ -50,6 +51,11 @@ void framebuffer_load_shadow(fb_console_t *fb, const uint32_t *src) {
     fb->dirty_bottom = 0;
 }
 
+void framebuffer_mark_grab(fb_console_t *fb, size_t y, size_t height) {
+    if (y < fb->grab_top) fb->grab_top = y;
+    if (y + height > fb->grab_bottom) fb->grab_bottom = y + height;
+}
+
 void framebuffer_flush(fb_console_t *fb) {
     if (!fb)
         return;
@@ -71,6 +77,7 @@ void framebuffer_flush(fb_console_t *fb) {
         uint32_t* src = fb_buffer + fb->dirty_top * fb->pitch;
         uint32_t* dst = fb->pixels + fb->dirty_top * fb->pitch;
         framebuffer_blit(src, dst, fb->width, fb->dirty_bottom - fb->dirty_top, fb->pitch);
+        framebuffer_mark_grab(fb, fb->dirty_top, fb->dirty_bottom - fb->dirty_top);
     }
 
     fb->dirty_top = fb->height;
@@ -142,6 +149,7 @@ static void framebuffer_scroll_buffer(fb_console_t *fb) {
     if (!fb_buffer) return;
     
     fb_scrollback_capture(fb, fb_buffer);
+    fb_text_scroll(fb);
 
     memmove(fb_buffer,
             fb_buffer + row_px * fb->pitch,
@@ -187,18 +195,21 @@ void framebuffer_put_char(fb_console_t *fb, uint32_t c) {
 
     uint16_t idx = 0;
     switch (c) {
-    case '\n': fb->cursor_x = 0; fb->cursor_y++; break;
+    case '\n': fb_text_wrap(fb, fb->cursor_y, 0); fb->cursor_x = 0; fb->cursor_y++; break;
     case '\r': fb->cursor_x = 0; break;
     case '\b': if (fb->cursor_x) fb->cursor_x--; break;
     case '\t': fb->cursor_x = (fb->cursor_x + 8) & ~7; break;
     default:
         idx = psf_lookup_glyph(fb->font, c);
         framebuffer_render_glyph_index(fb, fb->cursor_y, fb->cursor_x, idx, fb->fg, fb->bg);
+        fb_text_put(fb, fb->cursor_y, fb->cursor_x, c, fb->fg, fb->bg);
         fb->cursor_x++;
         break;
     }
 
     if (fb->cursor_x >= max_cols) {
+        // ran off the end without a newline, so the next row is more of the same line
+        fb_text_wrap(fb, fb->cursor_y, 1);
         fb->cursor_x = 0;
         fb->cursor_y++;
     }

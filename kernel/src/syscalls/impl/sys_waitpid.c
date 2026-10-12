@@ -47,7 +47,10 @@ long sys_waitpid(uint64_t pid) {
 
         sigset_t ready = current->sig_pending & ~current->sig_blocked;
         sigset_t sigchld_bit = (sigset_t)1ULL << (SIGCHLD - 1);
-        if (ready & ~sigchld_bit) {
+
+        // a window changing size is news, not a reason to stop waiting for the child
+        sigset_t sigwinch_bit = (sigset_t)1ULL << (SIGWINCH - 1);
+        if (ready & ~(sigchld_bit | sigwinch_bit)) {
             current->wait_target_pid = 0;
             irq_restore(flags);
             return -EINTR;

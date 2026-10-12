@@ -35,8 +35,13 @@ static tty_fb_backend_t g_tty0_backend;
 static bool            g_tty0_ready           = false;
 static bool            g_listener_registered  = false;
 
+static tty_t          *g_offscreen;             // tty1 and up. one is never taken off, only given back to be used again
+static spinlock_t      g_offscreen_lock       = {0};
+static tty_t          *g_active_offscreen;      // the one whose window has the focus, NULL when none does
+
 extern struct INodeOps tty_inode_ops;
 extern spinlock_t sched_lock;
+static struct tty_ops tty0_ops;
 
 static void tty_sync_termios_from_flags(tty_t *tty) {
     if (tty->flags & TTY_ECHO)      tty->termios.c_lflag |=  TTY_TERM_ECHO;
@@ -99,6 +104,9 @@ static void tty_render_byte(tty_t *tty, uint8_t byte) {
 
 static void tty_fb_putchar(tty_t *tty, char c) {
     if (!tty->backend) return;
+
+    // its window is gone, whatever still has it open is talking to nobody
+    if (tty->offscreen && !tty->owner_pid) return;
     tty_render_byte(tty, (uint8_t)c);
 }
 
@@ -112,8 +120,10 @@ void fb_clear(fb_console_t *fb) {
 
     if (dst != fb->pixels && !fb->detached)
         framebuffer_blit(dst, fb->pixels, fb->width, fb->height, fb->pitch);
+    framebuffer_mark_grab(fb, 0, fb->height);
 
     fb_scrollback_reset(fb);
+    fb_text_clear(fb);
 
     fb->cursor_x     = 0;
     fb->cursor_y     = 0;
@@ -280,6 +290,10 @@ long tty_inode_write(INode_t *inode, const void *in_buffer, size_t size, size_t 
     const uint8_t *c = in_buffer;
     for (size_t i = 0; i < size; i++)
         tty->ops->putchar(tty, (char)c[i]);
+
+    // whoever is showing it in a window sleeps in poll until theres something new
+    if (tty->offscreen)
+        sched_wake_event_waiters();
     return (long)size;
 }
 
@@ -292,6 +306,265 @@ static int tty_arg_in(void *arg, void *dst, size_t len) {
 static int tty_arg_out(void *arg, const void *src, size_t len) {
     if (!arg) return -EINVAL;
     return copy_to_user(get_current_task(), arg, src, len) == 0 ? 0 : -EFAULT;
+}
+
+static void tty_offscreen_free_buffers(tty_fb_backend_t *b) {
+    if (b->fb.pixels)           kfree(b->fb.pixels);
+    if (b->fb.shadow_pixels)    kfree(b->fb.shadow_pixels);
+    if (b->fb.scrollback_lines) kfree(b->fb.scrollback_lines);
+    fb_text_detach(&b->fb);
+
+    b->fb.pixels           = NULL;
+    b->fb.shadow_pixels    = NULL;
+    b->fb.scrollback_lines = NULL;
+}
+
+static void tty_offscreen_destroy(tty_t *tty) {
+    tty_fb_backend_t *b = tty->backend;
+
+    unsigned long irq = irq_push();
+    spinlock_acquire(&b->fb_lock);
+
+    // the tty_t and its /dev node stay for the next window, only the pixels go back
+    tty->owner_pid = 0;
+    if (g_active_offscreen == tty)
+        g_active_offscreen = NULL;
+    tty_offscreen_free_buffers(b);
+
+    spinlock_release(&b->fb_lock);
+    irq_restore(irq);
+}
+
+// the tty a task writes to, going by its stdout and then its stderr
+static tty_t *tty_of_task(task_t *task) {
+    if (!task || !task->fd_table) return NULL;
+
+    for (int fd = 1; fd <= 2; fd++) {
+        file_t *f = task->fd_table->fds[fd];
+        if (f && f->inode && f->inode->ops == &tty_inode_ops && f->inode->internal_data)
+            return (tty_t *)f->inode->internal_data;
+    }
+    return NULL;
+}
+
+static uint32_t tty_offscreen_grow(uint32_t n) {
+    return (n + TTY_OFFSCREEN_GROW - 1) / TTY_OFFSCREEN_GROW * TTY_OFFSCREEN_GROW;
+}
+
+// SIGWINCH for everything that has this tty as its terminal
+static void tty_send_winch(task_t *task, void *userdata) {
+    if (!task || task->task_privilege != PRIVILEGE_USER) return;
+    if (tty_of_task(task) == (tty_t *)userdata)
+        signal_send(task, SIGWINCH);
+}
+
+/// @brief give an offscreen tty a different size in pixels and wrap its text again to fit
+/// @return 0 on success, negative status code on failure
+static int tty_offscreen_resize(tty_t *tty, uint32_t width, uint32_t height) {
+    tty_fb_backend_t *b  = tty->backend;
+    fb_console_t     *fb = &b->fb;
+    if (width < TTY_OFFSCREEN_MIN || height < TTY_OFFSCREEN_MIN ||
+        width > TTY_OFFSCREEN_MAX || height > TTY_OFFSCREEN_MAX)
+        return -EINVAL;
+    if (width == fb->width && height == fb->height)
+        return 0;
+
+    // only allocated if it has outgrown what it has, and before the lock is taken
+    uint32_t  cap_w  = fb->pitch;
+    uint32_t  cap_h  = b->cap_height;
+    uint32_t *pixels = NULL;
+    uint32_t *shadow = NULL;
+    size_t    bytes  = 0;
+
+    if (width > cap_w || height > cap_h) {
+        cap_w = tty_offscreen_grow(width > cap_w ? width : cap_w);
+        cap_h = tty_offscreen_grow(height > cap_h ? height : cap_h);
+        bytes = (size_t)cap_w * cap_h * sizeof(uint32_t);
+
+        pixels = kmalloc(bytes);
+        shadow = kmalloc(bytes);
+        if (!pixels || !shadow) {
+            if (pixels) kfree(pixels);
+            if (shadow) kfree(shadow);
+            return -ENOMEM;
+        }
+    }
+
+    if (fb_text_spare_alloc(fb) != 0) {
+        if (pixels) kfree(pixels);
+        if (shadow) kfree(shadow);
+        return -ENOMEM;
+    }
+
+    unsigned long irq = irq_push();
+    spinlock_acquire(&b->fb_lock);
+
+    if (shadow) {
+        kfree(fb->pixels);
+        kfree(fb->shadow_pixels);
+        fb->pixels             = pixels;
+        fb->shadow_pixels      = shadow;
+        fb->shadow_pixels_size = bytes;
+        fb->pitch              = cap_w;
+        b->cap_height          = cap_h;
+        b->display_pixels      = pixels;
+    }
+
+    fb->shadow_initialized = 1;
+    fb->width              = width;
+    fb->height             = height;
+
+    // every line laid out again for the new width, the cursor goes with the text its in
+    fb_text_reflow(fb);
+    fb_text_repaint(fb);
+
+    // the display copy is just the shadow again, and all of it counts as changed
+    memcpy(fb->pixels, fb->shadow_pixels, (size_t)fb->pitch * height * sizeof(uint32_t));
+    fb->dirty_top    = height;
+    fb->dirty_bottom = 0;
+    fb->grab_top     = 0;
+    fb->grab_bottom  = height;
+
+    spinlock_release(&b->fb_lock);
+    irq_restore(irq);
+
+    fb_text_spare_free(fb);
+    return 0;
+}
+
+void tty_task_exit(task_t *task) {
+    if (!task) return;
+
+    for (tty_t *tty = g_offscreen; tty; tty = tty->next) {
+        if (tty->owner_pid == task->id)
+            tty_offscreen_destroy(tty);
+    }
+}
+
+/// @brief make a tty that draws into a buffer of its own, for a terminal window to show
+/// @param width  size of that buffer in pixels
+/// @param index_out which /dev/ttyN it is
+/// @return 0 on success, negative status code on failure
+static int tty_offscreen_create(uint32_t width, uint32_t height, uint32_t *index_out) {
+    task_t *task = get_current_task();
+    if (!task) return -ESRCH;
+    if (width < TTY_OFFSCREEN_MIN || height < TTY_OFFSCREEN_MIN ||
+        width > TTY_OFFSCREEN_MAX || height > TTY_OFFSCREEN_MAX)
+        return -EINVAL;
+
+    // everything that can fail or take a while happens before a slot is taken.
+    // the buffers get some room to grow into, see tty_offscreen_resize
+    uint32_t  cap_w  = tty_offscreen_grow(width);
+    uint32_t  text_w = tty_offscreen_grow((uint32_t)framebuffer_get_width(0));
+    if (text_w < cap_w) text_w = cap_w;
+    uint32_t  cap_h  = tty_offscreen_grow(height);
+    size_t    bytes  = (size_t)cap_w * cap_h * sizeof(uint32_t);
+    uint32_t *pixels = kmalloc(bytes);
+    uint32_t *shadow = kmalloc(bytes);
+    tty_t    *fresh  = kmalloc(sizeof(tty_t));
+    tty_fb_backend_t *fresh_backend = kmalloc(sizeof(tty_fb_backend_t));
+    if (!pixels || !shadow || !fresh || !fresh_backend) {
+        if (pixels)        kfree(pixels);
+        if (shadow)        kfree(shadow);
+        if (fresh)         kfree(fresh);
+        if (fresh_backend) kfree(fresh_backend);
+        return -ENOMEM;
+    }
+    memset(pixels, 0, bytes);
+    memset(shadow, 0, bytes);
+    memset(fresh, 0, sizeof(*fresh));
+    memset(fresh_backend, 0, sizeof(*fresh_backend));
+
+    unsigned long irq = irq_push();
+    spinlock_acquire(&g_offscreen_lock);
+
+    // one thats been used and given back comes first, its /dev node already exists
+    uint32_t  index = 1;
+    tty_t    *tty   = NULL;
+    tty_t   **end   = &g_offscreen;
+    for (; *end; end = &(*end)->next, index++) {
+        if (!(*end)->owner_pid) {
+            tty = *end;
+            break;
+        }
+    }
+
+    bool isnew = !tty;
+    if (isnew) {
+        tty = fresh;
+        tty->backend              = fresh_backend;
+        tty->device.ops           = &tty_inode_ops;
+        tty->device.internal_data = tty;
+        tty->device.type          = INODE_DEVICE;
+        tty->device.shared        = 1;
+        *end                      = tty;
+    }
+    tty->owner_pid = task->id;
+
+    spinlock_release(&g_offscreen_lock);
+    irq_restore(irq);
+
+    if (!isnew) {
+        kfree(fresh);
+        kfree(fresh_backend);
+    }
+
+    tty_fb_backend_t *b = tty->backend;
+    memset(b, 0, sizeof(*b));
+    b->fb = (fb_console_t){
+        .pixels             = pixels,
+        .shadow_pixels      = shadow,
+        .shadow_pixels_size = bytes,
+        .shadow_initialized = 1,
+        .dirty_top   = height,
+        .width       = width,
+        .height      = height,
+        .pitch       = cap_w,
+        .font        = psf_get_current_font(),
+        .fg          = 0xFFFFFF,
+        .bg          = 0x000000,
+        .grab_top    = 0,
+        .grab_bottom = height,      // all of it, the window starts out showing nothing
+    };
+    b->display_pixels = pixels;
+    b->is_active      = 1;
+    b->cap_height     = cap_h;
+
+    // the text is what lets a resize wrap everything again, without it this isnt worth having
+    if (!b->fb.font || fb_text_attach(&b->fb, text_w / b->fb.font->width,
+                                      TTY_OFFSCREEN_MAX / b->fb.font->height) != 0) {
+        tty_offscreen_destroy(tty);
+        return -ENOMEM;
+    }
+
+    tty->index      = index;
+    tty->offscreen  = 1;
+    tty->ops        = &tty0_ops;
+    tty->in_head    = 0;
+    tty->in_tail    = 0;
+    tty->line_start = 0;
+    tty->flags      = TTY_ECHO | TTY_CANNONICAL;
+    tty->termios    = (tty_termios_t){0};
+    tty->termios.c_lflag           = TTY_TERM_ECHO | TTY_TERM_ICANON | TTY_TERM_ISIG;
+    tty->termios.c_cc[TTY_VINTR]   = 3;
+    tty->termios.c_cc[TTY_VERASE]  = 127;
+    tty->termios.c_cc[TTY_VMIN]    = 1;
+    tty_sync_termios_from_flags(tty);
+    spinlock_init(&tty->in_lock);
+
+    if (isnew) {
+        char name[16];
+        snprintf(name, sizeof(name), "tty%u", index);
+        long reg = device_register(&tty->device, name);
+        if (reg < 0) {
+            // the slot keeps its tty_t, it just never got a /dev node. hand the pixels back
+            tty_offscreen_destroy(tty);
+            return (int)reg;
+        }
+    }
+
+    *index_out = index;
+    return 0;
 }
 
 int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
@@ -341,8 +614,110 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
         }
 
         case TTY_IOCTL_GET_INDEX: {
-            uint32_t index = 0;
+            uint32_t index = tty->index;
+
+            // a shell works out if its the one being looked at by asking /dev/tty0
+            if (tty == &g_tty0 && g_active_offscreen && tty_of_task(get_current_task()) == g_active_offscreen)
+                index = g_active_offscreen->index;
             return tty_arg_out(arg, &index, sizeof(index));
+        }
+
+        case TTY_IOCTL_GET_ACTIVE_INDEX: {
+            uint32_t index = g_active_offscreen ? g_active_offscreen->index : 0;
+            return tty_arg_out(arg, &index, sizeof(index));
+        }
+
+        // arg is just yes or no, not a pointer. the window that owns the tty says when it has the focus
+        case TTY_IOCTL_SET_ACTIVE: {
+            task_t *task = get_current_task();
+            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+
+            if (arg)
+                g_active_offscreen = tty;
+            else if (g_active_offscreen == tty)
+                g_active_offscreen = NULL;
+            return 0;
+        }
+
+        case TTY_IOCTL_RESIZE: {
+            task_t *task = get_current_task();
+            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+
+            tty_create_t size;
+            if ((r = tty_arg_in(arg, &size, sizeof(size))) < 0) return r;
+
+            uint32_t old_cols, old_rows, cols, rows;
+            tty_fill_winsize(tty, &old_cols, &old_rows);
+            if ((r = tty_offscreen_resize(tty, size.width, size.height)) < 0) return r;
+            tty_fill_winsize(tty, &cols, &rows);
+
+            // only when the text grid itself changed, a few pixels either way is nobodys business
+            if (cols != old_cols || rows != old_rows)
+                itterate_each_task(tty_send_winch, tty);
+
+            sched_wake_event_waiters();
+            return 0;
+        }
+
+        case TTY_IOCTL_CREATE: {
+            tty_create_t create;
+            if ((r = tty_arg_in(arg, &create, sizeof(create))) < 0) return r;
+            if ((r = tty_offscreen_create(create.width, create.height, &create.index)) < 0) return r;
+            return tty_arg_out(arg, &create, sizeof(create));
+        }
+
+        case TTY_IOCTL_DESTROY: {
+            task_t *task = get_current_task();
+            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+            tty_offscreen_destroy(tty);
+            return 0;
+        }
+
+        case TTY_IOCTL_GRAB: {
+            task_t *task = get_current_task();
+            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+
+            tty_grab_t grab;
+            if ((r = tty_arg_in(arg, &grab, sizeof(grab))) < 0) return r;
+
+            unsigned long irq = irq_push();
+            spinlock_acquire(&b->fb_lock);
+
+            size_t top    = b->fb.grab_top;
+            size_t bottom = b->fb.grab_bottom;
+            b->fb.grab_top    = b->fb.height;
+            b->fb.grab_bottom = 0;
+
+            spinlock_release(&b->fb_lock);
+            irq_restore(irq);
+
+            grab.top    = 0;
+            grab.bottom = 0;
+            if (top < bottom && b->fb.pixels) {
+                // copied with the lock gone because the copy can fault. if something draws
+                // halfway through it marks the rows again and the next grab puts it right
+                size_t row = b->fb.pitch * sizeof(uint32_t);
+
+                if (!grab.pitch || grab.pitch == b->fb.pitch) {
+                    if (copy_to_user(task, (void *)(uintptr_t)(grab.buffer + top * row),
+                                     b->fb.pixels + top * b->fb.pitch, (bottom - top) * row) != 0)
+                        return -EFAULT;
+                } else {
+                    // the callers rows are further apart than ours, so its a row at a time
+                    if (grab.pitch < b->fb.width) return -EINVAL;
+
+                    size_t out_row = (size_t)grab.pitch * sizeof(uint32_t);
+                    for (size_t y = top; y < bottom; y++) {
+                        if (copy_to_user(task, (void *)(uintptr_t)(grab.buffer + y * out_row),
+                                         b->fb.pixels + y * b->fb.pitch, b->fb.width * sizeof(uint32_t)) != 0)
+                            return -EFAULT;
+                    }
+                }
+
+                grab.top    = (uint32_t)top;
+                grab.bottom = (uint32_t)bottom;
+            }
+            return tty_arg_out(arg, &grab, sizeof(grab));
         }
 
         case TTY_IOCTL_TCGETS:
@@ -402,6 +777,9 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
             spinlock_release(&b->fb_lock);
             irq_restore(irq);
 
+            if (tty->offscreen)
+                sched_wake_event_waiters();
+
             // copied out after the lock is gone, the copy can fault
             return tty_arg_out(arg, &view, sizeof(view));
         }
@@ -417,6 +795,11 @@ static int tty_poll(INode_t *dev) {
     if (!tty) return POLLERR;
 
     int ready = POLLOUT;
+
+    tty_fb_backend_t *b = tty->backend;
+    if (tty->offscreen && b && b->fb.grab_top < b->fb.grab_bottom)
+        ready |= POLLPRI;
+
     if (!(tty->flags & TTY_CANNONICAL)) {
         if (tty->in_head != tty->in_tail) ready |= POLLIN;
         return ready;

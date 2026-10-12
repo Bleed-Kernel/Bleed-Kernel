@@ -10,25 +10,36 @@
 #include <user/errno.h>
 #include <user/user_copy.h>
 
-typedef struct {
-    uint64_t id;            // 0 = slot is free
+typedef struct shm_object {
+    uint64_t id;
     uint64_t owner_pid;
     size_t   pages;
     paddr_t *frames;
+    struct shm_object *next;
 } shm_object_t;
 
-static shm_object_t shm_objects[SHM_MAX_OBJECTS];
-static uint64_t     shm_next_id = 1;
-static spinlock_t   shm_lock = {0};
+static shm_object_t *shm_objects;
+static uint64_t      shm_next_id = 1;
+static spinlock_t    shm_lock = {0};
 
 static shm_object_t *shm_find(uint64_t id) {
     if (!id) return NULL;
 
-    for (size_t i = 0; i < SHM_MAX_OBJECTS; i++) {
-        if (shm_objects[i].id == id)
-            return &shm_objects[i];
+    for (shm_object_t *obj = shm_objects; obj; obj = obj->next) {
+        if (obj->id == id)
+            return obj;
     }
     return NULL;
+}
+
+// off the list, whoever called owns it and its frames after this
+static void shm_unlink(shm_object_t *obj) {
+    for (shm_object_t **p = &shm_objects; *p; p = &(*p)->next) {
+        if (*p == obj) {
+            *p = obj->next;
+            return;
+        }
+    }
 }
 
 // drop the objects ref on each frame and free the ones nobody has mapped
@@ -46,15 +57,20 @@ long shm_create(task_t *task, uint64_t pages) {
     if (!pages || pages > SHM_MAX_PAGES)
         return -EINVAL;
 
-    paddr_t *frames = kmalloc((size_t)pages * sizeof(paddr_t));
-    if (!frames)
+    shm_object_t *obj    = kmalloc(sizeof(shm_object_t));
+    paddr_t      *frames = kmalloc((size_t)pages * sizeof(paddr_t));
+    if (!obj || !frames) {
+        if (obj)    kfree(obj);
+        if (frames) kfree(frames);
         return -ENOMEM;
+    }
 
     for (size_t i = 0; i < (size_t)pages; i++) {
         // zeroed, same reason as task_mmap
         paddr_t phys = paging_alloc_empty_frame(NULL);
         if (!phys) {
             shm_drop_frames(frames, i);
+            kfree(obj);
             return -ENOMEM;
         }
 
@@ -63,6 +79,7 @@ long shm_create(task_t *task, uint64_t pages) {
         if (!cow_get_refcount(phys)) {
             pmm_free_pages(phys, 1);
             shm_drop_frames(frames, i);
+            kfree(obj);
             return -ENOMEM;
         }
         frames[i] = phys;
@@ -71,30 +88,17 @@ long shm_create(task_t *task, uint64_t pages) {
     unsigned long flags = irq_push();
     spinlock_acquire(&shm_lock);
 
-    shm_object_t *obj = NULL;
-    for (size_t i = 0; i < SHM_MAX_OBJECTS; i++) {
-        if (!shm_objects[i].id) {
-            obj = &shm_objects[i];
-            break;
-        }
-    }
-
-    uint64_t id = 0;
-    if (obj) {
-        id             = shm_next_id++;
-        obj->id        = id;
-        obj->owner_pid = task->id;
-        obj->pages     = (size_t)pages;
-        obj->frames    = frames;
-    }
+    uint64_t id    = shm_next_id++;
+    obj->id        = id;
+    obj->owner_pid = task->id;
+    obj->pages     = (size_t)pages;
+    obj->frames    = frames;
+    obj->next      = shm_objects;
+    shm_objects    = obj;
 
     spinlock_release(&shm_lock);
     irq_restore(flags);
 
-    if (!id) {
-        shm_drop_frames(frames, (size_t)pages);
-        return -ENOSPC;
-    }
     return (long)id;
 }
 
@@ -140,17 +144,6 @@ long shm_map(task_t *task, uint64_t id, uint64_t user_pages_ptr) {
     return (long)base;
 }
 
-// take the frames out of the slot so they can be dropped once the lock is gone
-static paddr_t *shm_slot_clear(shm_object_t *obj, size_t *pages_out) {
-    paddr_t *frames = obj->frames;
-    *pages_out = obj->pages;
-
-    obj->id        = 0;
-    obj->owner_pid = 0;
-    obj->pages     = 0;
-    obj->frames    = NULL;
-    return frames;
-}
 
 long shm_destroy(task_t *task, uint64_t id) {
     if (!task)
@@ -166,13 +159,14 @@ long shm_destroy(task_t *task, uint64_t id) {
         return obj ? -EPERM : -ENOENT;
     }
 
-    size_t   pages  = 0;
-    paddr_t *frames = shm_slot_clear(obj, &pages);
+    shm_unlink(obj);
 
     spinlock_release(&shm_lock);
     irq_restore(flags);
 
-    shm_drop_frames(frames, pages);
+    // freed with the lock gone, nothing can find it any more
+    shm_drop_frames(obj->frames, obj->pages);
+    kfree(obj);
     return 0;
 }
 
@@ -180,19 +174,22 @@ void shm_task_cleanup(task_t *task) {
     if (!task)
         return;
 
-    for (size_t i = 0; i < SHM_MAX_OBJECTS; i++) {
+    for (;;) {
         unsigned long flags = irq_push();
         spinlock_acquire(&shm_lock);
 
-        size_t   pages  = 0;
-        paddr_t *frames = NULL;
-        if (shm_objects[i].id && shm_objects[i].owner_pid == task->id)
-            frames = shm_slot_clear(&shm_objects[i], &pages);
+        shm_object_t *obj = shm_objects;
+        while (obj && obj->owner_pid != task->id)
+            obj = obj->next;
+        if (obj)
+            shm_unlink(obj);
 
         spinlock_release(&shm_lock);
         irq_restore(flags);
 
-        if (frames)
-            shm_drop_frames(frames, pages);
+        if (!obj)
+            break;
+        shm_drop_frames(obj->frames, obj->pages);
+        kfree(obj);
     }
 }

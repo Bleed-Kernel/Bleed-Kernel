@@ -35,6 +35,15 @@
 
 #define TTY_IOCTL_SCROLL            0x5425
 
+// offscreen ttys, the same terminal as tty0 but drawing into memory for a window to show
+#define TTY_IOCTL_DESTROY           0x5430
+#define TTY_IOCTL_GRAB              0x5431
+#define TTY_IOCTL_RESIZE            0x5432  // tty_create_t again, new size in and the index left alone
+
+#define TTY_OFFSCREEN_MIN           64      // pixels, either way
+#define TTY_OFFSCREEN_MAX           4096
+#define TTY_OFFSCREEN_GROW          128     // buffers are sized up to a multiple of this
+
 #define SCROLLBACK_ROWS 500
 
 typedef struct {
@@ -69,6 +78,23 @@ typedef struct {
     tty_cc_t c_cc[TTY_NCCS];
 } tty_termios_t;
 
+// TTY_IOCTL_CREATE, size in pixels going in and which /dev/ttyN it became coming out
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t index;
+} tty_create_t;
+
+// TTY_IOCTL_GRAB, buffer is a whole width by height of pixels. only the rows that changed
+// since the last grab get written, top to bottom says which they were (both 0 for none).
+// pitch is how many pixels apart the rows of buffer start, 0 if thats just the ttys width
+typedef struct {
+    uint64_t buffer;
+    uint32_t top;
+    uint32_t bottom;
+    uint32_t pitch;
+} tty_grab_t;
+
 typedef struct tty tty_t;
 
 typedef struct {
@@ -81,6 +107,7 @@ typedef struct {
     int utf8_len;
     int utf8_expected;
     uint8_t is_active;
+    uint32_t cap_height;    // rows the buffers of an offscreen tty really have, fb.pitch is how wide
 } tty_fb_backend_t;
 
 struct tty_ops {
@@ -113,9 +140,12 @@ typedef struct tty{
     uint32_t flags;
     uint32_t index;
     uint8_t activated_once;
+    uint8_t offscreen;      // draws into its own buffer instead of the screen
+    uint64_t owner_pid;     // who made it with TTY_IOCTL_CREATE, 0 for tty0 or a free slot
     tty_termios_t termios;
     struct tty_ops *ops;    // backend
     void *backend;
+    struct tty *next;       // the offscreen ones are a list, oldest first
 } tty_t;
 
 void tty_process_input(tty_t *tty, char c);
@@ -123,6 +153,11 @@ void tty_init_framebuffer(tty_t *tty, tty_fb_backend_t *backend, fb_console_t *f
 int tty_create_framebuffer(uint32_t *out_index);
 int tty_set_active_index(uint32_t index);
 void tty_set_graphics(int on);
+
+struct task;
+
+// frees any offscreen ttys task made
+void tty_task_exit(struct task *task);
 
 void fb_clear(fb_console_t *fb);
 void tty_device_init(void);

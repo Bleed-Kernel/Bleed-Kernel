@@ -113,6 +113,9 @@ void framebuffer_apply_bootargs(void) {
 static void fb_scrollback_ensure(fb_console_t *fb) {
     if (!fb->font || !fb->pitch) return;
 
+    // a console that keeps its text has its history there, not as rows of pixels
+    if (fb->text) return;
+
     size_t new_lw = (size_t)fb->font->height * fb->pitch;
 
     if (fb->scrollback_lines && fb->scrollback_line_words == new_lw) return;
@@ -135,7 +138,7 @@ void fb_scrollback_reset(fb_console_t *fb) {
 }
 
 void fb_scrollback_capture(fb_console_t *fb, const uint32_t *line_src) {
-    if (!fb || !line_src) return;
+    if (!fb || !line_src || fb->text) return;
 
     fb_scrollback_ensure(fb);
     if (!fb->scrollback_lines) return;
@@ -157,6 +160,14 @@ static void fb_console_clear_row_block(fb_console_t *fb, size_t row, uint32_t co
 void fb_console_render_view(fb_console_t *fb) {
     if (!fb || !fb->pixels || !fb->font) return;
     if (fb->detached) return;
+
+    // any of it could have moved
+    framebuffer_mark_grab(fb, 0, fb->height);
+
+    if (fb->text && fb->scrollback_view != 0) {
+        fb_text_render_view(fb);
+        return;
+    }
 
     size_t visible_rows = fb->height / fb->font->height;
     size_t lw = fb->scrollback_line_words;

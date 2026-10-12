@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <sched/scheduler.h>
 
-#define SHM_MAX_OBJECTS 64
 #define SHM_MAX_PAGES   65536   // 256MiB, far past any framebuffer
 
 // make an object of zeroed pages owned by task

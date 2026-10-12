@@ -4,10 +4,14 @@
 #include <fs/vfs.h>
 #include <stdio.h>
 #include <mm/spinlock.h>
+#include <mm/kalloc.h>
 
 #define device_from_inode(inode) ((device_t*)inode->internal_data)
 
-static struct {INode_t *inode; char *name;} device_list[MAX_DEVICES];
+typedef struct {INode_t *inode; char *name;} device_entry_t;
+
+static device_entry_t *device_list = NULL;
+static size_t device_list_cap = 0;
 static size_t device_list_count = 0;   // faster to save hwo many devices we have than check every time we register a new one
 
 static spinlock_t device_list_lock = {0};
@@ -21,9 +25,19 @@ long device_register(INode_t *device, char *name){
         return -EEXIST;
 
     spinlock_acquire(&device_list_lock);
-    if (device_list_count >= MAX_DEVICES) {
-        spinlock_release(&device_list_lock);
-        return -ENOSPC;
+    if (device_list_count >= device_list_cap) {
+        size_t cap = device_list_cap ? device_list_cap * 2 : DEVICES_GROW;
+        device_entry_t *bigger = kmalloc(cap * sizeof(device_entry_t));
+        if (!bigger) {
+            spinlock_release(&device_list_lock);
+            return -ENOMEM;
+        }
+        if (device_list) {
+            memcpy(bigger, device_list, device_list_count * sizeof(device_entry_t));
+            kfree(device_list);
+        }
+        device_list     = bigger;
+        device_list_cap = cap;
     }
 
     size_t devidx = device_list_count;
