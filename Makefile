@@ -230,12 +230,16 @@ repack: limine/limine $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE)
 	$(build_initrd_tar)
 	$(build_iso)
 
+ifeq ($(UNAME_S)$(UNAME_M),Darwinarm64)
+QEMU_HOST := -accel tcg,thread=multi,tb-size=1024 -cpu max -display cocoa
+else
+QEMU_HOST := --enable-kvm -display sdl
+endif
+
 define run_qemu
 	qemu-system-x86_64 \
 		-cdrom $(IMAGE_NAME).iso \
-		$(if $(filter Darwinarm64,$(UNAME_S)$(UNAME_M)), \
-			-accel tcg,thread=multi,tb-size=1024 -cpu max -display cocoa, \
-			--enable-kvm -display sdl) \
+		$(QEMU_HOST) \
 		-boot d \
 		-m $(MEMSZ) \
 		-serial stdio \
@@ -274,9 +278,7 @@ run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		-cdrom $(IMAGE_NAME).iso \
-		$(if $(filter Darwinarm64,$(UNAME_S)$(UNAME_M)), \
-			-accel tcg,thread=multi,tb-size=1024 -cpu max, -display cocoa, \
-			--enable-kvm -display sdl) \
+		$(QEMU_HOST) \
 		-boot d \
 		-m $(MEMSZ) \
 		-serial stdio \
