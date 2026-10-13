@@ -7,6 +7,7 @@
 #include <drivers/serial/serial.h>
 #include <drivers/framebuffer/framebuffer.h>
 #include <drivers/framebuffer/draw_image.h>
+#include <boot/splash_image.h>
 #include <mm/pmm.h>
 #include <mm/kalloc.h>
 #include "../acpi_priv.h"
@@ -154,7 +155,8 @@ bool acpi_bgrt_display_logo(void) {
         }
     }
 
-    draw_bgra_image(img.offset_x, img.offset_y, img.width, img.height, buf);
+    splash_show(buf, img.offset_x, img.offset_y, img.width, img.height,
+                SPLASH_BAR_FIRMWARE, SPLASH_TRACK_FIRMWARE);
     kfree(buf);
 
     serial_printf(LOG_OK "BGRT: drew %ux%u firmware logo at (%u,%u)\n",

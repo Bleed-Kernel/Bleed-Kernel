@@ -129,7 +129,11 @@ void breset_color(void);
 void bconsole_reset_cursor(void);
 void bconsole_set_cursor(uint32_t col, uint32_t row);
 
+// every stage that reports in also moves the bar on the boot splash, see splash_image.c
+void splash_progress(void);
+
 #define BLOG_OK(msg)    do {                              \
+    splash_progress();                                    \
     bset_color(BCOL_GREEN,  BCOL_BLACK);                  \
     bprintf("[ OK ] ");                                   \
     bset_color(BCOL_WHITE,  BCOL_BLACK);                  \
@@ -158,6 +162,7 @@ void bconsole_set_cursor(uint32_t col, uint32_t row);
 } while(0)
  
 #define BLOG_OKF(fmt, ...)    do {                        \
+    splash_progress();                                    \
     bset_color(BCOL_GREEN,  BCOL_BLACK);                  \
     bprintf("[ OK ] ");                                   \
     bset_color(BCOL_WHITE,  BCOL_BLACK);                  \

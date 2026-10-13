@@ -343,6 +343,7 @@ Licenced under GPLv3\n");
     asm volatile("sti");
 
     init_userspace();
+    splash_finish();
     kernel_console_init();
 
     for(;;){
