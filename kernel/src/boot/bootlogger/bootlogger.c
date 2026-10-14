@@ -8,8 +8,7 @@
 
 extern volatile struct limine_framebuffer_request framebuffer_request;
 
-#define MAX_BACKBUFFER_WORDS (2560 * 1440)          // staticness for speed, yeah early in boot we have no fancy tricks available
-static uint32_t s_backbuffer[MAX_BACKBUFFER_WORDS];
+static uint32_t *s_backbuffer = NULL;
 
 static volatile uint32_t *s_fb       = NULL;
 static uint32_t  s_width             = 0;
@@ -90,6 +89,22 @@ static void newline(void) {
     }
 }
 
+static uint32_t *take_backbuffer(size_t bytes) {
+    bytes = (bytes + 0xFFF) & ~(size_t)0xFFF;
+
+    for (size_t i = 0; i < g_gbi.memmap_entry_count; i++) {
+        gbi_memmap_entry_t *e = &g_gbi.memmap[i];
+        if (e->type != GBI_MEMMAP_USABLE || e->base < 0x100000 || e->length < bytes)
+            continue;
+
+        uint64_t phys = e->base;
+        e->base   += bytes;
+        e->length -= bytes;
+        return (uint32_t *)(uintptr_t)(phys + g_gbi.hhdm_offset);
+    }
+    return NULL;
+}
+
 void bconsole_init(void) {
     if (s_ready) return;
     if (!g_gbi.framebuffer.present || !g_gbi.framebuffer.address) return;
@@ -101,7 +116,8 @@ void bconsole_init(void) {
     if (g_gbi.framebuffer.bpp != 32) return;
     s_pitch32 = (uint32_t)(g_gbi.framebuffer.pitch / (g_gbi.framebuffer.bpp / 8));
 
-    if ((s_pitch32 * s_height) > MAX_BACKBUFFER_WORDS) return;
+    s_backbuffer = take_backbuffer((size_t)s_pitch32 * s_height * sizeof(uint32_t));
+    if (!s_backbuffer) return;
 
     s_cols  = s_width  / FONT_W;
     s_rows  = s_height / FONT_H;

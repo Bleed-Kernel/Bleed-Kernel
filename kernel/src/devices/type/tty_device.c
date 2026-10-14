@@ -860,6 +860,9 @@ void tty_device_init(void) {
     b->ansi            = (ansii_state_t){0};
     b->fb_lock         = (spinlock_t){0};
 
+    if (fb.font)
+        fb_text_attach(&b->fb, fb.width / fb.font->width, fb.height / fb.font->height);
+
     memset(tty, 0, sizeof(*tty));
     tty->index   = 0;
     tty->backend = b;
