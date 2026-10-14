@@ -399,6 +399,21 @@ FORCE:
 distclean:
 	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	rm -f $(PROC_VERSION_FILE)
+	rm -f $(KERNEL_SYM)
+	@done_dirs=""; for entry in $(USER_REPOS); do \
+		repo=$${entry%% *}; \
+		[ -n "$(USERPROG_SRC)" ] || break; \
+		local_dir=$$(find "$(USERPROG_SRC)" -maxdepth 1 -type d -iname "$${repo##*/}" | head -n 1); \
+		[ -n "$$local_dir" ] || continue; \
+		case " $$done_dirs " in *" $$local_dir "*) continue;; esac; \
+		done_dirs="$$done_dirs $$local_dir"; \
+		echo "[USER] distclean $$local_dir"; \
+		$(MAKE) -s -C "$$local_dir" distclean; \
+	done
+	@if [ -n "$(USERPROG_SRC)" ] && [ -d "$(USERPROG_SRC)/blibc" ]; then \
+		echo "[BLIBC] clean $(USERPROG_SRC)/blibc"; \
+		$(MAKE) -s -C "$(USERPROG_SRC)/blibc" clean; \
+	fi
 	find kernel klibc -name '*.o' -delete
 	find kernel klibc -name '*.d' -delete
 	rm -rf $(USER_BIN_DIR)
