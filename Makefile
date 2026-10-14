@@ -87,6 +87,8 @@ USER_REPOS := \
     "https://github.com/Bleed-Kernel/Bleed-tvi tvi" \
 	"https://github.com/Bleed-Kernel/Bleed-Tetris tetris" \
 	"https://github.com/Bleed-Kernel/Crime-Scene crime-scene" \
+	"https://github.com/Bleed-Kernel/libuikit uikit-demo" \
+	"https://github.com/Bleed-Kernel/Bleed-About about" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils cat" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils echo" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils write" \
