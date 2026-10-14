@@ -54,6 +54,8 @@
 static volatile uint32_t *lapic = NULL;
 static volatile uint32_t *ioapic = NULL;
 static int apic_enabled = 0;
+static uint32_t ioapic_max_redir = 0;
+static uint32_t bsp_lapic_id = 0;
 
 static inline void lapic_write(uint32_t reg, uint32_t val) {
     lapic[reg / 4] = val;
@@ -106,6 +108,35 @@ static uint64_t ioapic_entry_for_irq(uint8_t vector, uint32_t lapic_id, uint32_t
 
     entry |= ((uint64_t)lapic_id << 56);
     return entry;
+}
+
+// -1 if the gsi belongs to some other ioapic, theres only the one in here
+static int ioapic_pin_for_gsi(uint32_t gsi) {
+    uint32_t base = acpi_ioapic_gsi_base();
+    if (!apic_enabled || gsi < base || gsi - base > ioapic_max_redir)
+        return -1;
+    return (int)(gsi - base);
+}
+
+int ioapic_route_gsi(uint32_t gsi, uint8_t vector, int level, int low) {
+    int pin = ioapic_pin_for_gsi(gsi);
+    if (pin < 0) return -1;
+
+    uint64_t entry = vector;
+    if (low)
+        entry |= (1ULL << 13);
+    if (level)
+        entry |= (1ULL << 15);
+    entry |= ((uint64_t)bsp_lapic_id << 56);
+
+    ioapic_write_redir((uint32_t)pin, entry);
+    return 0;
+}
+
+void ioapic_mask_gsi(uint32_t gsi) {
+    int pin = ioapic_pin_for_gsi(gsi);
+    if (pin >= 0)
+        ioapic_mask_pin((uint32_t)pin);
 }
 
 /// @brief start the LAPIC timer as the periodic scheduler tick on vector 0x20
@@ -215,6 +246,8 @@ int apic_init(void) {
     uint32_t ioapic_gsi_base = acpi_ioapic_gsi_base();
 
     uint32_t bsp_id = lapic_id;
+    ioapic_max_redir = max_redir;
+    bsp_lapic_id     = lapic_id;
     struct {
         uint32_t irq;
         uint8_t vector;

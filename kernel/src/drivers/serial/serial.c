@@ -28,16 +28,27 @@ static int is_serial_transmit_empty(void) {
     return inb(PORT_COM1 + 5) & 0x20;
 }
 
+static void serial_port_put(char c) {
+    for (int t = 0; t < SERIAL_TIMEOUT; t++) {
+        if (is_serial_transmit_empty()) {
+            outb(PORT_COM1, c);
+            return;
+        }
+    }
+    serial_available = 0;
+}
+
+// the log is kept whether or not theres a port to send it down, on a laptop
+// with no COM1 /dev/serial is the only place any of this can be read
 static void serial_emit_char(char c) {
     serial_log_buffer[serial_log_total++ % SERIAL_LOG_SIZE] = c;
 
-    if (c == '\n') {
-        while (!is_serial_transmit_empty()) { }
-        outb(PORT_COM1, '\r');
-    }
+    if (!serial_available) return;
 
-    while (!is_serial_transmit_empty()) { }
-    outb(PORT_COM1, c);
+    if (c == '\n')
+        serial_port_put('\r');
+    if (serial_available)
+        serial_port_put(c);
 }
 
 static void serial_emit_str(const char *str) {
@@ -55,6 +66,8 @@ static void serial_emit_n(const char *buf, size_t len) {
 /// @brief initialse and test the serial port so its ready for writing
 /// @return success
 int serial_init(void) {
+    spinlock_init(&serial_lock);
+
     outb(PORT_COM1 + 4, 0x0F);
     uint8_t test = inb(PORT_COM1 + 4);
     if (test != 0x0F) {
@@ -78,7 +91,6 @@ int serial_init(void) {
     }
 
     outb(PORT_COM1 + 4, 0x0F);
-    spinlock_init(&serial_lock);
     serial_available = 1;
     return 0;
 }
@@ -86,8 +98,6 @@ int serial_init(void) {
 /// @brief put a single char, handles newline ansii
 /// @param c character to put
 void serial_put_char(char c) {
-    if (!serial_available) return;
-
     unsigned long flags = irq_push();
     asm volatile("cli" ::: "memory");
     spinlock_acquire(&serial_lock);
@@ -99,8 +109,6 @@ void serial_put_char(char c) {
 /// @brief write a string to serial
 /// @param str const string
 void serial_write(const char *str) {
-    if (!serial_available) return;
-
     unsigned long flags = irq_push();
     asm volatile("cli" ::: "memory");
     spinlock_acquire(&serial_lock);
@@ -110,7 +118,7 @@ void serial_write(const char *str) {
 }
 
 void serial_write_n(const char *buf, size_t len) {
-    if (!serial_available || !buf || len == 0) return;
+    if (!buf || len == 0) return;
 
     unsigned long flags = irq_push();
     asm volatile("cli" ::: "memory");
@@ -154,8 +162,6 @@ size_t serial_log_read(char *dst, size_t len, size_t offset) {
 /// @brief write a hex value to the screen from a uint
 /// @param value uint value
 void serial_write_hex(uint64_t value) {
-    if (!serial_available) return;
-
     char buffer[17];
     const char *hex = "0123456789ABCDEF";
 
@@ -225,8 +231,6 @@ static void serial_print_num(uint64_t val, int base, int is_signed, int uppercas
 /// @param fmt formatted string
 /// @param  VARDIC
 void serial_printf(const char *fmt, ...) {
-    if (!serial_available) return;
-
     unsigned long flags = irq_push();
     asm volatile("cli" ::: "memory");
     spinlock_acquire(&serial_lock);

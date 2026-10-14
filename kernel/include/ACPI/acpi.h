@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stddef.h>
 #include <ACPI/acpi_time.h>
 
 struct acpi_sdt {
@@ -37,6 +38,10 @@ void acpi_init(void);
 void rtc_get_time(struct rtc_time *t);
 
 struct acpi_sdt *acpi_find_sdt(const char sig[4]);
+
+// every table the firmware lists in order, NULL once index runs off the end.
+// for the ones that come in multiples like SSDT
+struct acpi_sdt *acpi_get_sdt(size_t index);
 
 // start noticing the power button, anything pressed before this is forgotten
 void acpi_power_button_enable(void);

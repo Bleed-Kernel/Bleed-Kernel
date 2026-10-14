@@ -15,6 +15,8 @@
 #include <ACPI/acpi_hpet.h>
 #include <fs/vfs_mount.h>
 #include <mm/spinlock.h>
+#include <drivers/cros_ec/cros_ec.h>
+#include <stdio.h>
 
 typedef struct {
     task_t *self;
@@ -97,9 +99,71 @@ void power_button_watch(void) {
     }
 }
 
+static void power_battery_read(power_battery_t *out) {
+    cros_ec_battery_t batt;
+
+    memset(out, 0, sizeof(*out));
+    if (!cros_ec_battery(&batt)) return;
+
+    out->present  = 1;
+    out->charging = batt.charging;
+    out->ac       = batt.ac;
+    out->percent  = batt.percent;
+    out->voltage  = batt.voltage;
+    out->rate     = batt.rate;
+    out->capacity = batt.capacity;
+    out->full     = batt.full;
+}
+
+// the same thing as text, so it can be looked at with cat
+static size_t power_text(char *text, size_t max) {
+    power_battery_t batt;
+    power_battery_read(&batt);
+
+    if (!batt.present)
+        return (size_t)snprintf(text, max, "battery: none\n");
+    return (size_t)snprintf(text, max, "battery: %u%% %s (%u/%u mAh, %u mV)\n", batt.percent,
+                            batt.charging ? "charging" : batt.ac ? "full" : "discharging",
+                            batt.capacity, batt.full, batt.voltage);
+}
+
+static long power_read(INode_t *inode, void *buf, size_t len, size_t offset) {
+    (void)inode;
+    if (!buf || len == 0) return 0;
+
+    char   text[POWER_TEXT_MAX];
+    size_t size = power_text(text, sizeof(text));
+
+    if (offset >= size) return 0;
+    if (len > size - offset) len = size - offset;
+
+    memcpy(buf, text + offset, len);
+    return (long)len;
+}
+
+// without a size a read never comes to an end
+static size_t power_size(INode_t *inode) {
+    (void)inode;
+    char text[POWER_TEXT_MAX];
+    return power_text(text, sizeof(text));
+}
+
 static int power_ioctl(INode_t *inode, unsigned long request, void *arg) {
     (void)inode;
-    (void)arg;
+
+    if (request == POWER_DEVICE_BATTERY) {
+        if (!arg)
+            return -EFAULT;
+
+        power_battery_t batt;
+        power_battery_read(&batt);
+
+        task_t *task = get_current_task();
+        if (!task || copy_to_user(task, arg, &batt, sizeof(batt)) != 0)
+            return -EFAULT;
+
+        return 0;
+    }
 
     if (request == POWER_DEVICE_POWEROFF) {
         serial_printf(LOG_OK "Power Device recieved Poweroff instruction\n");
@@ -124,6 +188,8 @@ static int power_ioctl(INode_t *inode, unsigned long request, void *arg) {
 }
 
 static INodeOps_t power_inode_ops = {
+    .read = power_read,
+    .size = power_size,
     .ioctl = power_ioctl,
 };
 

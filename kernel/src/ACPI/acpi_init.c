@@ -84,6 +84,19 @@ struct acpi_sdt *acpi_find_sdt(const char sig[4]) {
     return NULL;
 }
 
+struct acpi_sdt *acpi_get_sdt(size_t index) {
+    if (acpi_rsdp->revision >= 2 && acpi_rsdp->xsdt_address) {
+        struct acpi_xsdt *xsdt = paddr_to_vaddr(acpi_rsdp->xsdt_address);
+        size_t entries = (xsdt->header.length - sizeof(struct acpi_sdt)) / 8;
+        return index < entries ? paddr_to_vaddr(xsdt->tables[index]) : NULL;
+    }
+
+    struct acpi_sdt *rsdt = paddr_to_vaddr(acpi_rsdp->rsdt_address);
+    uint32_t *tables = (uint32_t *)((uint8_t *)rsdt + sizeof(struct acpi_sdt));
+    size_t entries = (rsdt->length - sizeof(struct acpi_sdt)) / 4;
+    return index < entries ? paddr_to_vaddr(tables[index]) : NULL;
+}
+
 void acpi_init(void) {
     acpi_rsdp = acpi_get_rsdp();
 

@@ -32,11 +32,14 @@
 #include <drivers/ps2/PS2_mouse.h>
 #include <drivers/ps2/PS2_keyboard.h>
 #include <drivers/usb/ohci.h>
+#include <drivers/i2c/dw_i2c.h>
+#include <drivers/i2c/i2c_trackpad.h>
 #include <devices/type/hpet_device.h>
 #include <devices/type/mouse_device.h>
 #include <devices/type/kbd_device.h>
 #include <devices/type/fb_device.h>
 #include <devices/type/power_device.h>
+#include <drivers/cros_ec/cros_ec.h>
 #include <devices/type/serial_device.h>
 #include <devices/type/tty_device.h>
 
@@ -210,11 +213,18 @@ void init_devices(){
     BLOG_INFO("Enumerating OHCI Controller");
     ohci_init();
 
+    BLOG_INFO("Enumerating I2C Controllers");
+    dw_i2c_init();
+    i2c_trackpad_init();
+    if (i2c_trackpad_present())
+        BLOG_OK("I2C trackpad Ready");
+
     BLOG_INFO("Starting serial Device");
     serial_device_register();
     BLOG_OK("serial Device Ready");
 
     BLOG_INFO("Starting power Device");
+    cros_ec_init();
     power_device_init();
     BLOG_OK("power Device Ready");
 
@@ -258,7 +268,7 @@ void init_multitasking(){
 
     BLOG_INFO("Attempting to start the Task Reaper");
     task_t *reaper = NULL;
-    reaper = sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper");
+    reaper = sched_create_task(read_cr3(), (uint64_t)scheduler_reap, KERNEL_CS, KERNEL_SS, "reaper_service");
 
     if (reaper != NULL)
         BLOG_OK("Reaper Started");
@@ -308,8 +318,12 @@ bool init_userspace(){
         ke_panic(NULL, "Failure to Start listed init task");
 
     // after init so it keeps the pid it always had
-    if (sched_create_task(read_cr3(), (uint64_t)power_button_watch, KERNEL_CS, KERNEL_SS, "power watchdog"))
+    if (sched_create_task(read_cr3(), (uint64_t)power_button_watch, KERNEL_CS, KERNEL_SS, "power_service"))
         BLOG_OK("Power watchdog started");
+
+    if (i2c_trackpad_present() &&
+        sched_create_task(read_cr3(), (uint64_t)i2c_trackpad_watch, KERNEL_CS, KERNEL_SS, "i2c_service"))
+        BLOG_OK("I2C trackpad task started");
 
     return true;
 }
@@ -328,6 +342,7 @@ void kmain(void){
     if (bootargs_has("verbose")){
         bconsole_init();
     }
+    bootargs_validate();
 
     BLOG_INFO("Starting the Bleed Kernel\n\t\
 by Isabella 'Mellurboo' Wilson\n\t\

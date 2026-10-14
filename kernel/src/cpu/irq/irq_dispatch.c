@@ -3,6 +3,7 @@
 #include <drivers/ps2/PS2_mouse.h>
 #include <drivers/usb/ohci.h>
 #include <drivers/usb/usb_keyboard.h>
+#include <drivers/i2c/i2c_trackpad.h>
 #include <sched/scheduler.h>
 
 volatile uint64_t timer_ticks = 0;
@@ -27,6 +28,9 @@ void irq_handler(uint8_t irq) {
             break;
         case 12:
             PS2_Mouse_Interrupt(irq);
+            break;
+        case I2C_TRACKPAD_IRQ:
+            i2c_trackpad_interrupt();
             break;
         default:
             break;

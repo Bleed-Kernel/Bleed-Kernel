@@ -41,6 +41,19 @@
 #define PCI_PROGIF_OHCI         0x10
 #define PCI_PROGIF_EHCI         0x20
 
+//Intel LPSS (i2c and spi) has no subclass of its own, it sits under "other"
+#define PCI_CLASS_SIGNAL        0x11
+#define PCI_SUBCLASS_SERIAL_OTHER 0x80
+#define PCI_PROGIF_NONE         0x00
+
+// capability list, only walked to find power management
+#define PCI_STATUS_CAP_LIST     0x0010
+#define PCI_CAP_POINTER         0x34
+#define PCI_CAP_ID_PM           0x01
+#define PCI_PM_CTRL             0x04    // offset inside the capability
+#define PCI_PM_CTRL_STATE_MASK  0x0003
+
+#define PCI_VENDOR_INTEL    0x8086
 #define PCI_VENDOR_NONE     0xFFFF
 
 typedef struct {

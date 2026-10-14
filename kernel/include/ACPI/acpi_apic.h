@@ -40,3 +40,7 @@
 int apic_init(void);
 int apic_is_enabled(void);
 int lapic_timer_start(uint32_t hz);
+
+// send a gsi that isnt one of the legacy irqs to vector, -1 if the ioapic has no such pin
+int ioapic_route_gsi(uint32_t gsi, uint8_t vector, int level, int low);
+void ioapic_mask_gsi(uint32_t gsi);

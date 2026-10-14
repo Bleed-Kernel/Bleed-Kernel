@@ -4,14 +4,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define VALID_BOOTARG_COUNT 11
-
 typedef struct {
     char* key;
     char* value;
 } bootarg_t;
 
 void        bootargs_init(const char* cmdline);
+// warns about unknown and repeated arguments, call once logging is up
+void        bootargs_validate(void);
 const char* bootargs_get(const char* key);
 bool        bootargs_is(const char* key, const char* expected_value);
 bool        bootargs_has(const char* key);

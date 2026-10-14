@@ -1,6 +1,7 @@
 #include <kernel/bootargs.h>
 #include <boot/bootlogger/bootlogger.h>
 #include <drivers/serial/serial.h>
+#include <ansii.h>
 #include <string.h>
 
 // bootargs.c
@@ -23,7 +24,7 @@
 #define MAX_BOOTARGS        64
 #define BOOTARG_BUFFER_SIZE 2048
 
-static char* valid_tokens[VALID_BOOTARG_COUNT] = {
+static const char* valid_keys[] = {
     "init",
     "splash",
     "ttyfont",
@@ -36,6 +37,8 @@ static char* valid_tokens[VALID_BOOTARG_COUNT] = {
     "fb-pitch",
     "fb-bpp"
 };
+
+#define VALID_BOOTARG_COUNT (sizeof(valid_keys) / sizeof(valid_keys[0]))
 
 static bootarg_t args[MAX_BOOTARGS];
 static size_t    arg_count = 0;
@@ -94,19 +97,6 @@ void bootargs_init(const char* cmdline) {
 
         char* token = arena_copy(start, len);
         if (!token) break; // out of arena space; stop parsing rather than overflow
-        
-
-        for (int i = 0; i < VALID_BOOTARG_COUNT; i++){
-            int valid = 0;
-            if (strcmp(token, valid_tokens[i]) == 0){
-                serial_printf("%s is a valid boot argument\n", token);
-                valid = 1;
-            }
-
-            if (valid == 0){
-                serial_printf("%s is not a valid boot argument and is redundant\n", token);
-            }
-        }
 
         char* eq = strchr(token, '=');
         if (eq) {
@@ -145,4 +135,29 @@ bool bootargs_is(const char* key, const char* expected_value) {
     const char* val = bootargs_get(key);
     if (!val || !expected_value) return false;
     return (strcasecmp(val, expected_value) == 0);
+}
+
+static bool bootargs_key_valid(const char* key) {
+    for (size_t i = 0; i < VALID_BOOTARG_COUNT; i++) {
+        if (strcasecmp(key, valid_keys[i]) == 0) return true;
+    }
+    return false;
+}
+
+void bootargs_validate(void) {
+    for (size_t i = 0; i < arg_count; i++) {
+        const char* key = args[i].key;
+
+        if (!bootargs_key_valid(key)) {
+            BLOG_WARNF("Unknown boot argument '%s', ignoring", key);
+            serial_printf(LOG_WARN "bootargs: unknown argument '%s', ignoring\n", key);
+            continue;
+        }
+
+        // lookups return the first match so later copies do nothing
+        if (bootargs_find(key) != (int)i) {
+            BLOG_WARNF("Boot argument '%s' given more than once, using the first", key);
+            serial_printf(LOG_WARN "bootargs: '%s' given more than once, using the first\n", key);
+        }
+    }
 }

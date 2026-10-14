@@ -13,7 +13,7 @@
 
 #include "priv_scheduler.h"
 
-#define KERNEL_TASK_NAME    "bleed kernel"
+#define KERNEL_TASK_NAME    "bleed_kernel"
 
 task_t *current_task   = NULL;
 task_t *task_list_head = NULL;
