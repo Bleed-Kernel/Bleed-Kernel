@@ -86,6 +86,7 @@ USER_REPOS := \
     "https://github.com/Bleed-Kernel/Bleed-Taskv taskv" \
     "https://github.com/Bleed-Kernel/Bleed-tvi tvi" \
 	"https://github.com/Bleed-Kernel/Bleed-Tetris tetris" \
+	"https://github.com/Bleed-Kernel/Crime-Scene crime-scene" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils cat" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils echo" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils write" \
@@ -158,11 +159,14 @@ userprogs:
 		repo=$${entry%% *}; \
 		name=$${entry##* }; \
 		dir=$(USER_BIN_DIR)/$$name; \
-		local_dir=""; blibc_arg=""; \
+		local_dir=""; blibc_arg=""; crime_arg=""; \
 		if [ -n "$(USERPROG_SRC)" ]; then \
 			local_dir=$$(find "$(USERPROG_SRC)" -maxdepth 1 -type d -iname "$${repo##*/}" | head -n 1); \
 			if [ -d "$(USERPROG_SRC)/blibc" ]; then \
 				blibc_arg="BLIBC_DIR=$$(cd "$(USERPROG_SRC)/blibc" && pwd)"; \
+			fi; \
+			if [ -d "$(USERPROG_SRC)/Crime-Scene" ]; then \
+				crime_arg="CRIME_DIR=$$(cd "$(USERPROG_SRC)/Crime-Scene" && pwd)"; \
 			fi; \
 		fi; \
 		if [ -n "$$local_dir" ]; then \
@@ -178,7 +182,7 @@ userprogs:
 		echo "[USER] Preparing blibc for $$name"; \
 		$(MAKE) -s -C "$$dir" blibc $(USERPROG_TOOLCHAIN) $$blibc_arg; \
 		echo "[USER] Building $$name"; \
-		$(MAKE) -s -C "$$dir" $(USERPROG_TOOLCHAIN); \
+		$(MAKE) -s -C "$$dir" $(USERPROG_TOOLCHAIN) $$blibc_arg $$crime_arg; \
 		if [ -f "$$dir/bin/$$name" ]; then \
 			COPYFILE_DISABLE=1 cp "$$dir/bin/$$name" $(INITRD_BIN)/$$name; \
 		else \
