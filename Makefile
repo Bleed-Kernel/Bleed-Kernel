@@ -197,7 +197,9 @@ define build_initrd_tar
 	@mkdir -p initrd
 	@find initrd -name '._*' -delete
 	@find initrd -name '.DS_Store' -delete
-	@COPYFILE_DISABLE=1 tar -cf initrd/initrd.tar initrd/*/* initrd/*.*
+	@# no xattrs, macos puts com.apple.provenance on everything and tar would store it as a pax
+	@# header, which the initrd shows as a PaxHeader directory
+	@COPYFILE_DISABLE=1 tar --no-xattrs -cf initrd/initrd.tar initrd/*/* initrd/*.*
 endef
 
 define build_iso

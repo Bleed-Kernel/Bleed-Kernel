@@ -138,6 +138,10 @@ void fb_text_repaint(fb_console_t *fb);
 /// @brief draw fb->pixels from the text with the history scrolled back by scrollback_view
 void fb_text_render_view(fb_console_t *fb);
 
+/// @brief the cells of one row of the screen as its being looked at, scrollback_view included.
+/// out gets cols of them, anything past what the row has is cp 0
+void fb_text_copy_row(const fb_console_t *fb, size_t screen_row, fb_cell_t *out, size_t cols);
+
 /// @brief note that rows y to y + height of fb->pixels changed, for the next grab
 void framebuffer_mark_grab(fb_console_t *fb, size_t y, size_t height);
 

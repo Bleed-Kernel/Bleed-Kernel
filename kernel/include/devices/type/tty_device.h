@@ -39,6 +39,7 @@
 #define TTY_IOCTL_DESTROY           0x5430
 #define TTY_IOCTL_GRAB              0x5431
 #define TTY_IOCTL_RESIZE            0x5432  // tty_create_t again, new size in and the index left alone
+#define TTY_IOCTL_GRAB_TEXT         0x5433  // tty_text_grab_t, the same as GRAB but the text instead of pixels
 
 #define TTY_OFFSCREEN_MIN           64      // pixels, either way
 #define TTY_OFFSCREEN_MAX           4096
@@ -94,6 +95,23 @@ typedef struct {
     uint32_t bottom;
     uint32_t pitch;
 } tty_grab_t;
+
+// TTY_IOCTL_GRAB_TEXT, for a window that draws the text itself. cells is room for max_rows rows of
+// fb_cell_t, stride apart, laid out like the screen. only the rows that changed since the last grab
+// (of either kind) get written, top to bottom says which. empty cells are cp 0 and should be bg.
+// a size given to CREATE or RESIZE is cell_w by cell_h pixels for every column and row
+typedef struct {
+    uint64_t cells;
+    uint32_t stride;
+    uint32_t max_rows;
+    uint32_t cols;
+    uint32_t rows;
+    uint32_t top;
+    uint32_t bottom;
+    uint32_t bg;
+    uint32_t cell_w;
+    uint32_t cell_h;
+} tty_text_grab_t;
 
 typedef struct tty tty_t;
 

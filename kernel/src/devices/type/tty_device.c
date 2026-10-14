@@ -567,6 +567,80 @@ static int tty_offscreen_create(uint32_t width, uint32_t height, uint32_t *index
     return 0;
 }
 
+// how big the text is right now, cols and rows both 0 if theres none kept
+static void tty_text_size(tty_fb_backend_t *b, size_t *cols, size_t *rows) {
+    unsigned long irq = irq_push();
+    spinlock_acquire(&b->fb_lock);
+    *cols = b->fb.text ? b->fb.text->cols : 0;
+    *rows = b->fb.text ? b->fb.text->rows : 0;
+    spinlock_release(&b->fb_lock);
+    irq_restore(irq);
+}
+
+/// @brief the rows of text that changed since the last grab into the callers cells, see tty_text_grab_t
+/// @return 0 on success, negative status code on failure
+static int tty_offscreen_grab_text(tty_t *tty, task_t *task, tty_text_grab_t *grab) {
+    tty_fb_backend_t *b = tty->backend;
+    if (!grab->cells || !grab->stride || !grab->max_rows) return -EINVAL;
+
+    // the rows are copied out of the text into here with the lock held, then to the caller
+    // without it, the copy can fault. sized before the lock is taken
+    size_t cols, rows;
+    tty_text_size(b, &cols, &rows);
+    if (!cols || !rows || !b->fb.font) return -EIO;
+
+    fb_cell_t *staging = kmalloc(cols * rows * sizeof(fb_cell_t));
+    if (!staging) return -ENOMEM;
+
+    unsigned long irq = irq_push();
+    spinlock_acquire(&b->fb_lock);
+
+    fb_text_t *t      = b->fb.text;
+    size_t     cell_h = b->fb.font->height;
+    size_t     top    = 0;
+    size_t     bottom = 0;
+
+    // a resize got in between, leave the marks alone and the next grab gets it all at the new size
+    int same = t && t->cols == cols && t->rows == rows;
+    if (same && b->fb.grab_top < b->fb.grab_bottom) {
+        top    = b->fb.grab_top / cell_h;
+        bottom = (b->fb.grab_bottom + cell_h - 1) / cell_h;
+        if (bottom > rows) bottom = rows;
+    }
+    // anything that doesnt fit the callers cells is left marked, theirs is out of date
+    if (cols > grab->stride || bottom > grab->max_rows)
+        top = bottom = 0;
+
+    if (top < bottom) {
+        for (size_t row = top; row < bottom; row++)
+            fb_text_copy_row(&b->fb, row, staging + row * cols, cols);
+        b->fb.grab_top    = b->fb.height;
+        b->fb.grab_bottom = 0;
+    }
+
+    grab->cols   = t ? (uint32_t)t->cols : 0;
+    grab->rows   = t ? (uint32_t)t->rows : 0;
+    grab->bg     = b->fb.bg;
+    grab->cell_w = b->fb.font->width;
+    grab->cell_h = (uint32_t)cell_h;
+
+    spinlock_release(&b->fb_lock);
+    irq_restore(irq);
+
+    // if something draws halfway through this it marks the rows again and the next grab puts it right
+    int r = 0;
+    for (size_t row = top; row < bottom && r == 0; row++) {
+        uint64_t to = grab->cells + (uint64_t)row * grab->stride * sizeof(fb_cell_t);
+        if (copy_to_user(task, (void *)(uintptr_t)to, staging + row * cols, cols * sizeof(fb_cell_t)) != 0)
+            r = -EFAULT;
+    }
+    kfree(staging);
+
+    grab->top    = (uint32_t)top;
+    grab->bottom = (uint32_t)bottom;
+    return r;
+}
+
 int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
     tty_t *tty = dev->internal_data;
     tty_fb_backend_t *b = tty->backend;
@@ -717,6 +791,16 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
                 grab.top    = (uint32_t)top;
                 grab.bottom = (uint32_t)bottom;
             }
+            return tty_arg_out(arg, &grab, sizeof(grab));
+        }
+
+        case TTY_IOCTL_GRAB_TEXT: {
+            task_t *task = get_current_task();
+            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+
+            tty_text_grab_t grab;
+            if ((r = tty_arg_in(arg, &grab, sizeof(grab))) < 0) return r;
+            if ((r = tty_offscreen_grab_text(tty, task, &grab)) < 0) return r;
             return tty_arg_out(arg, &grab, sizeof(grab));
         }
 

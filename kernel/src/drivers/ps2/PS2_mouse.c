@@ -1,6 +1,8 @@
 #include <drivers/ps2/PS2_mouse.h>
 #include <cpu/io.h>
 #include <input/mouse_dispatch.h>
+#include <drivers/serial/serial.h>
+#include <ansii.h>
 
 #define PS2_DATA_PORT    0x60
 #define PS2_STATUS_PORT  0x64
@@ -26,14 +28,18 @@
 #define MOUSE_CMD_SET_DEFAULTS 0xF6
 #define MOUSE_CMD_ENABLE       0xF4
 #define MOUSE_CMD_DISABLE      0xF5
+#define MOUSE_CMD_SAMPLE_RATE  0xF3
+#define MOUSE_CMD_GET_ID       0xF2
 #define MOUSE_ACK              0xFA
+#define MOUSE_ID_WHEEL         0x03
 #define MOUSE_SELF_TEST_OK     0xAA
 
 #define PS2_MOUSE_SENS_NUM 1
 #define PS2_MOUSE_SENS_DEN 2
 
-static uint8_t  packet[3];
+static uint8_t  packet[4];
 static uint8_t  packet_index = 0;
+static uint8_t  packet_size  = 3;
 static int32_t  rem_dx = 0;
 static int32_t  rem_dy = 0;
 static int      mouse_present = 0;
@@ -133,6 +139,16 @@ void PS2_Mouse_init(void) {
     ps2_read_data(&result); // 0x00 = standard PS/2 mouse 
 
     if (mouse_send(MOUSE_CMD_SET_DEFAULTS) < 0) return;
+
+    // the magic knock: rates 200 100 80 in a row turn the wheel on, if theres one
+    packet_size = 3;
+    if (mouse_send(MOUSE_CMD_SAMPLE_RATE) == 0 && mouse_send(200) == 0 &&
+        mouse_send(MOUSE_CMD_SAMPLE_RATE) == 0 && mouse_send(100) == 0 &&
+        mouse_send(MOUSE_CMD_SAMPLE_RATE) == 0 && mouse_send(80)  == 0 &&
+        mouse_send(MOUSE_CMD_GET_ID) == 0 && ps2_read_data(&result) == 0 && result == MOUSE_ID_WHEEL)
+        packet_size = 4;
+    serial_printf(LOG_INFO "ps2 mouse: id %u, %s\n", result, packet_size == 4 ? "wheel" : "no wheel");
+
     if (mouse_send(MOUSE_CMD_ENABLE)        < 0) return;
 
     mouse_present  = 1;
@@ -161,7 +177,7 @@ void PS2_Mouse_Interrupt(uint8_t irq) {
     }
 
     packet[packet_index++] = data;
-    if (packet_index < 3) return;
+    if (packet_index < packet_size) return;
     packet_index = 0;
 
     // Decode deltas with sign extension 
@@ -177,10 +193,13 @@ void PS2_Mouse_Interrupt(uint8_t irq) {
     dx = ps2_scale_delta(dx, &rem_dx);
     dy = ps2_scale_delta(dy, &rem_dy);
 
+    // a signed nibble. ps2 counts towards you as positive, everything else the other way
+    int8_t wheel = packet_size == 4 ? (int8_t)-((int8_t)(packet[3] << 4) >> 4) : 0;
+
     mouse_event_t ev = {
         .dx      = dx,
         .dy      = -dy,
-        .wheel   = 0,
+        .wheel   = wheel,
         .buttons =
             (packet[0] & (1 << 0) ? MOUSE_BTN_LEFT   : 0) |
             (packet[0] & (1 << 1) ? MOUSE_BTN_RIGHT  : 0) |

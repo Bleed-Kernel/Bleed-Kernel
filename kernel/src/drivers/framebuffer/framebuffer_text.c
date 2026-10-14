@@ -322,6 +322,21 @@ void fb_text_repaint(fb_console_t *fb) {
     }
 }
 
+void fb_text_copy_row(const fb_console_t *fb, size_t screen_row, fb_cell_t *out, size_t cols) {
+    const fb_text_t *t = fb->text;
+    memset(out, 0, cols * sizeof(fb_cell_t));
+    if (!t || screen_row >= t->rows) return;
+
+    size_t view = fb->scrollback_view < t->history ? fb->scrollback_view : t->history;
+    size_t i    = t->history - view + screen_row;
+    if (i >= t->history + t->rows) return;
+
+    size_t r     = text_ring(t, i);
+    size_t count = t->used[r] < t->cols ? t->used[r] : t->cols;
+    if (count > cols) count = cols;
+    memcpy(out, t->cells + r * t->cols_cap, count * sizeof(fb_cell_t));
+}
+
 void fb_text_render_view(fb_console_t *fb) {
     fb_text_t *t = fb->text;
     if (!t || !fb->pixels || !fb->font) return;
