@@ -238,8 +238,11 @@ repack: limine/limine $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE)
 	$(build_initrd_tar)
 	$(build_iso)
 
+# homebrew qemu has no sdl, so only use it on mac if the qemu on PATH was built with it
+QEMU_MAC_DISPLAY := $(if $(shell qemu-system-x86_64 -display help 2>/dev/null | grep -x sdl),sdl,cocoa)
+
 ifeq ($(UNAME_S)$(UNAME_M),Darwinarm64)
-QEMU_HOST := -accel tcg,thread=multi,tb-size=1024 -cpu max -display cocoa
+QEMU_HOST := -accel tcg,thread=multi,tb-size=1024 -cpu max -display $(QEMU_MAC_DISPLAY)
 else
 QEMU_HOST := --enable-kvm -display sdl
 endif
@@ -309,7 +312,7 @@ run-mac: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-m $(MEMSZ) \
 		-boot d \
 		-serial stdio \
-		-display cocoa \
+		-display $(QEMU_MAC_DISPLAY) \
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
