@@ -4,15 +4,7 @@
 #include <ansii.h>
 #include <cpu/control_registers.h>
 #include <cpu/cpuid.h>
-
-#define CPUID_LEAF_BASIC_MAX     0
-#define CPUID_LEAF_EXT_FEATURES  7
-
-#define CPUID_7_EBX_SMEP (1u << 7)
-#define CPUID_7_EBX_SMAP (1u << 20)
-
-#define CPU_CR4_SMEP_BIT (1ULL << 20)
-#define CPU_CR4_SMAP_BIT (1ULL << 21)
+#include <mm/smap.h>
 
 int smap_supported = 0;
 
@@ -38,16 +30,27 @@ int SMAP_init(void) {
 
     smap_supported = has_smap;
 
-    if (has_smep)
-        serial_printf(LOG_OK "SMEP Enabled\n");
-    else
-        serial_printf(LOG_ERROR "SMEP Not Supported\n");
+    int missing = 0;
+    if (!has_smap) missing += SMAP_MISSING;
+    if (!has_smep) missing += SMEP_MISSING;
 
-    if (has_smap)
-        serial_printf(LOG_OK "SMAP Enabled\n");
-    else
-        serial_printf(LOG_ERROR "SMAP Not Supported\n");
+    switch (missing){
+        case SMAP_MISSING:
+            serial_printf(LOG_WARN "SMAP not Supported\n");
+            break;
+        case SMEP_MISSING:
+            serial_printf(LOG_WARN "SMEP not Supported\n");
+            break;
+        case BOTH_MISSING:
+            serial_printf(LOG_WARN "SMAP and SMEP are not Supported\n");
+            break;
+        case FULLY_SUPPORTED:
+            serial_printf(LOG_OK "SMAP Enabled\n");
+            serial_printf(LOG_OK "SMEP Enabled\n");
+            break;
+        default:
+            serial_printf(LOG_WARN "SMAP/SMEP status is Unknown? Reported (%i)\n", missing);
+        }
 
-    int missing = (has_smep ? 0 : 1) | (has_smap ? 0 : 2);
-    return -missing;
+    return missing;
 }

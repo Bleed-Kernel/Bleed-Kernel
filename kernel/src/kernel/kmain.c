@@ -284,14 +284,23 @@ bool init_userspace(){
     if (!bootargs_has("no-smap")){
         BLOG_INFO("Attempting to enable SMAP/SMEP");
         int smap_status = SMAP_init();
-        if (smap_status == 0){
-            BLOG_OK("SMAP Enabled");
-        }else if (smap_status == -1){
-            BLOG_WARN("SMEP is not Supported");
-        }else if (smap_status == -2){
-            BLOG_WARN("SMAP is not Supported");
-        }else{
-            BLOG_WARN("SMEP & SMEP are not Supported");
+
+        switch (smap_status){
+            case SMAP_MISSING:
+                BLOG_WARN("SMAP not Supported");
+                break;
+            case SMEP_MISSING:
+                BLOG_WARN("SMEP not Supported");
+                break;
+            case BOTH_MISSING:
+                BLOG_WARN("SMAP and SMEP are not Supported");
+                break;
+            case FULLY_SUPPORTED:
+                BLOG_OK("SMAP Enabled");
+                BLOG_OK("SMEP Enabled");
+                break;
+            default:
+                BLOG_WARN("SMAP/SMEP status is Unknown?");
         }
     }
 
