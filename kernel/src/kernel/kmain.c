@@ -305,17 +305,41 @@ bool init_userspace(){
         }
     }
 
-    BLOG_INFO("Attempting to start init");
-    const char* init_path = NULL;
-    init_path = bootargs_get("init");
+    const char* shell_path = bootargs_get("shell");
+    const char* init_path  = bootargs_get("init");
+    if (!shell_path) shell_path = DEFAULT_SHELL;
+    if (!init_path)  init_path  = DEFAULT_INIT;
 
-    INode_t *init_elf = elf_get_from_path(init_path);
-    task_t *init = elf_sched(init_elf, 0, NULL);
-    vfs_drop(init_elf);
-    if (init != NULL)
-        BLOG_OK("Init Task started!");
+    INode_t *shell_elf = elf_get_from_path(shell_path);
+    INode_t *init_elf  = elf_get_from_path(init_path);
+    bool     same      = shell_elf && init_elf == shell_elf;
+
+    // the shell stays hidden behind the splash until init takes the screen
+    if (!same) tty_set_graphics(1);
+
+    BLOG_INFO("Attempting to start shell");
+    task_t *shell = elf_sched(shell_elf, 0, NULL);
+    if (shell != NULL)
+        BLOG_OK("Shell Task started!");
     else
-        ke_panic(NULL, "Failure to Start listed init task");
+        BLOG_WARNF("Failure to start shell '%s'", shell_path);
+
+    // shell=x init=x only wants the one instance
+    if (same && shell) {
+        BLOG_INFO("Init is the shell, not starting it twice");
+    } else {
+        BLOG_INFO("Attempting to start init");
+        task_t *init = elf_sched(init_elf, 0, NULL);
+        fb_device_hold_until(init);
+        if (init != NULL)
+            BLOG_OK("Init Task started!");
+        else if (!shell)
+            ke_panic(NULL, "Failure to Start listed init task");
+        else
+            BLOG_WARNF("Failure to start init '%s'", init_path);
+    }
+    vfs_drop(init_elf);
+    vfs_drop(shell_elf);
 
     // after init so it keeps the pid it always had
     if (sched_create_task(read_cr3(), (uint64_t)power_button_watch, KERNEL_CS, KERNEL_SS, "power_service"))

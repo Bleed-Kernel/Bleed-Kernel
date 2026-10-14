@@ -83,7 +83,7 @@ USER_REPOS := \
     "https://github.com/Bleed-Kernel/Bleed-Doom doom" \
 	"https://github.com/Bleed-Kernel/Bleed-Quake2 quake2" \
 	"https://github.com/Bleed-Kernel/Bleed-SpecSeek specseek" \
-    "https://github.com/Bleed-Kernel/Bleed-Taskv taskv" \
+    "https://github.com/Bleed-Kernel/Bleed-Taskman taskv" \
     "https://github.com/Bleed-Kernel/Bleed-tvi tvi" \
 	"https://github.com/Bleed-Kernel/Bleed-Tetris tetris" \
 	"https://github.com/Bleed-Kernel/Crime-Scene crime-scene" \

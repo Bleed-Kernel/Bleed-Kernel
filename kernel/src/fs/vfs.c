@@ -110,6 +110,30 @@ INode_t* vfs_get_root(void){
     return vfs_root;
 }
 
+int vfs_inode_path(INode_t *inode, char *out, size_t size){
+    if (!inode || !out || size < 2) return -1;
+
+    // the names are walked up from the inode, so it goes in backwards from the end of out
+    size_t pos = size - 1;
+    out[pos] = '\0';
+
+    for (INode_t *cur = inode; cur != vfs_root; cur = cur->parent) {
+        // no path to give it fell out
+        if (!cur || !cur->name[0]) return -1;
+
+        size_t len = strlen(cur->name);
+        if (len + 1 > pos) return -1;
+
+        pos -= len;
+        memcpy(out + pos, cur->name, len);
+        out[--pos] = '/';
+    }
+
+    if (pos == size - 1) out[--pos] = '/';
+    memmove(out, out + pos, size - pos);
+    return 0;
+}
+
 int vfs_mount_root(void){
     int r = tempfs.mount(&vfs_root);
     if (r < 0) {

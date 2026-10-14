@@ -325,6 +325,7 @@ task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
 
     strncpy(child->name, parent->name, sizeof(child->name) - 1);
     child->name[sizeof(child->name) - 1] = '\0';
+    memcpy(child->exec_path, parent->exec_path, sizeof(child->exec_path));
 
     child->kernel_stack = kmalloc(KERNEL_STACK_SIZE);
     if (!child->kernel_stack)

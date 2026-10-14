@@ -123,6 +123,8 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     const char *new_name = exec_display_name(kpath, file->internal_data);
     strncpy(task->name, new_name, sizeof(task->name) - 1);
     task->name[sizeof(task->name) - 1] = '\0';
+    if (vfs_inode_path(file, task->exec_path, sizeof(task->exec_path)) != 0)
+        task->exec_path[0] = '\0';
 
     sched_free_alloc_list(old_alloc_list);
     if (old_heap)

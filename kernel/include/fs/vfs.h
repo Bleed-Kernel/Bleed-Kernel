@@ -109,6 +109,9 @@ int tempfs_mount_root(INode_t** root);
 /// @return root inode, NULL before vfs_mount_root
 INode_t* vfs_get_root(void);
 
+/// @brief the absolute path of inode, 0 on success or -1 if it doesnt fit or isnt under the root
+int vfs_inode_path(INode_t *inode, char *out, size_t size);
+
 /// @brief VFS Mount the root directory
 /// @return success?
 int vfs_mount_root(void);

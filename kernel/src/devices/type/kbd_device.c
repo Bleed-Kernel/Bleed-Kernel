@@ -15,6 +15,9 @@
 #include <sched/signal.h>
 #include <sched/scheduler.h>
 #include <user/user_poll.h>
+#include <devices/type/fb_device.h>
+
+#define KBD_BACKGROUND_SLEEP_MS 250
 
 static kbd_device_t *keyboard_device = NULL;
 extern struct INodeOps tty_inode_ops;
@@ -56,6 +59,15 @@ static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     spinlock_acquire(&kbd->lock);
 
     if (current && current->task_privilege == PRIVILEGE_USER) {
+        // whoever has the screen has the keys
+        uint64_t screen = fb_device_screen_pid();
+        if (screen && screen != current->id) {
+            spinlock_release(&kbd->lock);
+            sched_wait_event(sched_deadline_ms(KBD_BACKGROUND_SLEEP_MS));
+            irq_restore(irq);
+            return (kbd->flags & TTY_NONBLOCK) ? -EAGAIN : 0;
+        }
+
         INode_t *active_console = console_get_active_console();
         tty_t *active_tty = active_console ? (tty_t *)active_console->internal_data : NULL;
         if (!active_tty) {
@@ -168,6 +180,11 @@ static int kbd_ioctl(INode_t *inode, unsigned long request, void *arg) {
 static int kbd_poll(INode_t *inode) {
     kbd_device_t *kbd = inode->internal_data;
     if (!kbd) return POLLERR;
+
+    task_t  *current = get_current_task();
+    uint64_t screen  = fb_device_screen_pid();
+    if (current && current->task_privilege == PRIVILEGE_USER && screen && screen != current->id)
+        return 0;
     return kbd->head != kbd->tail ? POLLIN : 0;
 }
 

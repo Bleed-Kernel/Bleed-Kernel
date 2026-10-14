@@ -26,6 +26,7 @@
 
 static const char* valid_keys[] = {
     "init",
+    "shell",
     "splash",
     "ttyfont",
     "verbose",

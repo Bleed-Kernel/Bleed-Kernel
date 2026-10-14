@@ -35,3 +35,9 @@ void fb_device_init();
 
 // gives the screen back to the tty if task was the one holding it
 void fb_device_task_exit(struct task *task);
+
+// pid of the task the screen belongs to, 0 when the tty has it
+uint64_t fb_device_screen_pid(void);
+
+// keeps an already hidden tty hidden until task takes the screen or exits, NULL gives it back now
+void fb_device_hold_until(struct task *task);

@@ -62,6 +62,7 @@ typedef struct task {
     uint64_t        pgid;
     uint64_t        sid;
     char            name[128];
+    char            exec_path[256];
     task_state_t    state;
     cpu_context_t  *context;
 

@@ -8,6 +8,7 @@
 #include <sched/scheduler.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <user/errno.h>
 #include <user/user_copy.h>
@@ -15,6 +16,7 @@
 static fb_device_t  *fb0;
 static uint8_t      *fb_backbuffer;
 static uint64_t     fb_owner_pid;   // task that took the screen with FB_IOC_ACQUIRE
+static uint64_t     fb_hold_pid;
 
 // ideally this become more flexable soon?
 
@@ -64,6 +66,7 @@ static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
         if (fb_owner_pid && fb_owner_pid != task->id)
             return -EBUSY;
         fb_owner_pid = task->id;
+        if (fb_hold_pid == task->id) fb_hold_pid = 0;
         tty_set_graphics(1);
         return 0;
     }
@@ -72,7 +75,8 @@ static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
         if (fb_owner_pid != task->id)
             return -EPERM;
         fb_owner_pid = 0;
-        tty_set_graphics(0);
+        if (!fb_hold_pid) tty_set_graphics(0);
+        sched_wake_event_waiters();
         return 0;
     }
 
@@ -108,10 +112,29 @@ static struct INodeOps fb_inode_ops = {
 };
 
 void fb_device_task_exit(task_t *task) {
-    if (!task || !fb_owner_pid || fb_owner_pid != task->id) return;
+    if (!task) return;
+    bool was_holding = (fb_owner_pid && fb_owner_pid == task->id) ||
+                       (fb_hold_pid && fb_hold_pid == task->id);
+    if (!was_holding) return;
 
-    fb_owner_pid = 0;
-    tty_set_graphics(0);
+    if (fb_owner_pid == task->id) fb_owner_pid = 0;
+    if (fb_hold_pid == task->id)  fb_hold_pid  = 0;
+    if (!fb_owner_pid && !fb_hold_pid) tty_set_graphics(0);
+    sched_wake_event_waiters();
+}
+
+uint64_t fb_device_screen_pid(void) {
+    return fb_owner_pid ? fb_owner_pid : fb_hold_pid;
+}
+
+void fb_device_hold_until(task_t *task) {
+    // it may have already died before we got here, the exit hook wouldve missed it
+    if (!task || task->state == TASK_ZOMBIE || task->state == TASK_DEAD || task->state == TASK_FREE) {
+        fb_hold_pid = 0;
+        if (!fb_owner_pid) tty_set_graphics(0);
+        return;
+    }
+    fb_hold_pid = task->id;
 }
 
 void fb_device_init(void) {
