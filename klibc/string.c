@@ -8,6 +8,7 @@
 #define CR0_TS          (1ULL << 3)
 
 #define SIMD_CHUNK      (64 * 1024)     // most we do with interrupts off in one go
+#define SIMD_MIN        1024            // probably dont go below this as anything below this costs more than SSE saves
 
 // i only wanna use it for this file for now but ill look at expanding it when i do simd stuff in userspace too
 #define MEM_VEC __attribute__((noinline, target("sse2"), \
@@ -37,11 +38,33 @@ static inline void simd_end(simd_guard_t *g) {
     irq_restore(g->flags);
 }
 
-// no restrict on purpose, memmove sends dest below src through here and gcc checks the
-// distance itself before it takes the vector loop
+typedef uint8_t vec16_t __attribute__((vector_size(16), aligned(1), may_alias));
+
+// unrolled by hand, the vectoriser only does 16 bytes a go and the loop overhead was half the work
 MEM_VEC static void copy_fwd_vec(uint8_t *dest, const uint8_t *src, uint64_t n) {
-    for (uint64_t i = 0; i < n; i++)
-        dest[i] = src[i];
+    while (n >= 128) {
+        vec16_t a = *(const vec16_t *)(src +   0), b = *(const vec16_t *)(src +  16);
+        vec16_t c = *(const vec16_t *)(src +  32), d = *(const vec16_t *)(src +  48);
+        vec16_t e = *(const vec16_t *)(src +  64), f = *(const vec16_t *)(src +  80);
+        vec16_t g = *(const vec16_t *)(src +  96), h = *(const vec16_t *)(src + 112);
+
+        *(vec16_t *)(dest +   0) = a; *(vec16_t *)(dest +  16) = b;
+        *(vec16_t *)(dest +  32) = c; *(vec16_t *)(dest +  48) = d;
+        *(vec16_t *)(dest +  64) = e; *(vec16_t *)(dest +  80) = f;
+        *(vec16_t *)(dest +  96) = g; *(vec16_t *)(dest + 112) = h;
+
+        dest += 128;
+        src  += 128;
+        n    -= 128;
+    }
+    while (n >= 16) {
+        *(vec16_t *)dest = *(const vec16_t *)src;
+        dest += 16;
+        src  += 16;
+        n    -= 16;
+    }
+    while (n--)
+        *dest++ = *src++;
 }
 
 // the vectoriser wont take a loop that walks down, so hand it whole 16 byte blocks. each
@@ -61,8 +84,23 @@ MEM_VEC static void copy_back_vec(uint8_t *dest, const uint8_t *src, uint64_t n)
 }
 
 MEM_VEC static void fill_vec(uint8_t *dest, uint8_t c, uint64_t n) {
-    for (uint64_t i = 0; i < n; i++)
-        dest[i] = c;
+    vec16_t v = (vec16_t){0} + c;
+
+    while (n >= 128) {
+        *(vec16_t *)(dest +   0) = v; *(vec16_t *)(dest +  16) = v;
+        *(vec16_t *)(dest +  32) = v; *(vec16_t *)(dest +  48) = v;
+        *(vec16_t *)(dest +  64) = v; *(vec16_t *)(dest +  80) = v;
+        *(vec16_t *)(dest +  96) = v; *(vec16_t *)(dest + 112) = v;
+        dest += 128;
+        n    -= 128;
+    }
+    while (n >= 16) {
+        *(vec16_t *)dest = v;
+        dest += 16;
+        n    -= 16;
+    }
+    while (n--)
+        *dest++ = c;
 }
 
 /// @brief move memory from destination to source
@@ -117,6 +155,13 @@ void *memcpy(void *dest, const void *src, uint64_t n) {
     const uint8_t *psrc  = (const uint8_t *)src;
     simd_guard_t   guard;
 
+    if (n < SIMD_MIN) {
+        uint64_t q = n >> 3, b = n & 7;
+        asm volatile("rep movsq" : "+D"(pdest), "+S"(psrc), "+c"(q) :: "memory");
+        asm volatile("rep movsb" : "+D"(pdest), "+S"(psrc), "+c"(b) :: "memory");
+        return dest;
+    }
+
     while (n > 0) {
         uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
 
@@ -135,6 +180,13 @@ void *memcpy(void *dest, const void *src, uint64_t n) {
 void *memset(void *s, int c, uint64_t n) {
     uint8_t     *pdest = (uint8_t *)s;
     simd_guard_t guard;
+
+    if (n < SIMD_MIN) {
+        uint64_t q = n >> 3, b = n & 7, fill = (uint8_t)c * 0x0101010101010101ULL;
+        asm volatile("rep stosq" : "+D"(pdest), "+c"(q) : "a"(fill) : "memory");
+        asm volatile("rep stosb" : "+D"(pdest), "+c"(b) : "a"(fill) : "memory");
+        return s;
+    }
 
     while (n > 0) {
         uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;

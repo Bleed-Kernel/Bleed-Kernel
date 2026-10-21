@@ -50,6 +50,9 @@ void paging_map_page_wc(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t fl
 void paging_map_page(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags);
 void paging_map_page_invl(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t flags, int invalidate_tlb);
 
+// map count contiguous frames from paddr at vaddr
+int paging_map_range(paddr_t cr3, paddr_t paddr, uint64_t vaddr, size_t count, uint64_t flags);
+
 /// @brief create a new address space that shares the kernels higher half
 /// @return paddr of the new pml4, 0 on failure
 paddr_t paging_create_address_space(void);
@@ -72,6 +75,9 @@ uint64_t paging_alloc_empty_frame(void **vaddr);
 int paging_map_mmio(paddr_t phys, size_t size);
 
 uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create);
+
+// the page table holding vaddr's pte, NULL if it isnt there
+uint64_t *paging_get_table(paddr_t cr3, uint64_t vaddr);
 
 void paging_unmap_page(paddr_t cr3, uint64_t vaddr);
 

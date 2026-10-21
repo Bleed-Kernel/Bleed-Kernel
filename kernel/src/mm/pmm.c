@@ -128,30 +128,40 @@ static int64_t paging_bitmap_find_free_in_range(bitmap_entry_t *entry,
     size_t i = begin;
 
     while (i < end) {
-        uint8_t byte = entry->bitmap[i >> 3];
-        if (byte == 0xFF) {
-            free_run = 0;
-            i = (i & ~(size_t)7) + 8;
+        // whole words and bytes at once while theyre all used or all free
+        size_t step = 0;
+        uint64_t bits = 0;
+
+        if (!(i & 63) && i + 64 <= end) {
+            __builtin_memcpy(&bits, &entry->bitmap[i >> 3], sizeof(bits));
+            if (bits == ~0ULL || bits == 0)
+                step = 64;
+        }
+        if (!step && !(i & 7) && i + 8 <= end) {
+            bits = entry->bitmap[i >> 3];
+            if (bits == 0xFF || bits == 0)
+                step = 8;
+        }
+
+        if (step) {
+            if (bits) {
+                free_run = 0;
+            } else {
+                if (free_run == 0) run_start = i;
+                free_run += step;
+                if (free_run >= count) return (int64_t)run_start;
+            }
+            i += step;
             continue;
         }
 
-        size_t bit_start = i & 7;
-        size_t bit_end   = 8;
-        if ((i & ~(size_t)7) + 8 > end)
-            bit_end = end & 7 ? end & 7 : 8;
-
-        for (size_t b = bit_start; b < bit_end; b++, i++) {
-            if (!(byte & (uint8_t)(1u << b))) {
-                if (free_run == 0) run_start = i;
-                free_run++;
-                if (free_run == count) return (int64_t)run_start;
-            } else {
-                free_run = 0;
-            }
+        if (BIT_TST(entry->bitmap, i)) {
+            free_run = 0;
+        } else {
+            if (free_run == 0) run_start = i;
+            if (++free_run == count) return (int64_t)run_start;
         }
-
-        if (!(i & 7)) continue;
-        i = (i & ~(size_t)7) + 8;
+        i++;
     }
 
     return -1;
@@ -178,7 +188,8 @@ static int64_t paging_bitmap_find_free(bitmap_entry_t *entry, size_t count) {
     return start;
 }
 
-paddr_t pmm_alloc_pages(size_t page_count) {
+/// @brief pmm_alloc_pages without the out of memory complaint
+paddr_t pmm_try_alloc_pages(size_t page_count) {
     if (!page_count) return 0;
 
     // syscalls can be preempted once they have yielded, the bitmaps cant be shared unlocked
@@ -204,9 +215,14 @@ paddr_t pmm_alloc_pages(size_t page_count) {
 
     spinlock_release(&pmm_lock);
     irq_restore(irq);
-
-    serial_printf(LOG_ERROR "PMM: out of memory\n");
     return 0;
+}
+
+paddr_t pmm_alloc_pages(size_t page_count) {
+    paddr_t paddr = pmm_try_alloc_pages(page_count);
+    if (!paddr && page_count)
+        serial_printf(LOG_ERROR "PMM: out of memory\n");
+    return paddr;
 }
 
 size_t pmm_available_pages(void) {

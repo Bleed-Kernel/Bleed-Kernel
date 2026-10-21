@@ -126,9 +126,15 @@ task_t *get_current_task(void);
 void sched_yield(task_t *task);
 void sched_block(task_t *task);
 
+// the kernel tasks loop once boot is done, runs only when nothing else can
+void sched_idle(void);
+
 // sleep until sched_wake_event_waiters, a signal or the deadline. interrupts must be off
 void sched_wait_event(uint64_t deadline);
 void sched_wake_event_waiters(void);
+
+// sched_wait_event that only the deadline or a signal ends
+void sched_sleep_until(uint64_t deadline);
 void sched_event_tick(void);
 uint64_t sched_deadline_ms(uint64_t ms);
 int sched_deadline_passed(uint64_t deadline);

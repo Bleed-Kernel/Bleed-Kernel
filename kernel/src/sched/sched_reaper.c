@@ -9,6 +9,8 @@
 
 #include "priv_scheduler.h"
 
+static task_t *reaper_task = NULL;
+
 static void unlink_from_list(task_t **head, task_t *task) {
     if (!*head || !task)
         return;
@@ -74,6 +76,11 @@ void sched_mark_task_dead(task_t *task) {
         dead_task_tail = task;
     }
 
+    if (reaper_task && reaper_task->state == TASK_BLOCKED) {
+        reaper_task->state = TASK_READY;
+        ready_enqueue(reaper_task);
+    }
+
     spinlock_release(&sched_lock);
     irq_restore(flags);
 
@@ -81,6 +88,8 @@ void sched_mark_task_dead(task_t *task) {
 }
 
 void scheduler_reap(void) {
+    reaper_task = get_current_task();
+
     for (;;) {
         int reaped = 0;
 
@@ -144,7 +153,15 @@ void scheduler_reap(void) {
             reaped++;
         }
 
-        sched_yield(get_current_task());
+        // nothing left to do
+        unsigned long flags = irq_push();
+        if (dead_task_head) {
+            irq_restore(flags);
+            sched_yield(reaper_task);
+            continue;
+        }
+        sched_block(reaper_task);
+        irq_restore(flags);
     }
     __builtin_unreachable();
 }

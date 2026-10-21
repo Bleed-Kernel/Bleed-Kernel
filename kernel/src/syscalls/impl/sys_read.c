@@ -25,12 +25,23 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
     char kbuf[2048];
     uint64_t copied = 0;
 
+    int direct = f->inode && f->inode->type == INODE_FILE;
+
     while (copied < len) {
+        uintptr_t at = user_buf + copied;
+        void *dst = NULL;
+
         size_t batch_size = len - copied;
-        if (batch_size > sizeof(kbuf))
+        if (direct) {
+            size_t to_page_end = PAGE_SIZE - (at & (PAGE_SIZE - 1));
+            if (batch_size > to_page_end)
+                batch_size = to_page_end;
+            dst = user_page_ptr(caller, at, 1);
+        }
+        if (!dst && batch_size > sizeof(kbuf))
             batch_size = sizeof(kbuf);
 
-        long r = vfs_read((int)fd, kbuf, batch_size);
+        long r = vfs_read((int)fd, dst ? dst : kbuf, batch_size);
         if (r < 0) {
             if (copied)
                 return copied;
@@ -39,7 +50,7 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
         if (r == 0)
             break;
 
-        if (copy_to_user(caller, (void *)(user_buf + copied), kbuf, (size_t)r) != 0)
+        if (!dst && copy_to_user(caller, (void *)at, kbuf, (size_t)r) != 0)
             return copied ? copied : (uint64_t)-EFAULT;
         copied += (uint64_t)r;
 

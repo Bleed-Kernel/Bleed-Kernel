@@ -83,10 +83,10 @@ void power_button_watch(void) {
     for (;;) {
         uint64_t deadline = sched_deadline_ms(POWER_BUTTON_POLL_MS);
 
-        // anything can wake an event wait, only the deadline is worth reading the port for
+        // a signal can still end it early, only the deadline is worth reading the port for
         while (!sched_deadline_passed(deadline)) {
             unsigned long flags = irq_push();
-            sched_wait_event(deadline);
+            sched_sleep_until(deadline);
             irq_restore(flags);
         }
 

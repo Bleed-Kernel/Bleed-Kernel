@@ -6,9 +6,15 @@
 
 extern volatile uint64_t timer_ticks;
 
+#define EVENT_WAIT_ANY          1
+#define EVENT_WAIT_DEADLINE     2
+
 // reading the hpet on every tick costs more than everything else the tick does, so its only
 // looked at on this tick or later. UINT64_MAX means nobody is waiting on a timeout at all
 static uint64_t event_check_tick = UINT64_MAX;
+
+// tasks sitting in sched_wait_event, one that dies in there leaves it high which only costs 1 scan
+static volatile uint32_t event_any_waiters = 0;
 
 // how many ticks to leave it for a wait with this much hpet time left. a tick is a
 // millisecond but they can run slow, half the wait is always early enough to look again
@@ -24,9 +30,11 @@ static void event_wake(task_t *task) {
     ready_enqueue(task);
 }
 
+// a deadline only sleep isnt anyones business but the timers
 static void event_wake_any(task_t *task, void *userdata) {
     (void)userdata;
-    event_wake(task);
+    if (task->event_wait == EVENT_WAIT_ANY)
+        event_wake(task);
 }
 
 typedef struct {
@@ -56,9 +64,7 @@ int sched_deadline_passed(uint64_t deadline) {
     return hpet_read_counter() >= deadline;
 }
 
-/// @brief block the current task until an event, a signal or the deadline
-/// @param deadline from sched_deadline_ms, 0 waits forever
-void sched_wait_event(uint64_t deadline) {
+static void event_block(uint64_t deadline, uint8_t mode) {
     task_t *task = current_task;
     if (!task) return;
 
@@ -71,16 +77,34 @@ void sched_wait_event(uint64_t deadline) {
     }
 
     task->event_deadline = deadline;
-    task->event_wait     = 1;
+    task->event_wait     = mode;
     task->state          = TASK_BLOCKED;
+    if (mode == EVENT_WAIT_ANY)
+        event_any_waiters++;
     asm volatile ("int $" SCHED_YIELD_VECTOR_STR);
 
+    if (mode == EVENT_WAIT_ANY)
+        event_any_waiters--;
     task->event_wait     = 0;
     task->event_deadline = 0;
 }
 
+/// @brief block the current task until an event, a signal or the deadline
+/// @param deadline from sched_deadline_ms, 0 waits forever
+void sched_wait_event(uint64_t deadline) {
+    event_block(deadline, EVENT_WAIT_ANY);
+}
+
+/// @brief block the current task until the deadline or a signal, events dont wake it
+void sched_sleep_until(uint64_t deadline) {
+    if (!deadline) return;
+    event_block(deadline, EVENT_WAIT_DEADLINE);
+}
+
 /// @brief something happened, let every task in sched_wait_event look again
 void sched_wake_event_waiters(void) {
+    if (!event_any_waiters)
+        return;
     itterate_each_task(event_wake_any, NULL);
 }
 

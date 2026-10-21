@@ -395,6 +395,6 @@ Licenced under GPLv3\n");
     kernel_console_init();
 
     for(;;){
-        sched_yield(get_current_task());
+        sched_idle();
     }
 }

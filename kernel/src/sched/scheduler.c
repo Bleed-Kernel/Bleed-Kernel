@@ -28,6 +28,8 @@ task_t *ready_tail     = NULL;
 // when the current task was given the cpu
 static uint64_t switch_tsc = 0;
 
+static task_t *idle_task = NULL;
+
 static inline uint64_t rdtsc(void) {
     uint32_t lo, hi;
     asm volatile ("rdtsc" : "=a"(lo), "=d"(hi));
@@ -46,7 +48,7 @@ uint64_t sched_task_cpu_time(task_t *task) {
 }
 
 void ready_enqueue(task_t *task) {
-    if (!task || task->ready_queued) return;   // already queued
+    if (!task || task->ready_queued || task == idle_task) return;   // already queued
 
     task->ready_next = NULL;
     if (ready_tail)
@@ -132,6 +134,10 @@ void* sched_next_context(void* old_context) {
     // nothing else wants the cpu, carry on with what we have. the state is only touched if
     // it was a plain yield, a zombie that got here must not come back to life as RUNNING
     if (!next_task) {
+        int can_run = current_task->state == TASK_READY || current_task->state == TASK_RUNNING;
+        if (!can_run && idle_task && current_task != idle_task)
+            return sched_switch_task(idle_task, old_context);
+
         if (current_task->state == TASK_READY)
             current_task->state = TASK_RUNNING;
         current_task->quantum_remaining = QUANTUM;
@@ -204,6 +210,18 @@ void sched_yield(task_t *task) {
     }
     asm volatile ("int $" SCHED_YIELD_VECTOR_STR);
     irq_restore(flags);
+}
+
+/// @brief one turn of the idle loop, hands the cpu over if anyone is waiting for it or halts till an irq
+void sched_idle(void) {
+    asm volatile("cli");
+    idle_task = current_task;
+    if (ready_head) {
+        sched_yield(current_task);
+        asm volatile("sti");
+        return;
+    }
+    asm volatile("sti; hlt");
 }
 
 void sched_block(task_t *task){

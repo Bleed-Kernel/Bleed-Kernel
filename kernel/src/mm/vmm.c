@@ -7,9 +7,11 @@
 #include <mm/vmm.h>
 #include <mm/spinlock.h>
 #include <mm/cow.h>
+#include <cpu/control_registers.h>
 
 #define VMM_BASE_FLAGS (PTE_WRITABLE | PTE_NX)
 #define VMM_NODES_PER_SLAB  (PAGE_SIZE / sizeof(vmm_region_t))
+#define VMM_INVLPG_MAX      64
 
 // dont get confused this is in the linker file
 extern char __kernel_end;
@@ -179,28 +181,68 @@ void vmm_unmap_pages(vmm_cr3_t cr3, void *virt, size_t page_count) {
         paging_unmap_page(cr3, va + i * PAGE_SIZE);
 }
 
+static void vmm_free_run(paddr_t start, size_t pages) {
+    if (pages)
+        pmm_free_pages(start, pages);
+}
+
 int vmm_unmap_free_pages(vmm_cr3_t cr3, void *virt, size_t page_count) {
     if (!virt || !page_count)
         return -1;
 
     uintptr_t va = PAGE_ALIGN_DOWN((uintptr_t)virt);
-    for (size_t i = 0; i < page_count; i++) {
-        uintptr_t vpage = va + i * PAGE_SIZE;
-        uint64_t *pte   = paging_get_page(cr3, vpage, 0);
-        if (!pte || !(*pte & PTE_PRESENT))
-            continue;
 
-        paddr_t ppage = *pte & PADDR_ENTRY_MASK;
-        if (*pte & PTE_NOFREE) {
-            // mmio, never came from the pmm
-        } else if (*pte & (PTE_COW | PTE_SHARED)) {
-            if (cow_unref_page(ppage) == 0)
-                pmm_free_pages(ppage, 1);
-        } else {
-            pmm_free_pages(ppage, 1);
+    // past this many a cr3 reload is probably cheaper than invlpg on every page
+    int user      = va < 0x0000800000000000ULL;
+    int flush_all = user && page_count > VMM_INVLPG_MAX
+                 && (read_cr3() & PADDR_ENTRY_MASK) == (cr3 & PADDR_ENTRY_MASK);
+
+    paddr_t run_start = 0;
+    size_t  run_pages = 0;
+
+    size_t i = 0;
+    while (i < page_count) {
+        uintptr_t vpage = va + i * PAGE_SIZE;
+        size_t    idx   = (vpage >> 12) & 0x1FF;
+        size_t    span  = 512 - idx;
+        if (span > page_count - i)
+            span = page_count - i;
+
+        uint64_t *pt = paging_get_table(cr3, vpage);
+        if (!pt) {
+            i += span;
+            continue;
         }
-        paging_unmap_page(cr3, vpage);
+
+        for (size_t j = 0; j < span; j++, vpage += PAGE_SIZE) {
+            uint64_t pte = pt[idx + j];
+            if (!(pte & PTE_PRESENT))
+                continue;
+
+            pt[idx + j] = 0;
+            if (!flush_all)
+                asm volatile("invlpg (%0)" :: "r"(vpage) : "memory");
+
+            paddr_t ppage = pte & PADDR_ENTRY_MASK;
+            if (pte & PTE_NOFREE)
+                continue;   // mmio, never came from the pmm
+            if ((pte & (PTE_COW | PTE_SHARED)) && cow_unref_page(ppage) != 0)
+                continue;
+
+            if (run_pages && ppage == run_start + run_pages * PAGE_SIZE) {
+                run_pages++;
+            } else {
+                vmm_free_run(run_start, run_pages);
+                run_start = ppage;
+                run_pages = 1;
+            }
+        }
+        i += span;
     }
+
+    vmm_free_run(run_start, run_pages);
+    if (flush_all)
+        paging_switch_address_space(read_cr3());
     return 0;
 }
 
@@ -229,9 +271,20 @@ int vmm_translate(vmm_cr3_t cr3, void *virt, paddr_t *out_paddr) {
     return vmm_page_paddr(cr3, (uintptr_t)virt, out_paddr);
 }
 
+static int vmm_in_hhdm(uintptr_t addr) {
+    return addr >= g_gbi.hhdm_offset && addr < g_gbi.hhdm_offset + get_max_paddr();
+}
+
 void *vmm_alloc_pages(size_t pages) {
     if (!pages)
         return NULL;
+
+    paddr_t phys = pmm_try_alloc_pages(pages);
+    if (phys) {
+        void *v = paddr_to_vaddr(phys);
+        memset(v, 0, pages * PAGE_SIZE);
+        return v;
+    }
 
     vmm_init();
 
@@ -262,6 +315,10 @@ void vmm_free_pages(void *addr, size_t pages) {
         return;
 
     uintptr_t base = PAGE_ALIGN_DOWN((uintptr_t)addr);
+    if (vmm_in_hhdm(base)) {
+        pmm_free_pages(vaddr_to_paddr((void *)base), pages);
+        return;
+    }
 
     vmm_init();
 

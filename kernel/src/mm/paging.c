@@ -157,6 +157,26 @@ void paging_map_page_invl(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t 
         asm volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
 }
 
+/// @brief map count physically contiguous pages, walking the tables once per page table
+/// @return 0 on success, -1 if a table couldnt be allocated
+int paging_map_range(paddr_t cr3, paddr_t paddr, uint64_t vaddr, size_t count, uint64_t flags) {
+    while (count > 0) {
+        uint64_t *pt;
+        size_t    idx;
+
+        paging_walk_page_tables(cr3, vaddr, &pt, &idx, flags & PTE_USER);
+        if (!pt)
+            return -1;
+
+        for (; idx < 512 && count > 0; idx++, count--) {
+            pt[idx] = (paddr & PADDR_ENTRY_MASK) | flags | PTE_PRESENT;
+            paddr += PAGE_SIZE_4K;
+            vaddr += PAGE_SIZE_4K;
+        }
+    }
+    return 0;
+}
+
 /// @brief map a physical page at a vaddr using a pd entry
 /// @param paddr physical address to map the page frame at
 /// @param vaddr virtual address to map the page at
@@ -282,10 +302,32 @@ static uint64_t *paging_next_table(uint64_t *table, size_t index, int create) {
     return (uint64_t *)paddr_to_vaddr(entry & PADDR_ENTRY_MASK);
 }
 
+/// @brief the page table covering vaddr without touching it
+uint64_t *paging_get_table(paddr_t cr3, uint64_t vaddr) {
+    if ((cr3 & PADDR_ENTRY_MASK) == 0) return NULL;
+
+    uint64_t *table = (uint64_t*)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
+    for (int shift = 39; shift > 12 && table; shift -= 9)
+        table = paging_next_table(table, (vaddr >> shift) & 0x1FF, 0);
+    return table;
+}
+
 uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create) {
     if ((cr3 & PADDR_ENTRY_MASK) == 0) return NULL;
 
     uint64_t *table = (uint64_t*)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
+
+    // just looking, every user copy comes through here so keep it tight
+    if (!create) {
+        for (int shift = 39; shift > 12; shift -= 9) {
+            uint64_t entry = table[(vaddr >> shift) & 0x1FF];
+            if ((entry & (PTE_PRESENT | PTE_PAT_4K)) != PTE_PRESENT)
+                return NULL;
+            table = (uint64_t *)paddr_to_vaddr(entry & PADDR_ENTRY_MASK);
+        }
+        uint64_t *pte = &table[(vaddr >> 12) & 0x1FF];
+        return (*pte & PTE_PRESENT) ? pte : NULL;
+    }
 
     // pml4 -> pdpt -> pd -> pt
     for (int shift = 39; shift > 12; shift -= 9) {
@@ -341,10 +383,30 @@ int paging_map_mmio(paddr_t phys, size_t size) {
     return 0;
 }
 
-int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
+static int paging_table_empty(const uint64_t *table) {
+    for (size_t i = 0; i < 512; i++) {
+        if (table[i])
+            return 0;
+    }
+    return 1;
+}
+
+// a table munmap emptied stays present, so drop it here while the walk is passing anyway
+// instead of every fork after walking all 512 entries of it again
+static void paging_drop_table(uint64_t *slot, uint64_t vaddr, int current) {
+    paddr_t table = *slot & PADDR_ENTRY_MASK;
+
+    *slot = 0;
+    if (current)
+        asm volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
+    pmm_free_pages(table, 1);
+}
+
+static int paging_clone_walk(paddr_t parent_cr3, paddr_t child_cr3, int current, int *flushp) {
     uint64_t *parent_pml4 = (uint64_t *)paddr_to_vaddr(parent_cr3 & PADDR_ENTRY_MASK);
     if (!parent_pml4 || !child_cr3)
         return -1;
+
 
     for (size_t pml4i = 0; pml4i < 256; pml4i++) {
         if (!(parent_pml4[pml4i] & PTE_PRESENT))
@@ -374,64 +436,92 @@ int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
                 if (!pt)
                     return -1;
 
+                uint64_t pt_base = ((uint64_t)pml4i << 39)
+                                 | ((uint64_t)pdpti << 30)
+                                 | ((uint64_t)pdi << 21);
+                int pt_used = 0;
+
+                // the childs table for this range, walked to once instead of once per page
+                uint64_t *child_pt = NULL;
+
                 for (size_t pti = 0; pti < 512; pti++) {
                     uint64_t pte = pt[pti];
+                    if (pte)
+                        pt_used = 1;
                     if (!(pte & PTE_PRESENT))
                         continue;
                     if (!(pte & PTE_USER))
                         continue;
 
-                    uint64_t vaddr = ((uint64_t)pml4i << 39)
-                                   | ((uint64_t)pdpti << 30)
-                                   | ((uint64_t)pdi << 21)
-                                   | ((uint64_t)pti << 12);
+                    if (!child_pt) {
+                        size_t child_idx;
+                        paging_walk_page_tables(child_cr3, pt_base, &child_pt, &child_idx, PTE_USER);
+                        if (!child_pt)
+                            return -1;
+                    }
+
                     paddr_t phys = pte & PADDR_ENTRY_MASK;
                     uint64_t flags = (pte & ~PADDR_ENTRY_MASK) & ~PTE_PRESENT;
 
-                    // mmio like the framebuffer isnt ram, parent and child both keep pointing at the device.
-                    // written raw because the PAT bit would read as a huge page in paging_map_page
+                    // mmio like the framebuffer isnt ram, parent and child both keep pointing at the device
                     if (pte & PTE_NOFREE) {
-                        uint64_t *child_pt;
-                        size_t child_idx;
-                        paging_walk_page_tables(child_cr3, vaddr, &child_pt, &child_idx, PTE_USER);
-                        if (!child_pt)
-                            return -1;
-                        child_pt[child_idx] = pte;
+                        child_pt[pti] = pte;
                         continue;
                     }
 
                     // shared memory stays shared, the child is just one more holder of the frame
                     if (pte & PTE_SHARED) {
                         cow_ref_page(phys);
-                        paging_map_page_invl(child_cr3, phys, vaddr, flags, 0);
+                        child_pt[pti] = phys | flags | PTE_PRESENT;
                         continue;
                     }
 
                     if ((pte & PTE_WRITABLE) || (pte & PTE_COW)) {
+                        // the tlb goes in one go at the end, nothing writes user memory till then
                         if (!(pte & PTE_COW)) {
                             pt[pti] = (pte & ~PTE_WRITABLE) | PTE_COW;
                             cow_ref_page(phys);
-                            asm volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
+                            *flushp = 1;
                         }
 
                         cow_ref_page(phys);
                         flags &= ~PTE_WRITABLE;
                         flags |= PTE_COW;
-                        paging_map_page_invl(child_cr3, phys, vaddr, flags, 0);
+                        child_pt[pti] = phys | flags | PTE_PRESENT;
                     } else {
                         paddr_t child_phys = pmm_alloc_pages(1);
                         if (!child_phys)
                             return -1;
 
                         memcpy(paddr_to_vaddr(child_phys), paddr_to_vaddr(phys), PAGE_SIZE);
-                        paging_map_page_invl(child_cr3, child_phys, vaddr, flags, 0);
+                        child_pt[pti] = child_phys | flags | PTE_PRESENT;
                     }
                 }
+
+                if (!pt_used)
+                    paging_drop_table(&pd[pdi], pt_base, current);
             }
+
+            if (paging_table_empty(pd))
+                paging_drop_table(&pdpt[pdpti], ((uint64_t)pml4i << 39) | ((uint64_t)pdpti << 30), current);
         }
+
+        if (paging_table_empty(pdpt))
+            paging_drop_table(&parent_pml4[pml4i], (uint64_t)pml4i << 39, current);
     }
 
     return 0;
+}
+
+int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
+    int current = (read_cr3() & PADDR_ENTRY_MASK) == (parent_cr3 & PADDR_ENTRY_MASK);
+    int flush   = 0;
+
+    // pages the parent lost write access to go out of the tlb in one go, failed or not
+    int r = paging_clone_walk(parent_cr3, child_cr3, current, &flush);
+    if (flush && current)
+        paging_switch_address_space(read_cr3());
+    return r;
 }
 
 int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_error) {
@@ -532,6 +622,9 @@ void paging_release_user_space(paddr_t cr3) {
     if (!pml4)
         return;
 
+    paddr_t run_start = 0;
+    size_t  run_pages = 0;
+
     for (size_t pml4i = 0; pml4i < 256; pml4i++) {
         uint64_t pml4e = pml4[pml4i];
         if (!(pml4e & PTE_PRESENT))
@@ -572,15 +665,21 @@ void paging_release_user_space(paddr_t cr3) {
                         continue;
 
                     paddr_t phys = pte & PADDR_ENTRY_MASK;
-                    if (pte & PTE_NOFREE) {
-                        // never came from the pmm
-                    } else if (pte & (PTE_COW | PTE_SHARED)) {
-                        if (cow_unref_page(phys) == 0)
-                            pmm_free_pages(phys, 1);
-                    } else {
-                        pmm_free_pages(phys, 1);
-                    }
                     pt[pti] = 0;
+                    if (pte & PTE_NOFREE)
+                        continue;
+                    if ((pte & (PTE_COW | PTE_SHARED)) && cow_unref_page(phys) != 0)
+                        continue;
+
+                    // neighbouring frames go back in one call
+                    if (run_pages && phys == run_start + run_pages * PAGE_SIZE) {
+                        run_pages++;
+                        continue;
+                    }
+                    if (run_pages)
+                        pmm_free_pages(run_start, run_pages);
+                    run_start = phys;
+                    run_pages = 1;
                 }
 
                 pmm_free_pages(pt_phys, 1);
@@ -594,4 +693,7 @@ void paging_release_user_space(paddr_t cr3) {
         pmm_free_pages(pdpt_phys, 1);
         pml4[pml4i] = 0;
     }
+
+    if (run_pages)
+        pmm_free_pages(run_start, run_pages);
 }

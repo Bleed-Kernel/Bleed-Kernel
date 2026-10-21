@@ -27,6 +27,7 @@ typedef struct bitmap_entry {
 
 uint8_t   pmm_init(void);
 paddr_t   pmm_alloc_pages(size_t page_count);
+paddr_t   pmm_try_alloc_pages(size_t page_count); // this version fails quietly
 void      pmm_free_pages(paddr_t paddr, size_t page_count);
 size_t    pmm_available_pages(void);
 

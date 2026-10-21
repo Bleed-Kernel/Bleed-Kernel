@@ -2,6 +2,8 @@
 #include <string.h>
 #include <mm/kalloc.h>
 #include <mm/vmm.h>
+#include <mm/pmm.h>
+#include <mm/paging.h>
 
 // take the node tracking addr out of the tasks alloc list, the caller owns it after this
 static user_alloc_t *alloc_list_unlink(task_t *task, void *addr) {
@@ -69,20 +71,43 @@ void task_mmap_release(task_t* task, void* addr) {
     if (a) kfree(a);
 }
 
+#define MMAP_RUN_MAX    64
+
 void* task_mmap(task_t* task, size_t pages) {
     uintptr_t base = (uintptr_t)task_mmap_reserve(task, pages);
     if (!base) return NULL;
 
-    for (size_t i = 0; i < pages; i++) {
+    size_t done = 0;
+    size_t want = MMAP_RUN_MAX;
+
+    while (done < pages) {
+        if (want > pages - done)
+            want = pages - done;
+
+        // fall back to smaller ones when fragmented
+        paddr_t phys = want > 1 ? pmm_try_alloc_pages(want) : pmm_alloc_pages(1);
+        if (!phys && want > 1) {
+            want /= 2;
+            continue;
+        }
+
         // zeroed, a task should never see what the last owner of the frame left behind
-        paddr_t phys = paging_alloc_empty_frame(NULL);
-        if (!phys) {
-            if (i) (void)vmm_unmap_free_pages(task->page_map, (void *)base, i);
+        if (phys)
+            memset(paddr_to_vaddr(phys), 0, want * PAGE_SIZE);
+
+        void *at = (void *)(base + done * PAGE_SIZE);
+        if (!phys || paging_map_range(task->page_map, phys, (uint64_t)at, want,
+                                      PTE_PRESENT | PTE_WRITABLE | PTE_USER) != 0) {
+            if (phys) {
+                vmm_unmap_pages(task->page_map, at, want);
+                pmm_free_pages(phys, want);
+            }
+            if (done) (void)vmm_unmap_free_pages(task->page_map, (void *)base, done);
             task_mmap_release(task, (void *)base);
             return NULL;
         }
 
-        paging_map_page_invl(task->page_map, phys, base + i * PAGE_SIZE, PTE_PRESENT | PTE_WRITABLE | PTE_USER , 0);
+        done += want;
     }
 
     return (void*)base;
