@@ -57,6 +57,7 @@ enum {
     SYS_SHM_DESTROY     = 524,
     SYS_TASKUSAGE       = 525,
     SYS_TASKPATH        = 526,
+    SYS_SHM_MAP_AT      = 527,
 };
 
 int sys_open(char *path_str, int flags);
@@ -114,6 +115,7 @@ long sys_ipc_recv(uint64_t user_msg_ptr);
 
 long sys_shm_create(uint64_t pages);
 long sys_shm_map(uint64_t id, uint64_t user_pages_ptr);
+long sys_shm_map_at(uint64_t id, uint64_t first, uint64_t pages, uint64_t addr);
 long sys_shm_destroy(uint64_t id);
 
 long sys_poll(uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms);

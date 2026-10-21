@@ -131,10 +131,6 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
         kfree(old_heap);
     paging_destroy_address_space(old_cr3);
 
-    serial_printf(LOG_OK "exec success pid=%u path=%s\n",
-                  (unsigned)task->id,
-                  kpath);
-
     ret = 0;
     goto done;
 

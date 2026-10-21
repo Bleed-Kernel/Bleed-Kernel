@@ -144,6 +144,39 @@ long shm_map(task_t *task, uint64_t id, uint64_t user_pages_ptr) {
     return (long)base;
 }
 
+long shm_map_at(task_t *task, uint64_t id, uint64_t first, uint64_t pages, uint64_t addr) {
+    if (!task)
+        return -ESRCH;
+    if (!pages)
+        return -EINVAL;
+
+    unsigned long flags = irq_push();
+    spinlock_acquire(&shm_lock);
+
+    shm_object_t *obj = shm_find(id);
+    if (!obj || first > obj->pages || pages > obj->pages - first) {
+        spinlock_release(&shm_lock);
+        irq_restore(flags);
+        return obj ? -EINVAL : -ENOENT;
+    }
+
+    if (!task_mmap_reserve_at(task, (uintptr_t)addr, (size_t)pages)) {
+        spinlock_release(&shm_lock);
+        irq_restore(flags);
+        return -EEXIST;
+    }
+
+    // left executable, the point is running code out of it
+    for (size_t i = 0; i < (size_t)pages; i++) {
+        cow_ref_page(obj->frames[first + i]);
+        paging_map_page_invl(task->page_map, obj->frames[first + i], addr + i * PAGE_SIZE,
+                             PTE_USER | PTE_WRITABLE | PTE_SHARED, 1);
+    }
+
+    spinlock_release(&shm_lock);
+    irq_restore(flags);
+    return (long)addr;
+}
 
 long shm_destroy(task_t *task, uint64_t id) {
     if (!task)

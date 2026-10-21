@@ -169,6 +169,7 @@ void itterate_each_task(task_itteration_fn fn, void *userdata);
 void* task_mmap(task_t* task, size_t pages);
 void task_munmap(task_t* task, void* addr);
 void* task_mmap_reserve(task_t* task, size_t pages);
+void* task_mmap_reserve_at(task_t* task, uintptr_t addr, size_t pages);
 void task_mmap_release(task_t* task, void* addr);
 void sched_free_alloc_list(user_alloc_t *list);
 void sched_init_task_heap(task_t* task);

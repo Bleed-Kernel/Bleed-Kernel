@@ -55,7 +55,8 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_SHM_DESTROY, sys_shm_destroy),
     SYSCALL(SYS_POLL, sys_poll),
     SYSCALL(SYS_TASKUSAGE, sys_taskusage),
-    SYSCALL(SYS_TASKPATH, sys_taskpath)
+    SYSCALL(SYS_TASKPATH, sys_taskpath),
+    SYSCALL(SYS_SHM_MAP_AT, sys_shm_map_at)
 };
 #pragma GCC diagnostic pop
 

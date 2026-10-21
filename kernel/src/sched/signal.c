@@ -171,13 +171,14 @@ static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) 
     uintptr_t restorer = task->sig_restorers[sig];
     sigset_t handler_mask = task->sig_masks[sig];
     uint64_t handler_flags = task->sig_flags[sig];
-    uintptr_t stack_floor = USER_STACK_TOP - USER_STACK_SIZE;
 
     if (handler == SIG_DFL || handler == SIG_IGN || restorer < 2)
         return -EINVAL;
 
+    // whatever stack the task is on, it doesnt have to be the main one. copy_to_user
+    // still says no if its not mapped
     uintptr_t frame_addr = (ctx->rsp - sizeof(sigframe_t)) & ~0xFULL;
-    if (frame_addr < stack_floor)
+    if (!user_ptr_valid(frame_addr) || !user_ptr_valid(ctx->rsp))
         return -EFAULT;
 
     sigframe_t frame;
@@ -190,7 +191,7 @@ static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) 
         return -EFAULT;
 
     uintptr_t ret_addr_sp = frame_addr - sizeof(uint64_t);
-    if (ret_addr_sp < stack_floor)
+    if (!user_ptr_valid(ret_addr_sp))
         return -EFAULT;
 
     uint64_t ret_addr = (uint64_t)restorer;
@@ -203,10 +204,26 @@ static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) 
     if (!(handler_flags & SA_NODEFER))
         task->sig_blocked |= sig_bit(sig);
 
+    // rsi is the frame so a handler can read and change the context it came from
     ctx->rip = handler;
     ctx->rdi = (uint64_t)sig;
+    ctx->rsi = frame_addr;
     ctx->rsp = ret_addr_sp;
     return 0;
+}
+
+int signal_deliver_fault(task_t *task, cpu_context_t *ctx, int sig) {
+    if (!task || !ctx || !valid_signal(sig))
+        return -EINVAL;
+
+    // a fault inside the handler, or with it blocked, would only fault again
+    uintptr_t handler = task->sig_handlers[sig];
+    if (handler == SIG_DFL || handler == SIG_IGN)
+        return -EINVAL;
+    if (task->sig_active_frame || (task->sig_blocked & sig_bit(sig)))
+        return -EINVAL;
+
+    return signal_setup_user_handler(task, ctx, sig);
 }
 
 int signal_handle_sigreturn(task_t *task, cpu_context_t *ctx) {

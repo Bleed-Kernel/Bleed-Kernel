@@ -6,6 +6,7 @@
 #include <mm/cow.h>
 #include <cpu/features/fpu.h>
 #include <sched/scheduler.h>
+#include <sched/signal.h>
 #include <drivers/serial/serial.h>
 #include <kernel/exception/panic.h>
 #include <kernel/exception/stack_trace.h>
@@ -54,12 +55,30 @@ const char* exception_name(uint8_t vector) {
     return vector < 32 ? names[vector] : "Unknown Internal Exception";
 }
 
+_Static_assert(sizeof(struct isr_stackframe) == sizeof(cpu_context_t), "signals treat the isr frame as a cpu_context_t");
+
+static int exception_signal(uint64_t vector) {
+    switch (vector) {
+        case 0: case 16: case 19:           return SIGFPE;
+        case 1: case 3:                     return SIGTRAP;
+        case 6:                             return SIGILL;
+        case 11: case 12: case 13: case 14: return SIGSEGV;
+        case 17:                            return SIGBUS;
+        default:                            return 0;
+    }
+}
+
 void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
     uint64_t cr2 = 0;
     __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
     if (sf->vector == 14 && paging_handle_cow_fault(task, cr2, sf->error_code))
         return sf;
     if (sf->vector == 14 && !(sf->error_code & 0x1) && paging_handle_stack_fault(task, cr2))
+        return sf;
+
+    // a task with a handler gets to deal with it
+    int sig = exception_signal(sf->vector);
+    if (sig && signal_deliver_fault(task, (cpu_context_t *)sf, sig) == 0)
         return sf;
 
     if (sf->vector == 14)

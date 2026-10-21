@@ -63,6 +63,46 @@ void* task_mmap_reserve(task_t* task, size_t pages) {
     return (void*)base;
 }
 
+/// @brief like task_mmap_reserve but at addr, for things that have to live somewhere exact
+/// @return addr, NULL if any of it is already taken or outside the mmap window
+void* task_mmap_reserve_at(task_t* task, uintptr_t addr, size_t pages) {
+    if (!task || !pages || (addr & (PAGE_SIZE - 1)))
+        return NULL;
+    if (addr < USER_MMAP_BASE || addr > USER_MMAP_LIMIT)
+        return NULL;
+    if (pages > (USER_MMAP_LIMIT - addr) / PAGE_SIZE)
+        return NULL;
+
+    uintptr_t end = addr + pages * PAGE_SIZE;
+    user_alloc_t* prev = NULL;
+    user_alloc_t* next = task->alloc_list;
+
+    for (; next; prev = next, next = next->next) {
+        uintptr_t a_start = (uintptr_t)next->vaddr;
+        uintptr_t a_end   = a_start + next->pages * PAGE_SIZE;
+
+        if (a_start >= end)
+            break;
+        if (a_end > addr)
+            return NULL;
+    }
+
+    user_alloc_t* alloc = kmalloc(sizeof(user_alloc_t));
+    if (!alloc)
+        return NULL;
+
+    alloc->vaddr = (void*)addr;
+    alloc->pages = pages;
+    alloc->next = next;
+
+    if (prev)
+        prev->next = alloc;
+    else
+        task->alloc_list = alloc;
+
+    return (void*)addr;
+}
+
 /// @brief forget a reservation, whatever is mapped there is left alone
 void task_mmap_release(task_t* task, void* addr) {
     if (!task || !addr) return;
