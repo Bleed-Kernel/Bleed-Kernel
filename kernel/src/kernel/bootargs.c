@@ -32,6 +32,7 @@ static const char* valid_keys[] = {
     "verbose",
     "no-smap",
     "no-umip",
+    "no-serial-shell",
     "strict",
     "fb-width",
     "fb-height",

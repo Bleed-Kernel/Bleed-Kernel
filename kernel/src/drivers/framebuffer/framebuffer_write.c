@@ -220,6 +220,26 @@ void framebuffer_put_char(fb_console_t *fb, uint32_t c) {
         framebuffer_flush(fb);
 }
 
+void framebuffer_erase(fb_console_t *fb, size_t row, size_t from, size_t to) {
+    uint32_t *fb_buffer = framebuffer_get_shadow_buffer(fb);
+    if (!fb_buffer || !fb->font) return;
+    if (!fb->shadow_initialized)
+        framebuffer_init_buffer(fb);
+
+    size_t max_cols = fb->width / fb->font->width;
+    size_t py       = row * fb->font->height;
+    if (to > max_cols) to = max_cols;
+    if (from >= to || py + fb->font->height > fb->height) return;
+
+    for (size_t y = py; y < py + fb->font->height; y++) {
+        uint32_t *dst = fb_buffer + y * fb->pitch;
+        for (size_t x = from * fb->font->width; x < to * fb->font->width; x++)
+            dst[x] = fb->bg;
+    }
+    framebuffer_mark_dirty(fb, py, fb->font->height);
+    fb_text_erase(fb, row, from, to);
+}
+
 void framebuffer_write_string(fb_console_t *fb, ansii_state_t *ansi, const char *str, spinlock_t *lock) {
     const uint8_t *p = (const uint8_t *)str;
     while (*p) {

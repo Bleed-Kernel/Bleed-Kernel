@@ -40,6 +40,9 @@ uint64_t framebuffer_get_bpp(int idx);
 /// @param bg background colour
 void framebuffer_put_char(fb_console_t *fb, uint32_t c);
 
+void framebuffer_erase(fb_console_t *fb, size_t row, size_t from, size_t to);
+void framebuffer_flush(fb_console_t *fb);
+
 /// @brief recursivly write characters from a string to the framebuffer
 /// @param str target
 void framebuffer_write_string(
@@ -124,6 +127,7 @@ void fb_text_put(fb_console_t *fb, size_t row, size_t col, uint32_t cp, uint32_t
 void fb_text_wrap(fb_console_t *fb, size_t row, int wrapped);
 void fb_text_scroll(fb_console_t *fb);
 void fb_text_clear(fb_console_t *fb);
+void fb_text_erase(fb_console_t *fb, size_t row, size_t from, size_t to);
 
 /// @brief lay every line out again for the size fb has now and move the cursor with it
 void fb_text_reflow(fb_console_t *fb);

@@ -38,6 +38,7 @@
 #include <devices/type/mouse_device.h>
 #include <devices/type/kbd_device.h>
 #include <devices/type/fb_device.h>
+#include <devices/type/serial_tty_device.h>
 #include <devices/type/power_device.h>
 #include <drivers/cros_ec/cros_ec.h>
 #include <devices/type/serial_device.h>
@@ -223,6 +224,9 @@ void init_devices(){
     serial_device_register();
     BLOG_OK("serial Device Ready");
 
+    if (serial_tty_init() == 0)
+        BLOG_OK("serial terminal Ready");
+
     BLOG_INFO("Starting power Device");
     cros_ec_init();
     power_device_init();
@@ -332,6 +336,14 @@ bool init_userspace(){
         BLOG_OK("Shell Task started!");
     else
         BLOG_WARNF("Failure to start shell '%s'", shell_path);
+
+    if (serial_present() && !bootargs_has("no-serial-shell")) {
+        BLOG_INFO("Attempting to start serial shell");
+        if (serial_tty_spawn(shell_elf))
+            BLOG_OK("Serial shell started on ttyS0");
+        else
+            BLOG_WARN("Failure to start serial shell");
+    }
 
     // shell=x init=x only wants the one instance
     if (same && shell) {

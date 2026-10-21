@@ -137,6 +137,23 @@ void fb_text_clear(fb_console_t *fb) {
     fb->scrollback_count = 0;
 }
 
+void fb_text_erase(fb_console_t *fb, size_t row, size_t from, size_t to) {
+    fb_text_t *t = fb->text;
+    if (!t || row >= t->rows) return;
+
+    size_t     r     = text_ring(t, t->history + row);
+    fb_cell_t *cells = t->cells + r * t->cols_cap;
+    if (to > t->used[r]) to = t->used[r];
+    if (from >= to) return;
+
+    for (size_t i = from; i < to; i++)
+        cells[i] = (fb_cell_t){0};
+
+    // erased to the end, the row is only as long as whats left of it
+    if (to == t->used[r])
+        t->used[r] = (uint16_t)from;
+}
+
 // how much of a row counts as text, blanks hanging off the end of it dont
 static size_t text_row_length(const fb_text_t *t, size_t i) {
     size_t           r     = text_ring(t, i);

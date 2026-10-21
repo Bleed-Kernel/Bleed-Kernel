@@ -1,7 +1,6 @@
 /*
     this can be really funny on UEFI, and by that i mean it may cause the system
     not to boot :/
-    for now i only want to write to serial but maybe recv later?
 */
 #include <cpu/io.h>
 #include <stdint.h>
@@ -12,6 +11,7 @@
 #include <string.h>
 #include <user/errno.h>
 #include <mm/spinlock.h>
+#include <drivers/serial/serial.h>
 
 #define PORT_COM1   0x3F8
 #define SERIAL_TIMEOUT 100000
@@ -19,6 +19,7 @@
 
 static int serial_available = 0;
 static spinlock_t serial_lock = {0};
+static serial_rx_t serial_rx = NULL;
 
 // everything emitted gets kept here so /dev/serial can read it back
 static char serial_log_buffer[SERIAL_LOG_SIZE];
@@ -126,6 +127,43 @@ void serial_write_n(const char *buf, size_t len) {
     serial_emit_n(buf, len);
     spinlock_release(&serial_lock);
     irq_restore(flags);
+}
+
+// straight down the port and not kept in the log, a char at a time so a long write
+// doesnt sit there with interrupts off
+void serial_send_n(const char *buf, size_t len) {
+    for (size_t i = 0; i < len && serial_available; i++) {
+        unsigned long flags = irq_push();
+        asm volatile("cli" ::: "memory");
+        spinlock_acquire(&serial_lock);
+        if (buf[i] == '\n')
+            serial_port_put('\r');
+        serial_port_put(buf[i]);
+        spinlock_release(&serial_lock);
+        irq_restore(flags);
+    }
+}
+
+int serial_present(void) {
+    return serial_available;
+}
+
+void serial_rx_listen(serial_rx_t rx) {
+    serial_rx = rx;
+    if (serial_available)
+        outb(PORT_COM1 + 1, 0x01);  // data available interrupt only
+}
+
+// IRQ4, everything sitting in the fifo goes over in one go
+void serial_interrupt(void) {
+    char buf[64];
+    size_t n = 0;
+
+    while (n < sizeof(buf) && (inb(PORT_COM1 + 5) & 0x01))
+        buf[n++] = (char)inb(PORT_COM1);
+
+    if (n && serial_rx)
+        serial_rx(buf, n);
 }
 
 /// @brief total bytes ever emitted, used as the log size

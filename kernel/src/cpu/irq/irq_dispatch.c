@@ -4,6 +4,7 @@
 #include <drivers/usb/ohci.h>
 #include <drivers/usb/usb_keyboard.h>
 #include <drivers/i2c/i2c_trackpad.h>
+#include <drivers/serial/serial.h>
 #include <sched/scheduler.h>
 
 volatile uint64_t timer_ticks = 0;
@@ -25,6 +26,9 @@ void irq_handler(uint8_t irq) {
     switch (irq) {
         case 1:
             PS2_Keyboard_Interrupt(irq);
+            break;
+        case 4:
+            serial_interrupt();
             break;
         case 12:
             PS2_Mouse_Interrupt(irq);

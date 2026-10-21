@@ -28,6 +28,19 @@ size_t serial_log_size(void);
 /// @return bytes copied
 size_t serial_log_read(char *dst, size_t len, size_t offset);
 
+typedef void (*serial_rx_t)(const char *buf, size_t len);
+
+// raw to the port, not kept in the log
+void serial_send_n(const char *buf, size_t len);
+
+// whether COM1 passed its loopback test and is available
+int serial_present(void);
+
+// rx gets whatever came in on each interrupt, called from the irq
+void serial_rx_listen(serial_rx_t rx);
+
+void serial_interrupt(void);
+
 /// @brief Write a formatted string to COM1
 /// @param fmt formatted string
 /// @param  VARDIC

@@ -253,7 +253,7 @@ define run_qemu
 		$(QEMU_HOST) \
 		-boot d \
 		-m $(MEMSZ) \
-		-serial stdio \
+		-serial mon:stdio \
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
@@ -269,6 +269,11 @@ QEMU_OHCI_INPUT := -machine pc,i8042=off -device pci-ohci,id=ohci -device usb-kb
 .PHONY: run
 run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	$(run_qemu)
+
+# no window, the desktop still runs but the way in is the shell on this terminal. ctrl+a x quits
+.PHONY: run-headless
+run-headless: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+	$(call run_qemu,-display none)
 
 # same as run but the only keyboard and mouse are usb ones on an OHCI controller, for testing the usb stack
 .PHONY: run-ohci
@@ -292,7 +297,7 @@ run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		$(QEMU_HOST) \
 		-boot d \
 		-m $(MEMSZ) \
-		-serial stdio \
+		-serial mon:stdio \
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
@@ -311,7 +316,7 @@ run-mac: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-cpu max \
 		-m $(MEMSZ) \
 		-boot d \
-		-serial stdio \
+		-serial mon:stdio \
 		-display $(QEMU_MAC_DISPLAY) \
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
