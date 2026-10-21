@@ -164,6 +164,7 @@ typedef struct tty{
     struct tty_ops *ops;    // backend
     void *backend;
     struct tty *next;       // the offscreen ones are a list, oldest first
+    wait_queue_t wait;
 } tty_t;
 
 void tty_process_input(tty_t *tty, char c);

@@ -20,6 +20,7 @@ typedef struct pipe_state {
     int readers;
     int writers;
     uint8_t nonblock;
+    wait_queue_t wait;
     char buffer[PIPE_BUFFER_SIZE];
 } pipe_state_t;
 
@@ -68,7 +69,7 @@ static long pipe_read_inode(INode_t *inode, void *out_buffer, size_t size, size_
 
         // theres room again, a writer might be polling for it
         if (copied > 0) {
-            sched_wake_event_waiters();
+            sched_wake_queue(&state->wait);
             return (long)copied;
         }
         if (writers == 0)
@@ -77,10 +78,16 @@ static long pipe_read_inode(INode_t *inode, void *out_buffer, size_t size, size_
             return -EAGAIN;
 
         // checked with the lock dropped, a fatal signal never comes back from this
-        if (signal_should_interrupt(get_current_task()))
+        task_t  *current = get_current_task();
+        sigset_t seen    = current->sig_pending;
+        if (signal_should_interrupt(current))
             return -EINTR;
 
-        sched_yield(get_current_task());
+        // looked at again with interrupts off
+        flags = irq_push();
+        if (!state->count && state->writers && current->sig_pending == seen)
+            sched_wait_queue(&state->wait, 0);
+        irq_restore(flags);
     }
 }
 
@@ -130,17 +137,22 @@ static long pipe_write_inode(INode_t *inode, const void *in_buffer, size_t size,
         irq_restore(flags);
 
         if (copied > 0)
-            sched_wake_event_waiters();
+            sched_wake_queue(&state->wait);
 
         if (copied == size)
             return (long)copied;
         if (!full)
             continue;
 
-        if (signal_should_interrupt(get_current_task()))
+        task_t  *current = get_current_task();
+        sigset_t seen    = current->sig_pending;
+        if (signal_should_interrupt(current))
             return copied ? (long)copied : -EINTR;
 
-        sched_yield(get_current_task());
+        flags = irq_push();
+        if (state->count == PIPE_BUFFER_SIZE && state->readers && current->sig_pending == seen)
+            sched_wait_queue(&state->wait, 0);
+        irq_restore(flags);
     }
 }
 
@@ -193,6 +205,11 @@ static int pipe_write_poll(INode_t *inode) {
     return state->count < PIPE_BUFFER_SIZE ? POLLOUT : 0;
 }
 
+static wait_queue_t *pipe_wait_queue(INode_t *inode) {
+    pipe_state_t *state = (pipe_state_t *)inode->internal_data;
+    return state ? &state->wait : NULL;
+}
+
 static const INodeOps_t pipe_read_ops = {
     .create = NULL,
     .read = pipe_read_inode,
@@ -202,7 +219,8 @@ static const INodeOps_t pipe_read_ops = {
     .drop = NULL,
     .readdir = NULL,
     .size = NULL,
-    .poll = pipe_read_poll
+    .poll = pipe_read_poll,
+    .wait_queue = pipe_wait_queue
 };
 
 static const INodeOps_t pipe_write_ops = {
@@ -214,7 +232,8 @@ static const INodeOps_t pipe_write_ops = {
     .drop = NULL,
     .readdir = NULL,
     .size = NULL,
-    .poll = pipe_write_poll
+    .poll = pipe_write_poll,
+    .wait_queue = pipe_wait_queue
 };
 
 int pipe_create_file_pair(file_t **out_read, file_t **out_write) {
@@ -299,7 +318,10 @@ void pipe_file_release(file_t *f) {
     irq_restore(flags);
 
     // whoever is polling the other end needs to see the hangup
-    sched_wake_event_waiters();
+    if (free_state)
+        sched_wait_queue_destroy(&state->wait);
+    else
+        sched_wake_queue(&state->wait);
 
     kfree(f->inode);
     if (free_state)

@@ -12,6 +12,7 @@ typedef struct {
     mouse_event_t buffer[MOUSE_BUFFER_SIZE];
     size_t head;
     size_t tail;
+    wait_queue_t wait;
 } mouse_device_t;
 
 void mouse_device_init(void);

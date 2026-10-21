@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <devices/devices.h>
 #include <user/user_file.h>
+#include <sched/wait_queue.h>
 
 #define O_RDONLY 0x0
 #define O_WRONLY 0x1
@@ -50,6 +51,7 @@ typedef struct INodeOps{
     int    (*readdir) (INode_t* dir, size_t index, INode_t** result);
     size_t (*size)    (INode_t* inode);
     int    (*poll)    (INode_t* inode);   // POLL* bits ready right now
+    wait_queue_t *(*wait_queue)(INode_t* inode);
 } INodeOps_t;
 
 /*

@@ -1,4 +1,5 @@
 #include <fs/vfs.h>
+#include <user/user_poll.h>
 #include <fs/vfs_mount.h>
 #include <string.h>
 #include <ansii.h>
@@ -633,7 +634,8 @@ long vfs_read(int fd, void *buf, size_t count) {
     }
 
     for (;;) {
-        task_t *current = get_current_task();
+        task_t  *current = get_current_task();
+        sigset_t seen    = current ? current->sig_pending : 0;
         if (signal_should_interrupt(current))
             return -EINTR;
 
@@ -654,9 +656,17 @@ long vfs_read(int fd, void *buf, size_t count) {
         if (is_size_finite)
             return 0;
 
-        // nothing wakes a BLOCKED task when a device gets data, it would sleep until a signal
-        // happened to arrive. give up the cpu and look again next time round, same as a pipe
-        sched_yield(current);
+        // sleep till the device says theres something. one without a queue gets looked at next turn
+        const INodeOps_t *ops   = f->inode->ops;
+        wait_queue_t     *queue = ops->wait_queue && ops->poll ? ops->wait_queue(f->inode) : NULL;
+        if (!queue || !current) {
+            sched_yield(current);
+        } else {
+            unsigned long flags = irq_push();
+            if (!(ops->poll(f->inode) & (POLLIN | POLLHUP | POLLERR)) && current->sig_pending == seen)
+                sched_wait_queue(queue, 0);
+            irq_restore(flags);
+        }
 
         if (signal_should_interrupt(current))
             return -EINTR;

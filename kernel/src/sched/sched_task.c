@@ -11,25 +11,40 @@
 
 #include "priv_scheduler.h"
 
-uint8_t pid_list[MAX_PIDS] = {0};
+#define PID_HASH_SIZE   256
+
 spinlock_t sched_lock;
+
+static uint64_t pid_bitmap[MAX_PIDS / 64];
+static int      pid_cursor = 1;
+static task_t  *pid_hash[PID_HASH_SIZE];
+static uint64_t task_count = 0;
 
 __attribute__((constructor))
 void sched_init_lock(void) {
     spinlock_init(&sched_lock);
 }
 
+// first free pid at or after from, -1 if theres none up there
+static int pid_find_free(int from) {
+    for (int i = from; i < MAX_PIDS; i = (i & ~63) + 64) {
+        uint64_t free = ~pid_bitmap[i / 64] & (~0ULL << (i % 64));
+        if (free)
+            return (i & ~63) + __builtin_ctzll(free);
+    }
+    return -1;
+}
+
 int alloc_pid(){
-    int pid = -1;
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
 
-    for (int i = 1; i < MAX_PIDS; i++){
-        if (!pid_list[i]){
-            pid_list[i] = 1;
-            pid = i;
-            break;
-        }
+    int pid = pid_find_free(pid_cursor);
+    if (pid < 0)
+        pid = pid_find_free(1);
+    if (pid > 0) {
+        pid_bitmap[pid / 64] |= 1ULL << (pid % 64);
+        pid_cursor = pid + 1 < MAX_PIDS ? pid + 1 : 1;
     }
 
     spinlock_release(&sched_lock);
@@ -37,15 +52,56 @@ int alloc_pid(){
     return pid;
 }
 
-static void free_pid(int pid) {
-    if (pid <= 0 || pid >= MAX_PIDS)
+static void free_pid_locked(uint64_t pid) {
+    if (pid == 0 || pid >= MAX_PIDS)
         return;
+    pid_bitmap[pid / 64] &= ~(1ULL << (pid % 64));
+}
 
+static void free_pid(int pid) {
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
-    pid_list[pid] = 0;
+    free_pid_locked((uint64_t)pid);
     spinlock_release(&sched_lock);
     irq_restore(flags);
+}
+
+task_t *sched_lookup_locked(uint64_t pid) {
+    for (task_t *t = pid_hash[pid % PID_HASH_SIZE]; t; t = t->pid_next) {
+        if (t->id == pid)
+            return t;
+    }
+    return NULL;
+}
+
+static void child_link(task_t *parent, task_t *child) {
+    child->parent       = parent;
+    child->sibling_prev = NULL;
+    child->sibling_next = parent ? parent->children : NULL;
+    if (!parent)
+        return;
+
+    if (parent->children)
+        parent->children->sibling_prev = child;
+    parent->children = child;
+}
+
+static void child_unlink(task_t *child) {
+    task_t *parent = child->parent;
+    if (!parent)
+        return;
+
+    if (child->sibling_prev)
+        child->sibling_prev->sibling_next = child->sibling_next;
+    else
+        parent->children = child->sibling_next;
+
+    if (child->sibling_next)
+        child->sibling_next->sibling_prev = child->sibling_prev;
+
+    child->parent       = NULL;
+    child->sibling_prev = NULL;
+    child->sibling_next = NULL;
 }
 
 // frees the tracking nodes only, the pages themselves go with the address space
@@ -83,71 +139,106 @@ static user_alloc_t *clone_user_alloc_list(const user_alloc_t *src) {
     return head;
 }
 
-static void queue_task(task_t *task) {
+void sched_queue_task_locked(task_t *task) {
     if (!task_list_head) {
         task_list_head = task;
-        task->next = task;
+        task->next     = task;
+        task->prev     = task;
     } else {
-        task_t *tail = task_list_head;
-        while (tail->next != task_list_head)
-            tail = tail->next;
-        tail->next = task;
-        task->next = task_list_head;
+        task_t *tail = task_list_head->prev;
+        tail->next           = task;
+        task->prev           = tail;
+        task->next           = task_list_head;
+        task_list_head->prev = task;
     }
+
+    task_t **bucket = &pid_hash[task->id % PID_HASH_SIZE];
+    task->pid_next  = *bucket;
+    *bucket         = task;
+
+    if (task->id != task->ppid)
+        child_link(sched_lookup_locked(task->ppid), task);
+
+    task_count++;
 
     if (task->state == TASK_READY)
         ready_enqueue(task);
 }
 
+// the reaper is done with it, after this the pid can go to someone else
+void sched_unlink_task_locked(task_t *task) {
+    if (task->next == task) {
+        task_list_head = NULL;
+    } else {
+        task->prev->next = task->next;
+        task->next->prev = task->prev;
+        if (task_list_head == task)
+            task_list_head = task->next;
+    }
+    task->next = task->prev = NULL;
+
+    for (task_t **p = &pid_hash[task->id % PID_HASH_SIZE]; *p; p = &(*p)->pid_next) {
+        if (*p == task) {
+            *p = task->pid_next;
+            break;
+        }
+    }
+
+    child_unlink(task);
+
+    // exit() hands them on already, this is for one that never got there
+    task_t *reaper = sched_lookup_locked(REAPER_PID);
+    while (task->children) {
+        task_t *child = task->children;
+        child_unlink(child);
+        child->ppid = REAPER_PID;
+        child_link(reaper != task ? reaper : NULL, child);
+    }
+
+    ready_dequeue(task);
+    task_count--;
+
+    // the reaper and the kernel task keep theirs
+    if (task->id > 1)
+        free_pid_locked(task->id);
+}
+
 task_t *sched_get_task(uint64_t pid) {
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
-
-    if (!task_list_head) {
-        spinlock_release(&sched_lock);
-        irq_restore(flags);
-        return NULL;
-    }
-
-    task_t *t = task_list_head;
-    do {
-        if (t->id == pid){
-            spinlock_release(&sched_lock);
-            irq_restore(flags);
-            return t;
-        }
-        t = t->next;
-    } while (t != task_list_head);
-
+    task_t *t = sched_lookup_locked(pid);
     spinlock_release(&sched_lock);
     irq_restore(flags);
-    return NULL;
+    return t;
 }
 
 /// @brief hand the children of a dying task to the reaper, the way linux gives orphans to init
 /// @param parent the task thats going away
 /// @return a child that had already exited and can be buried now, NULL once there are none left
 task_t *sched_reparent_children(task_t *parent) {
-    if (!parent || !task_list_head) return NULL;
+    if (!parent) return NULL;
 
     task_t *zombie = NULL;
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
 
-    task_t *t = task_list_head;
-    do {
-        if (t != parent && t->ppid == parent->id) {
-            t->ppid = REAPER_PID;
+    task_t *reaper = sched_lookup_locked(REAPER_PID);
+    if (reaper == parent)
+        reaper = NULL;
 
-            // nobody is left to wait for it. handed back one at a time because
-            // sched_mark_task_dead takes the lock we are holding
-            if (t->state == TASK_ZOMBIE) {
-                zombie = t;
-                break;
-            }
+    while (parent->children) {
+        task_t *t = parent->children;
+        child_unlink(t);
+        t->ppid = REAPER_PID;
+        child_link(reaper, t);
+
+        // nobody is left to wait for it. handed back one at a time because
+        // sched_mark_task_dead takes the lock we are holding
+        if (t->state == TASK_ZOMBIE) {
+            zombie = t;
+            break;
         }
-        t = t->next;
-    } while (t != task_list_head);
+    }
 
     spinlock_release(&sched_lock);
     irq_restore(flags);
@@ -185,6 +276,7 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     }
     task->state = TASK_READY;
     task->quantum_remaining = QUANTUM;
+    task->prio_base = parent ? parent->prio_base : PRIO_DEFAULT;
     task->page_map = cr3;
 
     task->kernel_stack = kmalloc(KERNEL_STACK_SIZE);
@@ -219,7 +311,7 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     // queue it last, the moment its on the list a tick can run it
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
-    queue_task(task);
+    sched_queue_task_locked(task);
     spinlock_release(&sched_lock);
     irq_restore(flags);
 
@@ -244,22 +336,7 @@ void itterate_each_task(task_itteration_fn fn, void *userdata) {
 }
 
 uint64_t get_task_count(void) {
-    if (!task_list_head) return 0;
-
-    uint64_t count = 0;
-    unsigned long flags = irq_push();
-    spinlock_acquire(&sched_lock);
-
-    task_t *start = task_list_head;
-    task_t *task = start;
-    do {
-        count++;
-        task = task->next;
-    } while (task != start);
-
-    spinlock_release(&sched_lock);
-    irq_restore(flags);
-    return count;
+    return task_count;
 }
 
 void sched_init_task_heap(task_t* task) {
@@ -306,6 +383,8 @@ task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
     child->sid = parent->sid ? parent->sid : parent->id;
     child->state = TASK_READY;
     child->quantum_remaining = QUANTUM;
+    child->prio_base = parent->prio_base;
+    child->prio_bonus = parent->prio_bonus;
     child->page_map = child_cr3;
     child->task_privilege = parent->task_privilege;
     child->wait_target_pid = 0;
@@ -366,7 +445,7 @@ task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
 
     unsigned long flags = irq_push();
     spinlock_acquire(&sched_lock);
-    queue_task(child);
+    sched_queue_task_locked(child);
     spinlock_release(&sched_lock);
     irq_restore(flags);
 

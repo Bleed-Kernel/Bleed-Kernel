@@ -21,9 +21,19 @@ task_t *task_list_head = NULL;
 task_t *dead_task_head = NULL;
 task_t *dead_task_tail = NULL;
 
-// fifo of tasks waiting for the cpu, O(1) at both ends
-task_t *ready_head     = NULL;
-task_t *ready_tail     = NULL;
+struct prio_array {
+    uint32_t bitmap;                // bit n is set while level n has someone in it
+    task_t  *head[PRIO_LEVELS];
+    task_t  *tail[PRIO_LEVELS];
+};
+
+// a task that used up its quantum goes to expired, the two swap once active runs dry.
+static prio_array_t  prio_arrays[2];
+static prio_array_t *active  = &prio_arrays[0];
+static prio_array_t *expired = &prio_arrays[1];
+
+// someone better than current_task got queued, the next tick hands the cpu over
+static uint8_t need_resched = 0;
 
 // when the current task was given the cpu
 static uint64_t switch_tsc = 0;
@@ -47,60 +57,87 @@ uint64_t sched_task_cpu_time(task_t *task) {
     return task->cpu_time + (rdtsc() - switch_tsc);
 }
 
-void ready_enqueue(task_t *task) {
-    if (!task || task->ready_queued || task == idle_task) return;   // already queued
-
-    task->ready_next = NULL;
-    if (ready_tail)
-        ready_tail->ready_next = task;
-    else
-        ready_head = task;
-
-    ready_tail         = task;
-    task->ready_queued = 1;
+static int task_prio(task_t *task) {
+    int prio = (int)task->prio_base - task->prio_bonus;
+    if (prio < 0)
+        return 0;
+    if (prio >= PRIO_LEVELS)
+        return PRIO_LEVELS - 1;
+    return prio;
 }
 
-// only for a task thats about to be freed. one that just blocks stays where it is and
-// ready_pop throws it out when it gets to the front, so blocking never walks the queue
-void ready_dequeue(task_t *task) {
-    if (!task || !task->ready_queued) return;
+void ready_enqueue(task_t *task) {
+    if (!task || task->ready_array || task == idle_task) return;   // already queued
 
-    task_t *prev = NULL;
-    task_t *cur  = ready_head;
-    while (cur && cur != task) {
-        prev = cur;
-        cur  = cur->ready_next;
+    prio_array_t *array = active;
+    if (!task->quantum_remaining) {
+        task->quantum_remaining = QUANTUM;
+        array = expired;
     }
-    if (!cur) return;
 
-    if (prev)
-        prev->ready_next = cur->ready_next;
+    int prio = task_prio(task);
+    task->ready_prev = array->tail[prio];
+    task->ready_next = NULL;
+    if (array->tail[prio])
+        array->tail[prio]->ready_next = task;
     else
-        ready_head = cur->ready_next;
+        array->head[prio] = task;
 
-    if (ready_tail == cur)
-        ready_tail = prev;
+    array->tail[prio]  = task;
+    array->bitmap     |= 1u << prio;
+    task->ready_array  = array;
+    task->ready_prio   = (uint8_t)prio;
 
-    task->ready_next   = NULL;
-    task->ready_queued = 0;
+    if (array == active && current_task &&
+        (current_task == idle_task || prio < task_prio(current_task)))
+        need_resched = 1;
+}
+
+void ready_dequeue(task_t *task) {
+    if (!task || !task->ready_array) return;
+
+    prio_array_t *array = task->ready_array;
+    int prio = task->ready_prio;
+
+    if (task->ready_prev)
+        task->ready_prev->ready_next = task->ready_next;
+    else
+        array->head[prio] = task->ready_next;
+
+    if (task->ready_next)
+        task->ready_next->ready_prev = task->ready_prev;
+    else
+        array->tail[prio] = task->ready_prev;
+
+    if (!array->head[prio])
+        array->bitmap &= ~(1u << prio);
+
+    task->ready_prev  = NULL;
+    task->ready_next  = NULL;
+    task->ready_array = NULL;
+}
+
+int sched_has_ready(void) {
+    return active->bitmap || expired->bitmap;
 }
 
 static task_t *ready_pop(void) {
-    while (ready_head) {
-        task_t *task = ready_head;
+    for (;;) {
+        if (!active->bitmap) {
+            prio_array_t *swap = active;
+            active  = expired;
+            expired = swap;
+        }
+        if (!active->bitmap)
+            return NULL;
 
-        ready_head = task->ready_next;
-        if (!ready_head)
-            ready_tail = NULL;
+        task_t *task = active->head[__builtin_ctz(active->bitmap)];
+        ready_dequeue(task);
 
-        task->ready_next   = NULL;
-        task->ready_queued = 0;
-
-        // blocked, stopped or died while it was waiting its turn
+        // stopped or died while it was waiting its turn
         if (task->state == TASK_READY)
             return task;
     }
-    return NULL;
 }
 
 void* sched_switch_task(task_t *next_task, void* old_context) {
@@ -110,14 +147,8 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
     current_task->cpu_time += now - switch_tsc;
     switch_tsc = now;
 
-    if (current_task->state == TASK_RUNNING)
-        current_task->state = TASK_READY;
-    if (current_task->state == TASK_READY)
-        ready_enqueue(current_task);       // back onto ready queue
-
     current_task = next_task;
     current_task->state = TASK_RUNNING;
-    current_task->quantum_remaining = QUANTUM;
 
     tss.rsp0 = ((uint64_t)current_task->kernel_stack + KERNEL_STACK_SIZE) & ~0xFULL;
     paging_switch_address_space(current_task->page_map);
@@ -129,18 +160,27 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
 }
 
 void* sched_next_context(void* old_context) {
+    task_t *prev = current_task;
+    need_resched = 0;
+
+    // back in line first, it might still be the best there is
+    if (prev->state == TASK_RUNNING)
+        prev->state = TASK_READY;
+    if (prev->state == TASK_READY)
+        ready_enqueue(prev);
+
     task_t *next_task = ready_pop();
 
-    // nothing else wants the cpu, carry on with what we have. the state is only touched if
-    // it was a plain yield, a zombie that got here must not come back to life as RUNNING
+    // nothing at all wants the cpu. a zombie that got here must not come back to life as RUNNING
     if (!next_task) {
-        int can_run = current_task->state == TASK_READY || current_task->state == TASK_RUNNING;
-        if (!can_run && idle_task && current_task != idle_task)
+        if (prev->state != TASK_READY && idle_task && prev != idle_task)
             return sched_switch_task(idle_task, old_context);
+        next_task = prev;
+    }
 
-        if (current_task->state == TASK_READY)
-            current_task->state = TASK_RUNNING;
-        current_task->quantum_remaining = QUANTUM;
+    if (next_task == prev) {
+        if (prev->state == TASK_READY)
+            prev->state = TASK_RUNNING;
         return old_context;
     }
 
@@ -151,9 +191,17 @@ cpu_context_t *sched_tick(cpu_context_t *context) {
     if (!current_task) return context;
 
     // only a running task gets to use up its quantum
-    if (current_task->state == TASK_RUNNING && current_task->quantum_remaining > 0) {
-        current_task->quantum_remaining--;
-        return context;
+    if (current_task->state == TASK_RUNNING) {
+        if (current_task->quantum_remaining)
+            current_task->quantum_remaining--;
+
+        // ran a whole turn without sleeping, it gets a little less keen
+        if (!current_task->quantum_remaining) {
+            if (current_task->prio_bonus > -PRIO_BONUS_MAX)
+                current_task->prio_bonus--;
+        } else if (!need_resched) {
+            return context;
+        }
     }
 
     return (cpu_context_t*)sched_next_context(context);
@@ -179,8 +227,7 @@ void sched_bootstrap(void *rsp) {
     kernel_task->state              = TASK_RUNNING;
     kernel_task->quantum_remaining  = QUANTUM;
     kernel_task->context            = (cpu_context_t *)rsp;
-    kernel_task->next               = kernel_task;
-    kernel_task->ready_next         = NULL;
+    kernel_task->prio_base          = PRIO_DEFAULT;
     kernel_task->task_privilege     = P_KERNEL;
     if (fpu_task_init(kernel_task) != 0)
         ke_panic(NULL, "Failed to allocate kernel task FPU state");
@@ -191,9 +238,9 @@ void sched_bootstrap(void *rsp) {
     if (!kernel_task->fd_table)
         ke_panic(NULL, "Failed to allocate kernel fd table");
 
-    current_task   = kernel_task;
-    task_list_head = kernel_task;
-    switch_tsc     = rdtsc();
+    current_task = kernel_task;
+    sched_queue_task_locked(kernel_task);
+    switch_tsc   = rdtsc();
 
     serial_printf(LOG_OK "Kernel Task Created, tid:0\n");
 }
@@ -216,12 +263,23 @@ void sched_yield(task_t *task) {
 void sched_idle(void) {
     asm volatile("cli");
     idle_task = current_task;
-    if (ready_head) {
+    if (sched_has_ready()) {
         sched_yield(current_task);
         asm volatile("sti");
         return;
     }
     asm volatile("sti; hlt");
+}
+
+void sched_wake_task(task_t *task) {
+    if (!task || task->state != TASK_BLOCKED) return;
+
+    task->prio_bonus += PRIO_WAKE_BONUS;
+    if (task->prio_bonus > PRIO_BONUS_MAX)
+        task->prio_bonus = PRIO_BONUS_MAX;
+
+    task->state = TASK_READY;
+    ready_enqueue(task);
 }
 
 void sched_block(task_t *task){

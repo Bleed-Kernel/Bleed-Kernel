@@ -29,7 +29,21 @@ static short poll_one(task_t *task, const pollfd_t *p) {
     return (short)(f->inode->ops->poll(f->inode) & (p->events | POLLERR | POLLHUP));
 }
 
-static long sys_poll_wait(task_t *current, pollfd_t *fds, uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms);
+// what to sleep on till this one might be ready, NULL if nothing ever changes it
+static wait_queue_t *poll_queue(task_t *task, const pollfd_t *p) {
+    if (p->fd == POLL_FD_IPC)
+        return &task->ipc_wait;
+    if (p->fd < 0 || p->fd >= MAX_FDS || !task->fd_table)
+        return NULL;
+
+    file_t *f = task->fd_table->fds[p->fd];
+    if (!f || !f->inode || !f->inode->ops || !f->inode->ops->wait_queue)
+        return NULL;
+    return f->inode->ops->wait_queue(f->inode);
+}
+
+static long sys_poll_wait(task_t *current, pollfd_t *fds, wait_entry_t *waits,
+                          uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms);
 
 /// @brief wait until one of fds is ready, a signal arrives or the timeout runs out
 long sys_poll(uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms) {
@@ -42,22 +56,30 @@ long sys_poll(uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms) {
         return -EFAULT;
 
     // most callers watch a handful, those stay on the stack
-    pollfd_t  few[POLL_STACK_FDS];
-    pollfd_t *fds   = few;
-    size_t    bytes = (size_t)nfds * sizeof(pollfd_t);
+    pollfd_t      few[POLL_STACK_FDS];
+    wait_entry_t  few_waits[POLL_STACK_FDS];
+    pollfd_t     *fds   = few;
+    wait_entry_t *waits = few_waits;
     if (nfds > POLL_STACK_FDS) {
-        fds = kmalloc(bytes);
-        if (!fds)
+        fds   = kmalloc((size_t)nfds * sizeof(pollfd_t));
+        waits = kmalloc((size_t)nfds * sizeof(wait_entry_t));
+        if (!fds || !waits) {
+            kfree(fds);
+            kfree(waits);
             return -ENOMEM;
+        }
     }
 
-    long ret = sys_poll_wait(current, fds, user_fds_ptr, nfds, timeout_ms);
-    if (fds != few)
+    long ret = sys_poll_wait(current, fds, waits, user_fds_ptr, nfds, timeout_ms);
+    if (fds != few) {
         kfree(fds);
+        kfree(waits);
+    }
     return ret;
 }
 
-static long sys_poll_wait(task_t *current, pollfd_t *fds, uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms) {
+static long sys_poll_wait(task_t *current, pollfd_t *fds, wait_entry_t *waits,
+                          uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms) {
     size_t bytes = (size_t)nfds * sizeof(pollfd_t);
     if (nfds && copy_from_user(current, fds, (void *)user_fds_ptr, bytes) != 0)
         return -EFAULT;
@@ -75,9 +97,14 @@ static long sys_poll_wait(task_t *current, pollfd_t *fds, uint64_t user_fds_ptr,
         unsigned long flags = irq_push();
 
         ready = 0;
+        size_t queues = 0;
         for (size_t i = 0; i < nfds; i++) {
             fds[i].revents = poll_one(current, &fds[i]);
             if (fds[i].revents) ready++;
+
+            wait_queue_t *queue = poll_queue(current, &fds[i]);
+            if (queue)
+                waits[queues++] = (wait_entry_t){ .queue = queue };
         }
 
         if (ready || timeout == 0 || (deadline && sched_deadline_passed(deadline))) {
@@ -91,7 +118,7 @@ static long sys_poll_wait(task_t *current, pollfd_t *fds, uint64_t user_fds_ptr,
             continue;
         }
 
-        sched_wait_event(deadline);
+        sched_wait_entries(waits, queues, deadline);
         irq_restore(flags);
     }
 

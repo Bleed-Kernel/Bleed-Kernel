@@ -172,7 +172,7 @@ void tty_process_input(tty_t *tty, char c) {
     spinlock_release(&tty->in_lock);
     irq_restore(irq);
 
-    sched_wake_event_waiters();
+    sched_wake_queue(&tty->wait);
 }
 
 typedef struct { task_t *picked; } tty_sig_pick_ctx_t;
@@ -293,7 +293,7 @@ long tty_inode_write(INode_t *inode, const void *in_buffer, size_t size, size_t 
 
     // whoever is showing it in a window sleeps in poll until theres something new
     if (tty->offscreen)
-        sched_wake_event_waiters();
+        sched_wake_queue(&tty->wait);
     return (long)size;
 }
 
@@ -729,7 +729,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
             if (cols != old_cols || rows != old_rows)
                 itterate_each_task(tty_send_winch, tty);
 
-            sched_wake_event_waiters();
+            sched_wake_queue(&tty->wait);
             return 0;
         }
 
@@ -862,7 +862,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
             irq_restore(irq);
 
             if (tty->offscreen)
-                sched_wake_event_waiters();
+                sched_wake_queue(&tty->wait);
 
             // copied out after the lock is gone, the copy can fault
             return tty_arg_out(arg, &view, sizeof(view));
@@ -916,11 +916,17 @@ static struct tty_ops tty0_ops = {
     .putchar = tty_fb_putchar,
 };
 
+static wait_queue_t *tty_wait_queue(INode_t *dev) {
+    tty_t *tty = dev->internal_data;
+    return tty ? &tty->wait : NULL;
+}
+
 struct INodeOps tty_inode_ops = {
-    .write = tty_inode_write,
-    .read  = tty_read,
-    .ioctl = tty_ioctl,
-    .poll  = tty_poll,
+    .write      = tty_inode_write,
+    .read       = tty_read,
+    .ioctl      = tty_ioctl,
+    .poll       = tty_poll,
+    .wait_queue = tty_wait_queue,
 };
 
 void tty_device_init(void) {

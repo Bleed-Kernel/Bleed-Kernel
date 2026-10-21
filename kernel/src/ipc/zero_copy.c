@@ -211,7 +211,7 @@ long ipc_send_pages(task_t *sender, uint64_t target_pid, uint64_t src_addr, uint
     spinlock_release(&ipc_lock);
     irq_restore(irq_flags);
 
-    sched_wake_event_waiters();
+    sched_wake_queue(&target->ipc_wait);
 
     return 0;
 }

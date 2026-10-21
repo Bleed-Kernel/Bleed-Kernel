@@ -6,15 +6,12 @@
 
 extern volatile uint64_t timer_ticks;
 
-#define EVENT_WAIT_ANY          1
-#define EVENT_WAIT_DEADLINE     2
-
 // reading the hpet on every tick costs more than everything else the tick does, so its only
 // looked at on this tick or later. UINT64_MAX means nobody is waiting on a timeout at all
 static uint64_t event_check_tick = UINT64_MAX;
 
-// tasks sitting in sched_wait_event, one that dies in there leaves it high which only costs 1 scan
-static volatile uint32_t event_any_waiters = 0;
+// everyone with a deadline, soonest first so the tick only ever looks at the front
+static task_t *deadline_head = NULL;
 
 // how many ticks to leave it for a wait with this much hpet time left. a tick is a
 // millisecond but they can run slow, half the wait is always early enough to look again
@@ -23,35 +20,73 @@ static uint64_t event_ticks_for(uint64_t hpet_left) {
     return ms / 2 ? ms / 2 : 1;
 }
 
-static void event_wake(task_t *task) {
-    if (!task->event_wait || task->state != TASK_BLOCKED) return;
-
-    task->state = TASK_READY;
-    ready_enqueue(task);
-}
-
-// a deadline only sleep isnt anyones business but the timers
-static void event_wake_any(task_t *task, void *userdata) {
-    (void)userdata;
-    if (task->event_wait == EVENT_WAIT_ANY)
-        event_wake(task);
-}
-
-typedef struct {
-    uint64_t now;       // the hpet counter
-    uint64_t soonest;   // least time left of the waits that havent run out
-} event_expiry_t;
-
-static void event_wake_expired(task_t *task, void *userdata) {
-    event_expiry_t *e = userdata;
-    if (!task->event_wait || !task->event_deadline) return;
-
-    if (e->now >= task->event_deadline) {
-        event_wake(task);
-        return;
+static void deadline_insert(task_t *task) {
+    task_t *prev = NULL;
+    task_t *cur  = deadline_head;
+    while (cur && cur->event_deadline <= task->event_deadline) {
+        prev = cur;
+        cur  = cur->deadline_next;
     }
-    if (task->event_deadline - e->now < e->soonest)
-        e->soonest = task->event_deadline - e->now;
+
+    task->deadline_prev = prev;
+    task->deadline_next = cur;
+    if (prev)
+        prev->deadline_next = task;
+    else
+        deadline_head = task;
+    if (cur)
+        cur->deadline_prev = task;
+
+    task->deadline_queued = 1;
+}
+
+static void deadline_remove(task_t *task) {
+    if (!task->deadline_queued) return;
+
+    if (task->deadline_prev)
+        task->deadline_prev->deadline_next = task->deadline_next;
+    else
+        deadline_head = task->deadline_next;
+    if (task->deadline_next)
+        task->deadline_next->deadline_prev = task->deadline_prev;
+
+    task->deadline_prev   = NULL;
+    task->deadline_next   = NULL;
+    task->deadline_queued = 0;
+}
+
+static void wait_entry_add(wait_entry_t *entry, task_t *task) {
+    entry->task = task;
+    entry->prev = NULL;
+    entry->next = entry->queue->head;
+    if (entry->next)
+        entry->next->prev = entry;
+    entry->queue->head = entry;
+}
+
+static void wait_entry_remove(wait_entry_t *entry) {
+    if (!entry->queue) return;
+
+    if (entry->prev)
+        entry->prev->next = entry->next;
+    else
+        entry->queue->head = entry->next;
+    if (entry->next)
+        entry->next->prev = entry->prev;
+
+    entry->prev  = NULL;
+    entry->next  = NULL;
+    entry->queue = NULL;
+}
+
+void sched_wait_cleanup(task_t *task) {
+    for (size_t i = 0; i < task->wait_entry_count; i++)
+        wait_entry_remove(&task->wait_entries[i]);
+
+    task->wait_entries     = NULL;
+    task->wait_entry_count = 0;
+    task->event_deadline   = 0;
+    deadline_remove(task);
 }
 
 /// @brief the deadline for a wait of ms starting now, in hpet counter units
@@ -64,56 +99,80 @@ int sched_deadline_passed(uint64_t deadline) {
     return hpet_read_counter() >= deadline;
 }
 
-static void event_block(uint64_t deadline, uint8_t mode) {
+void sched_wait_entries(wait_entry_t *entries, size_t count, uint64_t deadline) {
     task_t *task = current_task;
     if (!task) return;
 
-    // make sure the tick looks in time for this one
+    for (size_t i = 0; i < count; i++)
+        wait_entry_add(&entries[i], task);
+    task->wait_entries     = entries;
+    task->wait_entry_count = count;
+
     if (deadline && femtosecondsPerTick) {
+        task->event_deadline = deadline;
+        deadline_insert(task);
+
+        // make sure the tick looks in time for this one
         uint64_t now  = hpet_read_counter();
         uint64_t tick = timer_ticks + event_ticks_for(deadline > now ? deadline - now : 0);
         if (tick < event_check_tick)
             event_check_tick = tick;
     }
 
-    task->event_deadline = deadline;
-    task->event_wait     = mode;
-    task->state          = TASK_BLOCKED;
-    if (mode == EVENT_WAIT_ANY)
-        event_any_waiters++;
+    // a signal could have put it back in line while it was still running
+    ready_dequeue(task);
+    task->state = TASK_BLOCKED;
     asm volatile ("int $" SCHED_YIELD_VECTOR_STR);
 
-    if (mode == EVENT_WAIT_ANY)
-        event_any_waiters--;
-    task->event_wait     = 0;
-    task->event_deadline = 0;
+    sched_wait_cleanup(task);
+
+    if (task->state == TASK_BLOCKED)
+        task->state = TASK_RUNNING;
 }
 
-/// @brief block the current task until an event, a signal or the deadline
-/// @param deadline from sched_deadline_ms, 0 waits forever
-void sched_wait_event(uint64_t deadline) {
-    event_block(deadline, EVENT_WAIT_ANY);
+void sched_wait_queue(wait_queue_t *queue, uint64_t deadline) {
+    wait_entry_t entry = { .queue = queue };
+    sched_wait_entries(&entry, queue ? 1 : 0, deadline);
 }
 
-/// @brief block the current task until the deadline or a signal, events dont wake it
+/// @brief block the current task until the deadline or a signal
 void sched_sleep_until(uint64_t deadline) {
     if (!deadline) return;
-    event_block(deadline, EVENT_WAIT_DEADLINE);
+    sched_wait_entries(NULL, 0, deadline);
 }
 
-/// @brief something happened, let every task in sched_wait_event look again
-void sched_wake_event_waiters(void) {
-    if (!event_any_waiters)
-        return;
-    itterate_each_task(event_wake_any, NULL);
+void sched_wake_queue(wait_queue_t *queue) {
+    if (!queue) return;
+
+    unsigned long flags = irq_push();
+    for (wait_entry_t *entry = queue->head; entry; entry = entry->next)
+        sched_wake_task(entry->task);
+    irq_restore(flags);
+}
+
+void sched_wait_queue_destroy(wait_queue_t *queue) {
+    if (!queue) return;
+
+    unsigned long flags = irq_push();
+    while (queue->head) {
+        wait_entry_t *entry = queue->head;
+        sched_wake_task(entry->task);
+        wait_entry_remove(entry);
+    }
+    irq_restore(flags);
 }
 
 // called off the timer, wakes the waits that ran out of time
 void sched_event_tick(void) {
     if (timer_ticks < event_check_tick) return;
 
-    event_expiry_t e = { .now = hpet_read_counter(), .soonest = UINT64_MAX };
-    itterate_each_task(event_wake_expired, &e);
+    uint64_t now = hpet_read_counter();
+    while (deadline_head && now >= deadline_head->event_deadline) {
+        task_t *task = deadline_head;
+        deadline_remove(task);
+        sched_wake_task(task);
+    }
 
-    event_check_tick = e.soonest == UINT64_MAX ? UINT64_MAX : timer_ticks + event_ticks_for(e.soonest);
+    event_check_tick = deadline_head ? timer_ticks + event_ticks_for(deadline_head->event_deadline - now)
+                                     : UINT64_MAX;
 }

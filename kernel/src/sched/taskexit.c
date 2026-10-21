@@ -42,8 +42,7 @@ void exit(void) {
     while (w) {
         task_t *next = w->wait_next;
         w->wait_next = NULL;
-        w->state = TASK_READY;
-        ready_enqueue(w);
+        sched_wake_task(w);
         w = next;
     }
 

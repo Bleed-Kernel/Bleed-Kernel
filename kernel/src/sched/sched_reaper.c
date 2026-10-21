@@ -11,40 +11,6 @@
 
 static task_t *reaper_task = NULL;
 
-static void unlink_from_list(task_t **head, task_t *task) {
-    if (!*head || !task)
-        return;
-
-    if ((*head)->next == *head && *head == task) {
-        *head = NULL;
-        return;
-    }
-
-    task_t *cur = *head;
-    task_t *prev = NULL;
-
-    do {
-        if (cur == task)
-            break;
-        prev = cur;
-        cur  = cur->next;
-    } while (cur != *head);
-
-    if (cur != task)
-        return;
-
-    if (cur == *head) {
-        task_t *tail = *head;
-        while (tail->next != *head)
-            tail = tail->next;
-        *head = cur->next;
-        tail->next = *head;
-        return;
-    }
-
-    prev->next = cur->next;
-}
-
 void sched_mark_task_dead(task_t *task) {
     if (!task){
         kprintf(LOG_ERROR "Nothing Happend, This task does not exist\n");
@@ -64,6 +30,7 @@ void sched_mark_task_dead(task_t *task) {
 
     task->state = TASK_DEAD;
     task->dead_next = NULL;
+    ready_dequeue(task);
 
     __typeof__(task->current_directory) cwd = task->current_directory;
     task->current_directory = NULL;
@@ -76,10 +43,7 @@ void sched_mark_task_dead(task_t *task) {
         dead_task_tail = task;
     }
 
-    if (reaper_task && reaper_task->state == TASK_BLOCKED) {
-        reaper_task->state = TASK_READY;
-        ready_enqueue(reaper_task);
-    }
+    sched_wake_task(reaper_task);
 
     spinlock_release(&sched_lock);
     irq_restore(flags);
@@ -89,6 +53,7 @@ void sched_mark_task_dead(task_t *task) {
 
 void scheduler_reap(void) {
     reaper_task = get_current_task();
+    reaper_task->prio_base = PRIO_REAPER;
 
     for (;;) {
         int reaped = 0;
@@ -122,14 +87,8 @@ void scheduler_reap(void) {
                 continue;
             }
 
-            if (task_list_head)
-                unlink_from_list(&task_list_head, task);
-
-            ready_dequeue(task);
-
-            uint64_t task_id = task->id;
-            if (task_id > 1 && task_id < MAX_PIDS)
-                pid_list[task_id] = 0;
+            sched_wait_cleanup(task);
+            sched_unlink_task_locked(task);
 
             spinlock_release(&sched_lock);
             irq_restore(flags);

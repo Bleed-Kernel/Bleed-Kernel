@@ -22,6 +22,7 @@ static uint32_t      trackpad_gsi = 0;
 static bool          irq_level    = false;
 static bool          irq_low      = false;
 static volatile bool irq_pending  = false;
+static wait_queue_t  trackpad_queue;
 
 // PNP0C50 is the generic one, an ELAN id without it is their own protocol.
 // plenty of elan pads answer to both so the other one is worth a go if the first says no
@@ -91,7 +92,7 @@ void i2c_trackpad_interrupt(void) {
         ioapic_mask_gsi(trackpad_gsi);
 
     irq_pending = true;
-    sched_wake_event_waiters();
+    sched_wake_queue(&trackpad_queue);
 }
 
 // also what lets a level interrupt back in after the read
@@ -116,9 +117,8 @@ static bool trackpad_wait(uint32_t ms) {
     uint64_t      deadline = sched_deadline_ms(ms);
     unsigned long flags    = irq_push();
 
-    // every mouse event wakes the event waiters, us included
     while (!irq_pending && !sched_deadline_passed(deadline))
-        sched_wait_event(deadline);
+        sched_wait_queue(&trackpad_queue, deadline);
 
     bool fired  = irq_pending;
     irq_pending = false;

@@ -92,7 +92,9 @@ int signal_send(task_t *task, int sig) {
         task->sig_pending &= ~sig_bit(SIGCONT);
 
     task->sig_pending |= sig_bit(sig);
-    if (task->state == TASK_BLOCKED || task->state == TASK_STOPPED || sig == SIGKILL) {
+    if (task->state == TASK_BLOCKED) {
+        sched_wake_task(task);
+    } else if (task->state == TASK_STOPPED || sig == SIGKILL) {
         task->state = TASK_READY;
         ready_enqueue(task);
     }

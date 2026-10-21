@@ -6,14 +6,21 @@
 #include <mm/userspace/mmap.h>
 #include <fs/vfs.h>
 #include <user/signal.h>
+#include <sched/wait_queue.h>
 
 #define KERNEL_STACK_SIZE   8192
 
 #define USER_STACK_TOP      0x00007ffffffff000ULL
 #define USER_STACK_SIZE     (8 * 1024 * 1024)
 
-#define MAX_TASKS           64
 #define QUANTUM             10
+
+// 0 is the highest
+#define PRIO_LEVELS         32
+#define PRIO_DEFAULT        16
+#define PRIO_REAPER         24
+#define PRIO_BONUS_MAX      4
+#define PRIO_WAKE_BONUS     2
 
 // orphans are handed to the reaper, the same job init has on linux
 #define REAPER_PID          1
@@ -23,6 +30,7 @@
 #define SCHED_YIELD_VECTOR_STR  "0x81"
 
 typedef struct user_heap user_heap_t;
+typedef struct prio_array prio_array_t;
 typedef struct ipc_message ipc_message_t;
 
 typedef struct cpu_context {
@@ -82,15 +90,31 @@ typedef struct task {
 
     struct task     *wait_queue;
     struct task     *wait_next;
-    struct task     *ready_next;
-    uint8_t         ready_queued;
     uint64_t        wait_target_pid;
 
-    uint8_t         event_wait;
+    uint8_t         prio_base;
+    int8_t          prio_bonus;     // up for sleeping, down for using whole quanta
+    uint8_t         ready_prio;     // the level its queued at
+    prio_array_t    *ready_array;   // NULL when its not queued
+    struct task     *ready_prev;
+    struct task     *ready_next;
+
+    wait_entry_t    *wait_entries;  // what its sleeping on, only set while it is
+    size_t          wait_entry_count;
     uint64_t        event_deadline; // hpet count to give up at, 0 = no timeout
+    uint8_t         deadline_queued;
+    struct task     *deadline_prev;
+    struct task     *deadline_next;
 
     struct task     *next;
+    struct task     *prev;
     struct task     *dead_next;
+    struct task     *pid_next;
+
+    struct task     *parent;
+    struct task     *children;
+    struct task     *sibling_prev;
+    struct task     *sibling_next;
 
     sigset_t        sig_pending;
     sigset_t        sig_blocked;
@@ -108,6 +132,7 @@ typedef struct task {
 
     ipc_message_t   *ipc_head;
     ipc_message_t   *ipc_tail;
+    wait_queue_t    ipc_wait;
 } task_t;
 
 typedef void (*task_itteration_fn)(task_t *task, void *userdata);
@@ -126,14 +151,13 @@ task_t *get_current_task(void);
 void sched_yield(task_t *task);
 void sched_block(task_t *task);
 
+// a BLOCKED task can run again, and gets a bump for having slept
+void sched_wake_task(task_t *task);
+
 // the kernel tasks loop once boot is done, runs only when nothing else can
 void sched_idle(void);
 
-// sleep until sched_wake_event_waiters, a signal or the deadline. interrupts must be off
-void sched_wait_event(uint64_t deadline);
-void sched_wake_event_waiters(void);
-
-// sched_wait_event that only the deadline or a signal ends
+// sleep till the deadline or a signal. interrupts must be off
 void sched_sleep_until(uint64_t deadline);
 void sched_event_tick(void);
 uint64_t sched_deadline_ms(uint64_t ms);

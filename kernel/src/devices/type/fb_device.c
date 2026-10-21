@@ -4,6 +4,7 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <drivers/framebuffer/blit.h>
 #include <devices/type/fb_device.h>
+#include <devices/type/kbd_device.h>
 #include <devices/type/tty_device.h>
 #include <sched/scheduler.h>
 #include <stdio.h>
@@ -76,7 +77,7 @@ static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
             return -EPERM;
         fb_owner_pid = 0;
         if (!fb_hold_pid) tty_set_graphics(0);
-        sched_wake_event_waiters();
+        kbd_device_wake();
         return 0;
     }
 
@@ -120,7 +121,7 @@ void fb_device_task_exit(task_t *task) {
     if (fb_owner_pid == task->id) fb_owner_pid = 0;
     if (fb_hold_pid == task->id)  fb_hold_pid  = 0;
     if (!fb_owner_pid && !fb_hold_pid) tty_set_graphics(0);
-    sched_wake_event_waiters();
+    kbd_device_wake();
 }
 
 uint64_t fb_device_screen_pid(void) {

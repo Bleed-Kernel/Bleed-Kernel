@@ -45,9 +45,15 @@ static int mouse_poll(INode_t *inode) {
     return mouse->head != mouse->tail ? POLLIN : 0;
 }
 
+static wait_queue_t *mouse_wait_queue(INode_t *inode) {
+    mouse_device_t *mouse = inode->internal_data;
+    return mouse ? &mouse->wait : NULL;
+}
+
 static struct INodeOps mouse_inode_ops = {
     .read = mouse_read,
     .poll = mouse_poll,
+    .wait_queue = mouse_wait_queue,
 };
 
 static void mouse_listener(const mouse_event_t *ev) {
@@ -69,7 +75,7 @@ static void mouse_listener(const mouse_event_t *ev) {
     spinlock_release(&mouse_device->lock);
     irq_restore(irq);
 
-    sched_wake_event_waiters();
+    sched_wake_queue(&mouse_device->wait);
 }
 
 void mouse_device_init(void) {

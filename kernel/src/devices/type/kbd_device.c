@@ -63,7 +63,7 @@ static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
         uint64_t screen = fb_device_screen_pid();
         if (screen && screen != current->id) {
             spinlock_release(&kbd->lock);
-            sched_wait_event(sched_deadline_ms(KBD_BACKGROUND_SLEEP_MS));
+            sched_wait_queue(&kbd->wait, sched_deadline_ms(KBD_BACKGROUND_SLEEP_MS));
             irq_restore(irq);
             return (kbd->flags & TTY_NONBLOCK) ? -EAGAIN : 0;
         }
@@ -188,10 +188,16 @@ static int kbd_poll(INode_t *inode) {
     return kbd->head != kbd->tail ? POLLIN : 0;
 }
 
+static wait_queue_t *kbd_wait_queue(INode_t *inode) {
+    kbd_device_t *kbd = inode->internal_data;
+    return kbd ? &kbd->wait : NULL;
+}
+
 static struct INodeOps kbd_inode_ops = {
     .read = kbd_read,
     .ioctl = kbd_ioctl,
     .poll = kbd_poll,
+    .wait_queue = kbd_wait_queue,
 };
 
 static void kbd_listener(const keyboard_event_t *ev) {
@@ -213,7 +219,12 @@ static void kbd_listener(const keyboard_event_t *ev) {
     spinlock_release(&keyboard_device->lock);
     irq_restore(irq);
 
-    sched_wake_event_waiters();
+    sched_wake_queue(&keyboard_device->wait);
+}
+
+void kbd_device_wake(void) {
+    if (keyboard_device)
+        sched_wake_queue(&keyboard_device->wait);
 }
 
 void kbd_device_init(void) {

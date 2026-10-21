@@ -99,7 +99,7 @@ static bool dw_wait(uint64_t base, uint32_t reg, uint32_t mask,
 static void dw_sleep(void) {
     uint64_t      deadline = sched_deadline_ms(1);
     unsigned long flags    = irq_push();
-    sched_wait_event(deadline);
+    sched_sleep_until(deadline);
     irq_restore(flags);
 }
 
