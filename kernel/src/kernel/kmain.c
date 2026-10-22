@@ -47,6 +47,7 @@
 #include <drivers/ide/ide.h>
 #include <drivers/ahci/ahci.h>
 #include <drivers/nvme/nvme.h>
+#include <drivers/ac97/ac97.h>
 #include <devices/type/blk_device.h>
 
 #include <sched/scheduler.h>
@@ -226,6 +227,9 @@ void init_devices(){
 
     if (serial_tty_init() == 0)
         BLOG_OK("serial terminal Ready");
+
+    BLOG_INFO("Enumerating AC97 Controller");
+    ac97_init();
 
     BLOG_INFO("Starting power Device");
     cros_ec_init();

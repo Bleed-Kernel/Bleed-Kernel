@@ -161,7 +161,7 @@ userprogs:
 		repo=$${entry%% *}; \
 		name=$${entry##* }; \
 		dir=$(USER_BIN_DIR)/$$name; \
-		local_dir=""; blibc_arg=""; crime_arg=""; \
+		local_dir=""; blibc_arg=""; crime_arg=""; audio_arg=""; \
 		if [ -n "$(USERPROG_SRC)" ]; then \
 			local_dir=$$(find "$(USERPROG_SRC)" -maxdepth 1 -type d -iname "$${repo##*/}" | head -n 1); \
 			if [ -d "$(USERPROG_SRC)/blibc" ]; then \
@@ -169,6 +169,9 @@ userprogs:
 			fi; \
 			if [ -d "$(USERPROG_SRC)/Crime-Scene" ]; then \
 				crime_arg="CRIME_DIR=$$(cd "$(USERPROG_SRC)/Crime-Scene" && pwd)"; \
+			fi; \
+			if [ -d "$(USERPROG_SRC)/libaudio" ]; then \
+				audio_arg="AUDIO_DIR=$$(cd "$(USERPROG_SRC)/libaudio" && pwd)"; \
 			fi; \
 		fi; \
 		if [ -n "$$local_dir" ]; then \
@@ -184,7 +187,7 @@ userprogs:
 		echo "[USER] Preparing blibc for $$name"; \
 		$(MAKE) -s -C "$$dir" blibc $(USERPROG_TOOLCHAIN) $$blibc_arg; \
 		echo "[USER] Building $$name"; \
-		$(MAKE) -s -C "$$dir" $(USERPROG_TOOLCHAIN) $$blibc_arg $$crime_arg; \
+		$(MAKE) -s -C "$$dir" $(USERPROG_TOOLCHAIN) $$blibc_arg $$crime_arg $$audio_arg; \
 		if [ -f "$$dir/bin/$$name" ]; then \
 			COPYFILE_DISABLE=1 cp "$$dir/bin/$$name" $(INITRD_BIN)/$$name; \
 		else \
@@ -241,6 +244,13 @@ repack: limine/limine $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE)
 # homebrew qemu has no sdl, so only use it on mac if the qemu on PATH was built with it
 QEMU_MAC_DISPLAY := $(if $(shell qemu-system-x86_64 -display help 2>/dev/null | grep -x sdl),sdl,cocoa)
 
+ifeq ($(UNAME_S),Darwin)
+QEMU_AUDIODEV ?= coreaudio
+else
+QEMU_AUDIODEV ?= none
+endif
+QEMU_AUDIO := -audiodev $(QEMU_AUDIODEV),id=snd0 -device AC97,audiodev=snd0
+
 ifeq ($(UNAME_S)$(UNAME_M),Darwinarm64)
 QEMU_HOST := -accel tcg,thread=multi,tb-size=1024 -cpu max -display $(QEMU_MAC_DISPLAY)
 else
@@ -260,6 +270,7 @@ define run_qemu
 		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
+		$(QEMU_AUDIO) \
 		$(1)
 endef
 
@@ -303,7 +314,8 @@ run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
 		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
-		-device nvme,serial=bleed-nvme-1,drive=nvm0
+		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
+		$(QEMU_AUDIO)
 
 #apple silicon emulation sucks, if you are getting performance issues, please test it on an x86_64 machine before submitting an issue!
 #SMAP and SMEP are known to be funny on mac, it may not emulate it at all, just be careful but bleed should handle it.
@@ -323,7 +335,8 @@ run-mac: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
 		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
-		-device nvme,serial=bleed-nvme-1,drive=nvm0
+		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
+		$(QEMU_AUDIO)
 
 define create_ext2_disk
     @echo "[DISK] Creating $(1) ($(2))"

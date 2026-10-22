@@ -7,6 +7,7 @@
 #include <ipc/shm.h>
 #include <devices/type/fb_device.h>
 #include <devices/type/tty_device.h>
+#include <devices/type/audio_device.h>
 
 #include "priv_scheduler.h"
 
@@ -18,6 +19,7 @@ void exit(void) {
     // done here and not in the reaper, the screen should come back the moment its owner is gone
     fb_device_task_exit(current_task);
     tty_task_exit(current_task);
+    audio_device_task_exit(current_task);
     shm_task_cleanup(current_task);
 
     user_alloc_t *alloc = current_task->alloc_list;

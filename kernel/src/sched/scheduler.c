@@ -32,6 +32,10 @@ static prio_array_t  prio_arrays[2];
 static prio_array_t *active  = &prio_arrays[0];
 static prio_array_t *expired = &prio_arrays[1];
 
+// when expired last went from empty to not
+static uint64_t expired_since = 0;
+extern volatile uint64_t timer_ticks;
+
 // someone better than current_task got queued, the next tick hands the cpu over
 static uint8_t need_resched = 0;
 
@@ -73,6 +77,8 @@ void ready_enqueue(task_t *task) {
     if (!task->quantum_remaining) {
         task->quantum_remaining = QUANTUM;
         array = expired;
+        if (!expired->bitmap)
+            expired_since = timer_ticks;
     }
 
     int prio = task_prio(task);
@@ -123,10 +129,12 @@ int sched_has_ready(void) {
 
 static task_t *ready_pop(void) {
     for (;;) {
-        if (!active->bitmap) {
+        int starving = expired->bitmap && timer_ticks - expired_since >= STARVE_TICKS;
+        if (!active->bitmap || starving) {
             prio_array_t *swap = active;
             active  = expired;
             expired = swap;
+            expired_since = timer_ticks;
         }
         if (!active->bitmap)
             return NULL;

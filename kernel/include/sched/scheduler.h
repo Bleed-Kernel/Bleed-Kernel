@@ -14,11 +14,13 @@
 #define USER_STACK_SIZE     (8 * 1024 * 1024)
 
 #define QUANTUM             10
+#define STARVE_TICKS        (QUANTUM * 2)   // longest anything sits in expired before the arrays swap anyway
 
 // 0 is the highest
 #define PRIO_LEVELS         32
 #define PRIO_DEFAULT        16
 #define PRIO_REAPER         24
+#define PRIO_AUDIO          8
 #define PRIO_BONUS_MAX      4
 #define PRIO_WAKE_BONUS     2
 
