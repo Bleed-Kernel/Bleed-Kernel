@@ -89,10 +89,14 @@ USER_REPOS := \
 	"https://github.com/Bleed-Kernel/Crime-Scene crime-scene" \
 	"https://github.com/Bleed-Kernel/libuikit uikit-demo" \
 	"https://github.com/Bleed-Kernel/Bleed-About about" \
+	"https://github.com/Bleed-Kernel/Bleed-Cabinet cabinet" \
+	"https://github.com/Bleed-Kernel/Bleed-Exhibit exhibit" \
+	"https://github.com/Bleed-Kernel/Bleed-Playback playback" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils cat" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils echo" \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils write" \
 	"https://github.com/Bleed-Kernel/Bleed-Coreutils ioctl" \
+	"https://github.com/Bleed-Kernel/Bleed-TCC tcc" \
 
 USER_BIN_DIR := external/
 INITRD_BIN := initrd/bin
@@ -153,6 +157,33 @@ limine/limine:
 	tar -xzf limine/limine-binary.tar.gz -C limine --strip-components=1
 	rm -f limine/limine-binary.tar.gz
 
+# whats in initrd/lib and initrd/include isnt kept here, the programs that need it
+# (tcc, for its headers and libc) put it there with an `initrd` make target
+.PHONY: initrd-files
+initrd-files:
+	@if [ -d initrd/lib ] && [ -d initrd/include ]; then exit 0; fi; \
+	set -e; blibc_arg=""; \
+	if [ -n "$(USERPROG_SRC)" ] && [ -d "$(USERPROG_SRC)/blibc" ]; then \
+		blibc_arg="BLIBC_DIR=$$(cd "$(USERPROG_SRC)/blibc" && pwd)"; \
+	fi; \
+	for entry in $(USER_REPOS); do \
+		repo=$${entry%% *}; \
+		name=$${entry##* }; \
+		dir=""; \
+		if [ -n "$(USERPROG_SRC)" ]; then \
+			dir=$$(find "$(USERPROG_SRC)" -maxdepth 1 -type d -iname "$${repo##*/}" | head -n 1); \
+		fi; \
+		[ -n "$$dir" ] || dir=$(USER_BIN_DIR)/$$name; \
+		if [ ! -d "$$dir" ]; then \
+			case "$$repo" in *Bleed-TCC) ;; *) continue;; esac; \
+			echo "[USER] Cloning $$name for its initrd files"; \
+			git clone "$$repo" "$$dir"; \
+		fi; \
+		grep -q '^initrd:' "$$dir/Makefile" 2>/dev/null || continue; \
+		echo "[USER] initrd/lib or initrd/include is missing, getting $$name's files"; \
+		$(MAKE) -s -C "$$dir" initrd INITRD=$(abspath initrd) $(USERPROG_TOOLCHAIN) $$blibc_arg; \
+	done
+
 .PHONY: userprogs
 userprogs:
 	@mkdir -p $(USER_BIN_DIR)
@@ -194,6 +225,10 @@ userprogs:
 			echo "ERROR: $$name binary not found"; \
 			exit 1; \
 		fi; \
+		if grep -q '^initrd:' "$$dir/Makefile"; then \
+			echo "[USER] Copying $$name's files into the initrd"; \
+			$(MAKE) -s -C "$$dir" initrd INITRD=$(abspath initrd) $(USERPROG_TOOLCHAIN) $$blibc_arg; \
+		fi; \
 	done
 
 define build_initrd_tar
@@ -229,7 +264,7 @@ define build_iso
 endef
 
 .PHONY: initrd
-initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs
+initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs initrd-files
 	$(build_initrd_tar)
 
 $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
@@ -237,7 +272,7 @@ $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd
 
 # without cloning/pulling/building the user programs.
 .PHONY: repack
-repack: limine/limine $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE)
+repack: limine/limine $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) initrd-files
 	$(build_initrd_tar)
 	$(build_iso)
 
@@ -245,7 +280,9 @@ repack: limine/limine $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE)
 QEMU_MAC_DISPLAY := $(if $(shell qemu-system-x86_64 -display help 2>/dev/null | grep -x sdl),sdl,cocoa)
 
 ifeq ($(UNAME_S),Darwin)
-QEMU_AUDIODEV ?= coreaudio
+# coreaudio only keeps 4 buffers of ~11ms by default, less than qemu stalls for when the
+# window is busy (moving the mouse), so it ran dry and stuttered. 10 is ~116ms
+QEMU_AUDIODEV ?= coreaudio,out.buffer-count=10
 else
 QEMU_AUDIODEV ?= none
 endif
@@ -421,6 +458,7 @@ FORCE:
 
 distclean:
 	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+	rm -rf initrd/lib initrd/include
 	rm -f $(PROC_VERSION_FILE)
 	rm -f $(KERNEL_SYM)
 	@done_dirs=""; for entry in $(USER_REPOS); do \

@@ -13,34 +13,6 @@
 
 static audio_device_t *audio_dev;
 
-// the window a writer is allowed into: never the period the hardware is on
-static uint64_t audio_window_start(audio_device_t *dev) {
-    return (dev->played + (dev->running ? 1 : 0)) * dev->period_bytes;
-}
-
-static uint64_t audio_window_end(audio_device_t *dev) {
-    return (dev->played + dev->periods) * dev->period_bytes;
-}
-
-static uint64_t audio_writable(audio_device_t *dev) {
-    uint64_t end = audio_window_end(dev);
-    return dev->write_pos < end ? end - dev->write_pos : 0;
-}
-
-// lock held
-static void audio_reset(audio_device_t *dev) {
-    memset(dev->ring, 0, dev->ring_bytes);
-    dev->running   = false;
-    dev->played    = 0;
-    dev->write_pos = 0;
-}
-
-static void audio_stop_locked(audio_device_t *dev) {
-    if (dev->running)
-        dev->driver->stop(dev->priv);
-    audio_reset(dev);
-}
-
 static void audio_lock(audio_device_t *dev, unsigned long *flags) {
     *flags = irq_push();
     spinlock_acquire(&dev->lock);
@@ -49,6 +21,122 @@ static void audio_lock(audio_device_t *dev, unsigned long *flags) {
 static void audio_unlock(audio_device_t *dev, unsigned long flags) {
     spinlock_release(&dev->lock);
     irq_restore(flags);
+}
+
+// streams
+
+// lock held
+static audio_stream_t *stream_of(audio_device_t *dev, uint64_t pid) {
+    for (int i = 0; i < AUDIO_STREAMS; i++) {
+        audio_stream_t *s = &dev->streams[i];
+        if (s->used && s->pid == pid)
+            return s;
+    }
+    return NULL;
+}
+
+// lock held
+static audio_stream_t *stream_new(audio_device_t *dev, task_t *task) {
+    for (int i = 0; i < AUDIO_STREAMS; i++) {
+        audio_stream_t *s = &dev->streams[i];
+        if (s->used)
+            continue;
+
+        paddr_t ring = pmm_alloc_pages(dev->ring_bytes / PAGE_SIZE);
+        if (!ring)
+            return NULL;
+
+        memset(s, 0, sizeof(*s));
+        s->used      = true;
+        s->pid       = task->id;
+        s->ring_phys = ring;
+        s->ring      = paddr_to_vaddr(ring);
+
+        // whoever is making noise gets in ahead of whatever isnt
+        s->prio = task->prio_base;
+        if (task->prio_base > PRIO_AUDIO)
+            task->prio_base = PRIO_AUDIO;
+        return s;
+    }
+    return NULL;
+}
+
+// lock held. what it already wrote is in the cards ring by now and still plays
+static void stream_free(audio_device_t *dev, audio_stream_t *s) {
+    pmm_free_pages(s->ring_phys, dev->ring_bytes / PAGE_SIZE);
+    memset(s, 0, sizeof(*s));
+}
+
+// a running stream can write from the period
+static uint64_t stream_window_start(audio_device_t *dev, audio_stream_t *s) {
+    if (!s->running)
+        return 0;
+    uint64_t next = (dev->played + 1) * dev->period_bytes;
+    return next > s->origin ? next - s->origin : 0;
+}
+
+static uint64_t stream_window_end(audio_device_t *dev, audio_stream_t *s) {
+    if (!s->running)
+        return dev->ring_bytes - (AUDIO_JOIN_AHEAD + 1) * dev->period_bytes;
+    return (dev->played + dev->periods) * dev->period_bytes - s->origin;
+}
+
+static uint64_t stream_writable(audio_device_t *dev, audio_stream_t *s) {
+    uint64_t end = stream_window_end(dev, s);
+    return s->write_pos < end ? end - s->write_pos : 0;
+}
+
+// mixing
+
+static int16_t clip16(int32_t v) {
+    if (v > 32767)  return 32767;
+    if (v < -32768) return -32768;
+    return (int16_t)v;
+}
+
+// lock held. bytes from..to of a streams own positions added into the cards ring
+static void stream_mix(audio_device_t *dev, audio_stream_t *s, uint64_t from, uint64_t to) {
+    from -= from % sizeof(int16_t);
+    for (uint64_t at = from; at + sizeof(int16_t) <= to; at += sizeof(int16_t)) {
+        int16_t *out = (int16_t *)(dev->ring + (s->origin + at) % dev->ring_bytes);
+        int16_t  in  = *(const int16_t *)(s->ring + at % dev->ring_bytes);
+        *out = clip16((int32_t)*out + in);
+    }
+
+    uint64_t end = (s->origin + to + dev->period_bytes - 1) / dev->period_bytes;
+    if (end > dev->heard)
+        dev->heard = end;
+}
+
+static bool any_running(audio_device_t *dev) {
+    for (int i = 0; i < AUDIO_STREAMS; i++)
+        if (dev->streams[i].used && dev->streams[i].running)
+            return true;
+    return false;
+}
+
+// lock held
+static void card_stop(audio_device_t *dev) {
+    if (dev->running)
+        dev->driver->stop(dev->priv);
+    memset(dev->ring, 0, dev->ring_bytes);
+    dev->running = false;
+    dev->played  = 0;
+    dev->heard   = 0;
+}
+
+// lock held
+static int card_start(audio_device_t *dev) {
+    if (dev->running)
+        return 0;
+
+    int r = dev->driver->start(dev->priv);
+    if (r < 0) {
+        card_stop(dev);
+        return r;
+    }
+    dev->running = true;
+    return 0;
 }
 
 void audio_device_advance(audio_device_t *dev, uint32_t hw_period) {
@@ -62,47 +150,70 @@ void audio_device_advance(audio_device_t *dev, uint32_t hw_period) {
         return;
     }
 
-    bool     had_data = dev->write_pos > audio_window_start(dev);
-    uint64_t before   = dev->played;
+    uint64_t before = dev->played;
     while ((uint32_t)(dev->played % dev->periods) != hw_period) {
         memset(dev->ring + (dev->played % dev->periods) * dev->period_bytes, 0, dev->period_bytes);
         dev->played++;
     }
-
     if (dev->played == before) {
         audio_unlock(dev, flags);
         return;
     }
 
-    uint64_t start = audio_window_start(dev);
-    if (dev->write_pos < start) {
-        if (had_data)
-            dev->underruns++;
-        dev->write_pos = start;
+    // a stream that fell behind the hardware lost that bit, it carries on from where the hardware is
+    for (int i = 0; i < AUDIO_STREAMS; i++) {
+        audio_stream_t *s = &dev->streams[i];
+        if (!s->used || !s->running)
+            continue;
+
+        uint64_t start = stream_window_start(dev, s);
+        if (s->write_pos < start) {
+            uint64_t was = (before + 1) * dev->period_bytes;
+            if (s->write_pos + s->origin > was)
+                s->underruns++;
+            s->write_pos = start;
+        }
     }
 
-    // nobody left to feed it and whatever they queued is 
-    if (!dev->owner_pid && !had_data)
-        audio_stop_locked(dev);
+    // nobody playing and the last of what they had has been heard
+    if (!any_running(dev) && dev->played >= dev->heard)
+        card_stop(dev);
 
     audio_unlock(dev, flags);
     sched_wake_queue(&dev->wait);
 }
 
-// lock held
-static int audio_start_locked(audio_device_t *dev) {
-    if (dev->running)
+// lock held. a fresh card starts on the streams first byte.
+static int stream_start(audio_device_t *dev, audio_stream_t *s) {
+    if (s->running)
         return 0;
 
-    int r = dev->driver->start(dev->priv);
+    s->origin  = dev->running ? (dev->played + AUDIO_JOIN_AHEAD) * dev->period_bytes : 0;
+    s->running = true;
+    stream_mix(dev, s, 0, s->write_pos);
+
+    int r = card_start(dev);
     if (r < 0)
-        return r;
-    dev->running = true;
-    return 0;
+        s->running = false;
+    return r;
 }
 
-static int audio_map_ring(audio_device_t *dev, task_t *task) {
-    if (dev->owner_map)
+// lock held. nothing more goes in
+static void stream_stop(audio_stream_t *s) {
+    s->running   = false;
+    s->write_pos = 0;
+    s->origin    = 0;
+}
+
+// lock held. bytes the stream wrote into its ring at write_pos
+static void stream_commit(audio_device_t *dev, audio_stream_t *s, uint64_t bytes) {
+    if (s->running)
+        stream_mix(dev, s, s->write_pos, s->write_pos + bytes);
+    s->write_pos += bytes;
+}
+
+static int stream_map(audio_device_t *dev, audio_stream_t *s, task_t *task) {
+    if (s->map)
         return 0;
 
     size_t    pages = dev->ring_bytes / PAGE_SIZE;
@@ -110,45 +221,34 @@ static int audio_map_ring(audio_device_t *dev, task_t *task) {
     if (!base)
         return -ENOMEM;
 
-    // NOFREE, its the cards ring and not the tasks memory
+    // NOFREE, the stream owns the pages
     for (size_t i = 0; i < pages; i++)
-        paging_map_page(task->page_map, dev->ring_phys + i * PAGE_SIZE, base + i * PAGE_SIZE,
+        paging_map_page(task->page_map, s->ring_phys + i * PAGE_SIZE, base + i * PAGE_SIZE,
                         PTE_USER | PTE_WRITABLE | PTE_NX | PTE_NOFREE);
 
-    dev->owner_map = base;
+    s->map = base;
     return 0;
 }
 
-static bool audio_claim(audio_device_t *dev, task_t *task) {
-    if (dev->owner_pid && dev->owner_pid != task->id)
-        return false;
-    if (!dev->owner_pid) {
-        dev->owner_prio = task->prio_base;
-        if (task->prio_base > PRIO_AUDIO)
-            task->prio_base = PRIO_AUDIO;
-    }
-    dev->owner_pid = task->id;
-    return true;
+static void stream_pos(audio_device_t *dev, audio_stream_t *s, struct audio_pos *pos) {
+    memset(pos, 0, sizeof(*pos));
+    pos->write_pos = s->write_pos;
+    pos->writable  = stream_writable(dev, s);
+    pos->underruns = s->underruns;
+    pos->running   = s->running && dev->running;
+    if (!pos->running)
+        return;
+
+    uint64_t played = dev->played * dev->period_bytes;
+    uint64_t off    = dev->driver->hw_offset(dev->priv);
+    uint64_t base   = (dev->played % dev->periods) * dev->period_bytes;
+    uint64_t hw     = played + (off + dev->ring_bytes - base) % dev->ring_bytes;
+
+    pos->played = played > s->origin ? played - s->origin : 0;
+    pos->hw_pos = hw > s->origin ? hw - s->origin : 0;
 }
 
-static void audio_get_pos(audio_device_t *dev, struct audio_pos *pos) {
-    uint64_t period_start = dev->played * dev->period_bytes;
-    uint64_t hw_pos       = period_start;
-
-    if (dev->running) {
-        uint64_t off  = dev->driver->hw_offset(dev->priv);
-        uint64_t base = (dev->played % dev->periods) * dev->period_bytes;
-        hw_pos += (off + dev->ring_bytes - base) % dev->ring_bytes;
-    }
-
-    pos->write_pos = dev->write_pos;
-    pos->writable  = audio_writable(dev);
-    pos->played    = period_start;
-    pos->hw_pos    = hw_pos;
-    pos->underruns = dev->underruns;
-    pos->running   = dev->running;
-    pos->_pad      = 0;
-}
+// inode ops
 
 static long audio_write(INode_t *inode, const void *buf, size_t len, size_t offset) {
     (void)offset;
@@ -164,29 +264,34 @@ static long audio_write(INode_t *inode, const void *buf, size_t len, size_t offs
 
         unsigned long flags;
         audio_lock(dev, &flags);
-        if (!audio_claim(dev, task)) {
+        audio_stream_t *s = stream_of(dev, task->id);
+        if (!s)
+            s = stream_new(dev, task);
+        if (!s) {
             audio_unlock(dev, flags);
             return copied ? (long)copied : -EBUSY;
         }
 
-        uint64_t room = audio_writable(dev);
+        int r = stream_start(dev, s);
+        if (r < 0) {
+            audio_unlock(dev, flags);
+            return copied ? (long)copied : r;
+        }
+
+        uint64_t room = stream_writable(dev, s);
         if (room) {
             size_t chunk = len - copied;
             if (chunk > room)
                 chunk = room;
 
-            size_t at    = dev->write_pos % dev->ring_bytes;
+            size_t at    = s->write_pos % dev->ring_bytes;
             size_t first = chunk < dev->ring_bytes - at ? chunk : dev->ring_bytes - at;
-            memcpy(dev->ring + at, (const uint8_t *)buf + copied, first);
-            memcpy(dev->ring, (const uint8_t *)buf + copied + first, chunk - first);
+            memcpy(s->ring + at, (const uint8_t *)buf + copied, first);
+            memcpy(s->ring, (const uint8_t *)buf + copied + first, chunk - first);
 
-            dev->write_pos += chunk;
-            copied         += chunk;
-
-            int r = audio_start_locked(dev);
+            stream_commit(dev, s, chunk);
+            copied += chunk;
             audio_unlock(dev, flags);
-            if (r < 0)
-                return copied ? (long)copied : r;
             continue;
         }
         audio_unlock(dev, flags);
@@ -196,7 +301,7 @@ static long audio_write(INode_t *inode, const void *buf, size_t len, size_t offs
 
         // looked at again with interrupts off so the tick cant free a period in between
         flags = irq_push();
-        if (!audio_writable(dev) && task->sig_pending == seen)
+        if (!stream_writable(dev, s) && task->sig_pending == seen)
             sched_wait_queue(&dev->wait, 0);
         irq_restore(flags);
     }
@@ -205,9 +310,15 @@ static long audio_write(INode_t *inode, const void *buf, size_t len, size_t offs
 }
 
 static int audio_poll(INode_t *inode) {
-    audio_device_t *dev = inode->internal_data;
-    if (!dev) return POLLERR;
-    return audio_writable(dev) >= dev->period_bytes ? POLLOUT : 0;
+    audio_device_t *dev  = inode->internal_data;
+    task_t         *task = get_current_task();
+    if (!dev || !task)
+        return POLLERR;
+
+    audio_stream_t *s = stream_of(dev, task->id);
+    if (!s)
+        return POLLOUT;
+    return stream_writable(dev, s) >= dev->period_bytes ? POLLOUT : 0;
 }
 
 static wait_queue_t *audio_wait_queue(INode_t *inode) {
@@ -244,6 +355,13 @@ static int audio_wait_period(audio_device_t *dev, task_t *task) {
     return 0;
 }
 
+static uint64_t first_pid(audio_device_t *dev) {
+    for (int i = 0; i < AUDIO_STREAMS; i++)
+        if (dev->streams[i].used)
+            return dev->streams[i].pid;
+    return 0;
+}
+
 static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
     audio_device_t *dev  = inode->internal_data;
     task_t         *task = get_current_task();
@@ -252,30 +370,19 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
     if (!task)
         return -ESRCH;
 
-    // the ones that dont need the card
+    // the ones that dont need a stream
     if (request == AUDIO_IOC_GET_INFO)
         return arg ? audio_ioctl_info(dev, task, arg) : -EFAULT;
 
     if (request == AUDIO_IOC_GET_OWNER) {
-        uint64_t pid = dev->owner_pid;
+        uint64_t pid = first_pid(dev);
         return arg && copy_to_user(task, arg, &pid, sizeof(pid)) == 0 ? 0 : -EFAULT;
-    }
-
-    if (request == AUDIO_IOC_GET_POS) {
-        if (!arg) return -EFAULT;
-
-        struct audio_pos pos;
-        unsigned long flags;
-        audio_lock(dev, &flags);
-        audio_get_pos(dev, &pos);
-        audio_unlock(dev, flags);
-        return copy_to_user(task, arg, &pos, sizeof(pos)) == 0 ? 0 : -EFAULT;
     }
 
     if (request == AUDIO_IOC_WAIT)
         return audio_wait_period(dev, task);
 
-    // anyone can turn it up or down, the tray does it without ever owning the card
+    // anyone can turn it up or down, the tray does it without ever playing anything
     if (request == AUDIO_IOC_SET_VOLUME) {
         struct audio_volume vol;
         if (!arg || copy_from_user(task, &vol, arg, sizeof(vol)) != 0)
@@ -301,7 +408,7 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
         return arg && copy_to_user(task, arg, &vol, sizeof(vol)) == 0 ? 0 : -EFAULT;
     }
 
-    // the rest belong to whoever has it, copied in before the lock
+    // the rest are about the callers own stream, copied in before the lock
     uint32_t rate   = 0;
     uint64_t commit = 0;
     if (request == AUDIO_IOC_SET_RATE && (!arg || copy_from_user(task, &rate, arg, sizeof(rate)) != 0))
@@ -311,26 +418,29 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
 
     unsigned long flags;
     audio_lock(dev, &flags);
+    audio_stream_t *s = stream_of(dev, task->id);
 
     if (request == AUDIO_IOC_ACQUIRE) {
         if (!arg) {
             audio_unlock(dev, flags);
             return -EFAULT;
         }
-        if (!audio_claim(dev, task)) {
+        if (!s)
+            s = stream_new(dev, task);
+        if (!s) {
             audio_unlock(dev, flags);
             return -EBUSY;
         }
 
-        int r = audio_map_ring(dev, task);
-        struct audio_map map = { .addr = dev->owner_map, .ring_bytes = dev->ring_bytes };
+        int r = stream_map(dev, s, task);
+        struct audio_map map = { .addr = s->map, .ring_bytes = dev->ring_bytes };
         audio_unlock(dev, flags);
         if (r < 0)
             return r;
         return copy_to_user(task, arg, &map, sizeof(map)) == 0 ? 0 : -EFAULT;
     }
 
-    if (dev->owner_pid != task->id) {
+    if (!s) {
         audio_unlock(dev, flags);
         return -EPERM;
     }
@@ -338,38 +448,50 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
     int r = 0;
     switch (request) {
         case AUDIO_IOC_RELEASE: {
-            // whats queued still plays out
-            uintptr_t map  = dev->owner_map;
-            dev->owner_pid = 0;
-            dev->owner_map = 0;
-            task->prio_base = dev->owner_prio;
+            uintptr_t map   = s->map;
+            task->prio_base = s->prio;
+            stream_free(dev, s);
             audio_unlock(dev, flags);
             if (map)
                 task_munmap(task, (void *)map);
             return 0;
         }
         case AUDIO_IOC_START:
-            r = audio_start_locked(dev);
+            r = stream_start(dev, s);
             break;
         case AUDIO_IOC_STOP:
-            // the tick doesnt look at a stopped card
-            audio_stop_locked(dev);
+            stream_stop(s);
             audio_unlock(dev, flags);
             sched_wake_queue(&dev->wait);
             return 0;
+        case AUDIO_IOC_GET_POS: {
+            struct audio_pos pos;
+            stream_pos(dev, s, &pos);
+            audio_unlock(dev, flags);
+            return arg && copy_to_user(task, arg, &pos, sizeof(pos)) == 0 ? 0 : -EFAULT;
+        }
         case AUDIO_IOC_COMMIT: {
-            uint64_t room = audio_writable(dev);
+            uint64_t room = stream_writable(dev, s);
             if (commit > room)
                 commit = room;
-            dev->write_pos += commit;
+            stream_commit(dev, s, commit);
             audio_unlock(dev, flags);
             return copy_to_user(task, arg, &commit, sizeof(commit)) == 0 ? 0 : -EFAULT;
         }
         case AUDIO_IOC_SET_RATE:
+            // everyone shares the one rate, so it only changes while nobody else is using it
             if (dev->running) {
                 r = -EBUSY;
                 break;
             }
+            for (int i = 0; i < AUDIO_STREAMS; i++) {
+                if (dev->streams[i].used && dev->streams[i].pid != task->id) {
+                    r = -EBUSY;
+                    break;
+                }
+            }
+            if (r < 0)
+                break;
             r = dev->driver->set_rate ? dev->driver->set_rate(dev->priv, rate) : -ENOTTY;
             if (r < 0)
                 break;
@@ -394,14 +516,15 @@ static struct INodeOps audio_inode_ops = {
 };
 
 void audio_device_task_exit(task_t *task) {
-    if (!audio_dev || !task || audio_dev->owner_pid != task->id)
+    if (!audio_dev || !task)
         return;
 
-    // the mapping goes with the address space, the queued audio still drains
+    // the mapping goes with the address space
     unsigned long flags;
     audio_lock(audio_dev, &flags);
-    audio_dev->owner_pid = 0;
-    audio_dev->owner_map = 0;
+    audio_stream_t *s = stream_of(audio_dev, task->id);
+    if (s)
+        stream_free(audio_dev, s);
     audio_unlock(audio_dev, flags);
 }
 
@@ -426,7 +549,7 @@ audio_device_t *audio_device_register(const char *name, const audio_driver_t *dr
     dev->rate         = rate;
     dev->channels     = channels;
     dev->volume       = (struct audio_volume){ .left = 100, .right = 100 };
-    audio_reset(dev);
+    card_stop(dev);
 
     dev->device.ops           = &audio_inode_ops;
     dev->device.internal_data = dev;
@@ -438,7 +561,7 @@ audio_device_t *audio_device_register(const char *name, const audio_driver_t *dr
     }
 
     audio_dev = dev;
-    serial_printf(LOG_OK "audio: %s is /dev/%s, %u Hz, %u periods of %u bytes\n", driver->name, name,
-                  rate, periods, (uint32_t)period_bytes);
+    serial_printf(LOG_OK "audio: %s is /dev/%s, %u Hz, %u periods of %u bytes, up to %u programs\n", driver->name,
+                  name, rate, periods, (uint32_t)period_bytes, AUDIO_STREAMS);
     return dev;
 }

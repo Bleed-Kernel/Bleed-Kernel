@@ -31,6 +31,8 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_GETCWD, sys_getcwd),
     SYSCALL(SYS_READDIR, sys_readdir),
     SYSCALL(SYS_STAT, sys_stat),
+    SYSCALL(SYS_FSTAT, sys_fstat),
+    SYSCALL(SYS_LSTAT, sys_stat),   // for now its the same thing because we dont have links 
     SYSCALL(SYS_MMAP, sys_mmap),
     SYSCALL(SYS_MUNMAP, sys_munmap),
     SYSCALL(SYS_TASKINFO, sys_taskinfo),

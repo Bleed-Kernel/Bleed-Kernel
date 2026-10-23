@@ -62,6 +62,7 @@
 #define AC97_RATE_DEFAULT       48000
 #define AC97_CODEC_WAIT_MS      500
 #define AC97_RESET_WAIT_MS      10
+#define AC97_STUCK_TICKS        250
 
 typedef struct {
     uint32_t addr;

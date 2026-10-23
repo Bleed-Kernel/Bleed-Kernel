@@ -7,7 +7,7 @@
 #include <user/user_task.h>
 #include <fs/vfs.h>
 #include <user/signal.h>
-#include <user/user_file.h>
+#include <user/user_stat.h>
 
 enum {
     SYS_READ            = 0,
@@ -15,6 +15,8 @@ enum {
     SYS_OPEN            = 2,
     SYS_CLOSE           = 3,
     SYS_STAT            = 4,
+    SYS_FSTAT           = 5,
+    SYS_LSTAT           = 6,
     SYS_SEEK            = 8,
     SYS_MMAP            = 9,
     SYS_MUNMAP          = 11,
@@ -100,7 +102,8 @@ uint64_t sys_taskcount(void);
 long sys_taskusage(uint64_t pid, uint64_t user_usage_ptr);
 long sys_taskpath(uint64_t pid, char *buf, uint64_t size);
 
-int sys_stat(int fd, user_file_t *user_buf);
+long sys_stat(const char *user_path, user_stat_t *user_buf);
+long sys_fstat(int fd, user_stat_t *user_buf);
 
 void *sys_mmap(size_t pages);
 void sys_munmap(void *addr);

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <devices/devices.h>
-#include <user/user_file.h>
+#include <user/user_stat.h>
 #include <sched/wait_queue.h>
 
 #define O_RDONLY 0x0
@@ -141,7 +141,9 @@ size_t vfs_filesize(INode_t* inode);
 path_t vfs_path_from_abs(const char* pstring);
 path_t vfs_path_from_relative(const char *path, INode_t *cwd); 
 path_t vfs_parent_path(const path_t* path);
-user_file_t *vfs_file_stat(int fd);
+
+int vfs_stat(const char *path_str, user_stat_t *st);
+int vfs_fstat(int fd, user_stat_t *st);
 
 int vfs_open(const char *path_str, int flags);
 long vfs_read(int fd, void *buf, size_t count);

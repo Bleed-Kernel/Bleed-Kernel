@@ -11,7 +11,7 @@
 #include <drivers/serial/serial.h>
 #include <sched/scheduler.h>
 #include <sched/signal.h>
-#include <user/user_file.h>
+#include <user/user_stat.h>
 #include <user/errno.h>
 #include <mm/spinlock.h>
 #include <devices/devices.h>
@@ -922,32 +922,63 @@ long vfs_seek(int fd, long offset, int whence) {
     return new_offset;
 }
 
-user_file_t *vfs_file_stat(int fd) {
-    // userfacing structure and function kernel wont really need this
+// theres no owners or permissions yet so everything is open to everyone, and no clock
+static void stat_fill(INode_t *inode, user_stat_t *st) {
+    memset(st, 0, sizeof(*st));
+    st->dev     = 1;
+    st->ino     = (uint64_t)(uintptr_t)inode;
+    st->nlink   = 1;
+    st->blksize = 4096;
+
+    switch (inode->type) {
+    case INODE_DIRECTORY:
+        st->mode  = STAT_IFDIR | 0755;
+        st->nlink = 2;
+        break;
+    case INODE_DEVICE:
+        st->mode = STAT_IFCHR | 0666;
+        break;
+    default:
+        st->mode = STAT_IFREG | 0755;
+        st->size = (int64_t)vfs_filesize(inode);
+        break;
+    }
+    st->blocks = (st->size + 511) / 512;
+}
+
+int vfs_stat(const char *path_str, user_stat_t *st) {
+    if (!path_str || !path_str[0])
+        return -ENOENT;
+
+    task_t  *task  = get_current_task();
+    path_t   path  = vfs_path_from_relative(path_str, task ? task->current_directory : NULL);
+    INode_t *inode = NULL;
+    int      r     = vfs_lookup(&path, &inode);
+    if (r < 0)
+        return r;
+
+    stat_fill(inode, st);
+    vfs_drop(inode);
+    return 0;
+}
+
+int vfs_fstat(int fd, user_stat_t *st) {
     fd_table_t *fd_table = vfs_get_active_fd_table();
-    if (!fd_table || fd < 0 || fd >= MAX_FDS)
-        return NULL;
+    if (!fd_table || fd < 0 || fd >= MAX_FDS || !fd_table->fds[fd])
+        return -EBADF;
 
     file_t *f = fd_table->fds[fd];
-    if (!f || !f->inode)
-        return NULL;
-
-    user_file_t *stat = kmalloc(sizeof(*stat));
-    if (!stat)
-        return NULL;
-
-    memset(stat, 0, sizeof(*stat));
-
-    stat->filesize    = vfs_filesize(f->inode);
-    stat->permissions = f->flags & O_MODE;
-
-    // fname -> internal inode name.
-    if (f->inode->internal_data) {
-        const char *name = (const char *)f->inode->internal_data;
-        strncpy(stat->fname, name, sizeof(stat->fname) - 1);
+    if (f->type == FD_TYPE_PIPE) {
+        memset(st, 0, sizeof(*st));
+        st->mode    = STAT_IFIFO | 0600;
+        st->nlink   = 1;
+        st->blksize = 4096;
+        return 0;
     }
-
-    return stat;
+    if (!f->inode)
+        return -EBADF;
+    stat_fill(f->inode, st);
+    return 0;
 }
 
 int inode_create(INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type){

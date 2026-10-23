@@ -19,6 +19,9 @@ typedef struct {
     uint8_t           master_max;
     uint8_t           last_civ;
     uint32_t          quiet_ticks;
+    uint32_t          stuck_ticks;
+    bool              told_moving;
+    bool              told_stuck;
     uint32_t          rate;
     paddr_t           bdl_phys;
     ac97_bdl_entry_t *bdl;
@@ -71,6 +74,7 @@ static int ac97_start(void *priv) {
     nabm_write8(c, AC97_PO_CR, AC97_CR_RPBM);
     c->last_civ    = 0;
     c->quiet_ticks = 0;
+    c->stuck_ticks = 0;
     return 0;
 }
 
@@ -211,9 +215,17 @@ void ac97_poll(void) {
     }
 
     uint8_t civ = nabm_read8(c, AC97_PO_CIV) % AC97_BDL_ENTRIES;
-    if (civ == c->last_civ)
+    if (civ == c->last_civ) {
+        if (++c->stuck_ticks == AC97_STUCK_TICKS && !c->told_stuck) {
+            c->told_stuck = true;
+        }
         return;
+    }
 
+    if (!c->told_moving) {
+        c->told_moving = true;
+    }
+    c->stuck_ticks = 0;
     c->last_civ    = civ;
     c->quiet_ticks = AC97_PERIOD_FRAMES * 1000 / c->rate - 1;
     audio_device_advance(c->audio, civ);
@@ -235,7 +247,8 @@ static bool ac97_codec_up(ac97_t *c) {
         return false;
 
     nam_write(c, AC97_NAM_RESET, 0);
-    serial_printf(LOG_INFO "ac97: codec %04x:%04x\n", nam_read(c, AC97_NAM_VENDOR1), nam_read(c, AC97_NAM_VENDOR2));
+    serial_printf(LOG_INFO "ac97: codec %04x:%04x, ext id 0x%x, glob sta 0x%x\n", nam_read(c, AC97_NAM_VENDOR1),
+                  nam_read(c, AC97_NAM_VENDOR2), nam_read(c, AC97_NAM_EXT_ID), nabm_read32(c, AC97_GLOB_STA));
 
     c->rate = AC97_RATE_DEFAULT;
     if (nam_read(c, AC97_NAM_EXT_ID) & AC97_EXT_VRA) {
@@ -251,6 +264,9 @@ static bool ac97_codec_up(ac97_t *c) {
 
     struct audio_volume full = { .left = 100, .right = 100 };
     ac97_set_volume(c, &full);
+    serial_printf(LOG_INFO "ac97: %u Hz%s, %u bit master, %s volume, master 0x%x pcm 0x%x\n", c->rate,
+                  c->vra ? " variable" : "", c->master_max == 63 ? 6 : 5, c->qemu_volume ? "qemu" : "codec",
+                  nam_read(c, AC97_NAM_MASTER), nam_read(c, AC97_NAM_PCM_OUT));
     return true;
 }
 

@@ -19,7 +19,7 @@
 #define AUDIO_IOC_COMMIT     0x5107  // uint64_t bytes in, how much was written at write_pos
 #define AUDIO_IOC_SET_RATE   0x5108  // uint32_t in/out, stopped only, out is what the codec took
 #define AUDIO_IOC_SET_VOLUME 0x5109  // struct audio_volume in, anyone can, its the cards own volume
-#define AUDIO_IOC_GET_OWNER  0x510A  // pid
+#define AUDIO_IOC_GET_OWNER  0x510A  // pid of a program playing, 0 for none
 #define AUDIO_IOC_WAIT       0x510B  // sleep till the hardware finishes the period its on
 #define AUDIO_IOC_GET_VOLUME 0x510C  // struct audio_volume out, what SET_VOLUME last set
 
@@ -68,6 +68,25 @@ typedef struct audio_driver {
     int      (*set_volume)(void *priv, const struct audio_volume *vol); 
 } audio_driver_t;
 
+#define AUDIO_STREAMS       8
+#define AUDIO_JOIN_AHEAD    2
+
+// one programs audio. its ring is where it writes
+typedef struct audio_stream {
+    bool        used;
+    bool        running;
+    uint64_t    pid;
+    uint8_t     prio;
+    paddr_t     ring_phys;
+    uint8_t    *ring;
+    uintptr_t   map;
+
+    // write_pos is bytes since this stream started, origin is where that start is on the cards 
+    uint64_t    origin;
+    uint64_t    write_pos;
+    uint64_t    underruns;
+} audio_stream_t;
+
 typedef struct audio_device {
     INode_t     device;
     spinlock_t  lock;
@@ -83,14 +102,12 @@ typedef struct audio_device {
     uint32_t    channels;
 
     bool        running;
-    uint64_t    played;         // periods done and zeroed, only the service moves it
-    uint64_t    write_pos;
-    uint64_t    underruns;
+    uint64_t    played;
+    uint64_t    heard;
+
+    audio_stream_t streams[AUDIO_STREAMS];
 
     struct audio_volume volume;
-    uint64_t    owner_pid;
-    uint8_t     owner_prio;     // what the owner was before it got the audio boost
-    uintptr_t   owner_map;      // where the ring is mapped in the owner, 0 if it isnt
     wait_queue_t wait;
 } audio_device_t;
 
@@ -101,8 +118,8 @@ audio_device_t *audio_device_register(const char *name, const audio_driver_t *dr
                                       paddr_t ring_phys, size_t period_bytes, uint32_t periods,
                                       uint32_t rate, uint32_t channels);
 
-// the driver tells us which period the hardware is on now, anything before it is zeroed and handed back
+// the driver tells us which period the hardware is on now, whats behind it is zeroed for the next lap
 void audio_device_advance(audio_device_t *dev, uint32_t hw_period);
 
-// stops the card if task was the one holding it
+// the tasks stream goes, what it already wrote still plays
 void audio_device_task_exit(struct task *task);
