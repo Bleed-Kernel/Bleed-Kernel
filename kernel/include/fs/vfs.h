@@ -14,6 +14,9 @@
 #define O_CREAT  0x4
 #define O_TRUNC  0x8
 #define O_APPEND 0x10
+#define O_DIRECTORY 0x80
+
+#define AT_FDCWD (-100)
 
 #define SEEK_SET 0
 #define SEEK_CUR 1
@@ -53,6 +56,7 @@ typedef struct INodeOps{
     int    (*poll)    (INode_t* inode);   // POLL* bits ready right now
     wait_queue_t *(*wait_queue)(INode_t* inode);
     void   (*times)   (INode_t* inode, int64_t *atime, int64_t *mtime, int64_t *ctime);
+    int    (*statfs)  (INode_t* root, uint64_t *block_size, uint64_t *total, uint64_t *free);
 } INodeOps_t;
 
 /*
@@ -144,9 +148,11 @@ path_t vfs_path_from_relative(const char *path, INode_t *cwd);
 path_t vfs_parent_path(const path_t* path);
 
 int vfs_stat(const char *path_str, user_stat_t *st);
+int vfs_stat_at(int dirfd, const char *path_str, user_stat_t *st);
 int vfs_fstat(int fd, user_stat_t *st);
 
 int vfs_open(const char *path_str, int flags);
+int vfs_open_at(int dirfd, const char *path_str, int flags);
 long vfs_read(int fd, void *buf, size_t count);
 long vfs_write(int fd, const void *buf, size_t count);
 int vfs_unlink(const char *path_str);
@@ -154,6 +160,7 @@ int vfs_rename(const char *oldpath, const char *newpath);
 int vfs_mkdir(const char *path_str);
 int vfs_pipe(int out_fds[2]);
 int vfs_dup2(int oldfd, int newfd);
+int vfs_dup(int oldfd);
 int vfs_chdir(const char *path_str);
 
 // put a task back at the root, letting go of wherever it was

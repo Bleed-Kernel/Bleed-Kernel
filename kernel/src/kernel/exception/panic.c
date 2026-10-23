@@ -7,6 +7,7 @@
 #include <cpu/features/fpu.h>
 #include <sched/scheduler.h>
 #include <sched/signal.h>
+#include <user/user_copy.h>
 #include <drivers/serial/serial.h>
 #include <kernel/exception/panic.h>
 #include <kernel/exception/stack_trace.h>
@@ -85,6 +86,10 @@ void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
         serial_printf("Page Fault info: error code: %p, cr2: %p\n", sf->error_code, cr2);
     
     serial_printf("\nA User Program Crashed\n %u (%s) at %p (%s - %u)\n", sf->vector, exception_name(sf->vector), sf->rip, get_current_task()->name, get_current_task()->id);
+
+    uint64_t stack[4] = {0};
+    copy_from_user(task, stack, (const void *)sf->rsp, sizeof(stack));
+    serial_printf(" rsp %p: %p %p %p %p\n", sf->rsp, stack[0], stack[1], stack[2], stack[3]);
 
     kprintf("%s[ERROR]%s %s (%llu) has crashed and the task was killed [%s]\n", 
         RED_FG, 

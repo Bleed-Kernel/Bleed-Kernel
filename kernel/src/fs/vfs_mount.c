@@ -10,6 +10,9 @@
 #include <drivers/serial/serial.h>
 #include <ansii.h>
 #include <user/errno.h>
+#include <user/user_mount.h>
+#include <devices/devices.h>
+#include <boot/sysinfo/sysinfo.h>
 
 #define PROBE_FAT32_ROOT_ENTRY_OFF  17    //root entry count
 #define PROBE_FAT32_SIG_OFF         510   // 0x55 0xAA boot signature
@@ -234,4 +237,65 @@ int vfs_umount_all(void) {
             busy++;
     }
     return busy;
+}
+
+static const char *fs_type_name(fs_type_t type) {
+    switch (type) {
+        case FS_TYPE_EXT2:  return "ext2";
+        case FS_TYPE_FAT32: return "fat32";
+        case FS_TYPE_EXFAT: return "exfat";
+        default:            return "unknown";
+    }
+}
+
+int vfs_mount_info(int index, user_mount_info_t *out) {
+    if (index < 0 || !out)
+        return -EINVAL;
+    memset(out, 0, sizeof(*out));
+
+    if (index == 0) {
+        strcpy(out->path, "/");
+        strcpy(out->fs, "tempfs");
+        system_memory_info_t *mem = get_system_memory_info();
+        if (mem) {
+            out->block_size   = 4096;
+            out->blocks_total = mem->MEMORY_USABLE / 4096;
+            out->blocks_free  = mem->MEMORY_FREE / 4096;
+            kfree(mem);
+        }
+        return 0;
+    }
+
+    spinlock_acquire(&mount_lock);
+    mount_entry_t *found = NULL;
+    int seen = 0;
+    for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (!mount_table[i].active || !mount_table[i].fs_root)
+            continue;
+        if (++seen == index) {
+            found = &mount_table[i];
+            break;
+        }
+    }
+    if (!found) {
+        spinlock_release(&mount_lock);
+        return -ENOENT;
+    }
+
+    strncpy(out->path, found->mount_path, sizeof(out->path) - 1);
+    strncpy(out->fs, fs_type_name(found->fs_type), sizeof(out->fs) - 1);
+    INode_t *root = found->fs_root;
+    INode_t *dev  = found->dev_inode;
+    vfs_hold(root);
+    spinlock_release(&mount_lock);
+
+    const char *dev_name = device_get_name(dev);
+    if (dev_name)
+        snprintf(out->device, sizeof(out->device), "/dev/%s", dev_name);
+
+    // the drivers read the disk for this, so it happens outside the lock
+    if (root->ops && root->ops->statfs)
+        root->ops->statfs(root, &out->block_size, &out->blocks_total, &out->blocks_free);
+    vfs_drop(root);
+    return 0;
 }

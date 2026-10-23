@@ -107,3 +107,17 @@ INode_t *device_get_by_name(const char *name){
 
     return NULL;
 }
+
+const char *device_get_name(INode_t *inode) {
+    const char *name = NULL;
+
+    spinlock_acquire(&device_list_lock);
+    for (size_t i = 0; i < device_list_count; i++) {
+        if (device_list[i].inode == inode) {
+            name = device_list[i].name;
+            break;
+        }
+    }
+    spinlock_release(&device_list_lock);
+    return name;
+}

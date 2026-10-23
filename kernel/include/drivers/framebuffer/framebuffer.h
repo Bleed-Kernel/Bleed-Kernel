@@ -15,6 +15,7 @@ typedef struct {
     int param_count;
     int substate;
     int subparams[4];
+    int priv;
 } ansii_state_t;
 
 

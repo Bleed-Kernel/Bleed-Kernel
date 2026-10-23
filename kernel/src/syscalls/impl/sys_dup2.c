@@ -12,3 +12,9 @@ long sys_dup2(uint64_t oldfd, uint64_t newfd) {
 
     return vfs_dup2((int)oldfd, (int)newfd);
 }
+
+long sys_dup(uint64_t oldfd) {
+    if (oldfd >= MAX_FDS)
+        return -EBADF;
+    return vfs_dup((int)oldfd);
+}

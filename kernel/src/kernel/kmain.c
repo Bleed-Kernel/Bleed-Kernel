@@ -34,6 +34,7 @@
 #include <drivers/usb/ohci.h>
 #include <drivers/i2c/dw_i2c.h>
 #include <drivers/i2c/i2c_trackpad.h>
+#include <devices/type/null_device.h>
 #include <devices/type/hpet_device.h>
 #include <devices/type/mouse_device.h>
 #include <devices/type/kbd_device.h>
@@ -196,6 +197,8 @@ void init_devices(){
     BLOG_INFO("Starting framebuffer Device");
     fb_device_init();
     BLOG_OK("framebuffer Device Ready");
+
+    null_device_init();
 
     BLOG_INFO("Starting HPET Device");
     acpi_init_hpet();

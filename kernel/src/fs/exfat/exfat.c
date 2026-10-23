@@ -567,6 +567,41 @@ static int exfat_truncate(INode_t *inode, size_t new_size) {
     return 0;
 }
 
+static int exfat_statfs(INode_t *root, uint64_t *block_size, uint64_t *total, uint64_t *free) {
+    exfat_inode_t *fi = root->internal_data;
+    if (!fi) return -EINVAL;
+    exfat_fs_t *fs = fi->fs;
+
+    uint8_t *chunk = kmalloc(4096);
+    if (!chunk) return -ENOMEM;
+
+    uint64_t base = (uint64_t)exfat_cluster_to_lba(fs, fs->bitmap_cluster) * fs->bytes_per_sector;
+    uint64_t used = 0;
+    uint64_t bytes = (fs->cluster_count + 7) / 8;
+    for (uint64_t off = 0; off < bytes; off += 4096) {
+        size_t n = bytes - off < 4096 ? (size_t)(bytes - off) : 4096;
+        if (exfat_abs_read(fs, base + off, chunk, n) < 0) {
+            kfree(chunk);
+            return -EIO;
+        }
+        // no libgcc in the kernel, so no __builtin_popcount
+        for (size_t i = 0; i < n; i++) {
+            for (uint8_t b = chunk[i]; b; b &= (uint8_t)(b - 1))
+                used++;
+        }
+    }
+    kfree(chunk);
+
+    // the last byte can have bits past the end of the heap
+    if (used > fs->cluster_count)
+        used = fs->cluster_count;
+
+    *block_size = fs->bytes_per_cluster;
+    *total      = fs->cluster_count;
+    *free       = fs->cluster_count - used;
+    return 0;
+}
+
 static void exfat_times(INode_t *inode, int64_t *atime, int64_t *mtime, int64_t *ctime) {
     exfat_inode_t *fi = inode->internal_data;
     if (!fi) return;
@@ -876,6 +911,7 @@ static const INodeOps_t exfat_dir_ops = {
     .rename  = exfat_rename,
     .drop    = exfat_drop,
     .times   = exfat_times,
+    .statfs  = exfat_statfs,
 };
 
 static const INodeOps_t exfat_file_ops = {

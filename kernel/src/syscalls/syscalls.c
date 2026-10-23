@@ -62,7 +62,12 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_EXECVE, sys_execve),
     SYSCALL(SYS_WAITSTATUS, sys_waitstatus),
     SYSCALL(SYS_ARCH_PRCTL, sys_arch_prctl),
-    SYSCALL(SYS_MPROTECT, sys_mprotect)
+    SYSCALL(SYS_MPROTECT, sys_mprotect),
+    SYSCALL(SYS_DUP, sys_dup),
+    SYSCALL(SYS_GETPPID, sys_getppid),
+    SYSCALL(SYS_OPENAT, sys_openat),
+    SYSCALL(SYS_FSTATAT, sys_fstatat),
+    SYSCALL(SYS_MOUNTINFO, sys_mountinfo)
 };
 #pragma GCC diagnostic pop
 

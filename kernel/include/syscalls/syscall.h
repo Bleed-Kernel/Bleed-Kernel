@@ -22,6 +22,7 @@ enum {
     SYS_MPROTECT        = 10,
     SYS_MUNMAP          = 11,
     SYS_IOCTL           = 16,
+    SYS_DUP             = 32,
     SYS_DUP2            = 33,
     SYS_FORK            = 57,
     SYS_EXEC            = 59,
@@ -36,6 +37,9 @@ enum {
     SYS_READDIR         = 89,
     SYS_PIPE            = 293,
     SYS_GETPID          = 39,
+    SYS_GETPPID         = 110,
+    SYS_OPENAT          = 257,
+    SYS_FSTATAT         = 262,
     SYS_POLL            = 7,
     SYS_SIGACTION       = 13,
     SYS_SIGPROCMASK     = 14,
@@ -64,13 +68,16 @@ enum {
     SYS_SHM_MAP_AT      = 527,
     SYS_EXECVE          = 528,
     SYS_WAITSTATUS      = 529,
+    SYS_MOUNTINFO       = 530,
 };
 
 int sys_open(char *path_str, int flags);
+int sys_openat(int dirfd, char *path_str, int flags);
 uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len);
 uint64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len);
 long sys_pipe(uint64_t user_fds_ptr);
 long sys_dup2(uint64_t oldfd, uint64_t newfd);
+long sys_dup(uint64_t oldfd);
 long sys_readdir(int fd, size_t index, dirent_t *user_ent);
 int sys_unlink(const char *user_path);
 int sys_rename(const char *user_oldpath, const char *user_newpath);
@@ -85,6 +92,7 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
 long sys_fork(void);
 long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc);
 long sys_mprotect(uint64_t addr, uint64_t len, uint64_t prot);
+long sys_mountinfo(uint64_t index, uint64_t user_info_ptr);
 long sys_arch_prctl(uint64_t code, uint64_t addr);
 long sys_execve(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc, uint64_t user_envp_ptr);
 long sys_waitpid(uint64_t pid);
@@ -98,6 +106,7 @@ long sys_sigaction(int sig, const sigaction_t *user_act, sigaction_t *user_old);
 long sys_sigprocmask(int how, const sigset_t *user_set, sigset_t *user_old);
 long sys_sigreturn(void);
 long sys_getpid(void);
+long sys_getppid(void);
 
 int sys_meminfo(system_memory_info_t *user_buf);
 int sys_time(struct rtc_time* user_buf);
@@ -111,6 +120,7 @@ long sys_taskusage(uint64_t pid, uint64_t user_usage_ptr);
 long sys_taskpath(uint64_t pid, char *buf, uint64_t size);
 
 long sys_stat(const char *user_path, user_stat_t *user_buf);
+long sys_fstatat(int dirfd, const char *user_path, user_stat_t *user_buf, int flags);
 long sys_fstat(int fd, user_stat_t *user_buf);
 
 void *sys_mmap(size_t pages);

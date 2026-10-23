@@ -540,15 +540,43 @@ int vfs_chdir(const char *path_str) {
     return 0;
 }
 
+static int vfs_at_base(int dirfd, INode_t **out) {
+    if (dirfd == AT_FDCWD) {
+        task_t *task = get_current_task();
+        *out = task ? task->current_directory : NULL;
+        return 0;
+    }
+
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || dirfd < 0 || dirfd >= MAX_FDS || !fd_table->fds[dirfd])
+        return -EBADF;
+
+    file_t *f = fd_table->fds[dirfd];
+    if (f->type == FD_TYPE_PIPE || !f->inode)
+        return -ENOTDIR;
+    if (f->inode->type != INODE_DIRECTORY)
+        return -ENOTDIR;
+
+    *out = f->inode;
+    return 0;
+}
+
 int vfs_open(const char *path_str, int flags){
+    return vfs_open_at(AT_FDCWD, path_str, flags);
+}
+
+int vfs_open_at(int dirfd, const char *path_str, int flags){
     if (!path_str || path_str[0] == '\0')
         return -ENOENT;
     fd_table_t *fd_table = vfs_get_active_fd_table();
     if (!fd_table) return -EMFILE;
 
-    task_t *task = get_current_task();
-    INode_t *cwd = task ? task->current_directory : NULL;
-    path_t path = vfs_path_from_relative(path_str, cwd);
+    INode_t *base = NULL;
+    if (path_str[0] != '/') {
+        int b = vfs_at_base(dirfd, &base);
+        if (b < 0) return b;
+    }
+    path_t path = vfs_path_from_relative(path_str, base);
     INode_t *inode = NULL;
 
     int l = vfs_lookup(&path, &inode);
@@ -557,6 +585,11 @@ int vfs_open(const char *path_str, int flags){
         l = vfs_create(&path, &inode, INODE_FILE);
         if (l < 0) return l;
         // do not bump here! the file structure takes over the callers ref
+    }
+
+    if ((flags & O_DIRECTORY) && inode->type != INODE_DIRECTORY) {
+        vfs_drop(inode);
+        return -ENOTDIR;
     }
 
     // vfs_lookup already swapped any /dev placeholder for the real device inode
@@ -874,6 +907,19 @@ int vfs_dup2(int oldfd, int newfd) {
     return newfd;
 }
 
+int vfs_dup(int oldfd) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || oldfd < 0 || oldfd >= MAX_FDS || !fd_table->fds[oldfd])
+        return -EBADF;
+
+    // the lowest free one, like everywhere else
+    for (int fd = 0; fd < MAX_FDS; fd++) {
+        if (!fd_table->fds[fd])
+            return vfs_dup2(oldfd, fd);
+    }
+    return -EMFILE;
+}
+
 int vfs_close(int fd){
     fd_table_t *fd_table = vfs_get_active_fd_table();
     if (!fd_table || fd < 0 || fd >= MAX_FDS) return -EBADF;
@@ -950,11 +996,19 @@ static void stat_fill(INode_t *inode, user_stat_t *st) {
 }
 
 int vfs_stat(const char *path_str, user_stat_t *st) {
+    return vfs_stat_at(AT_FDCWD, path_str, st);
+}
+
+int vfs_stat_at(int dirfd, const char *path_str, user_stat_t *st) {
     if (!path_str || !path_str[0])
         return -ENOENT;
 
-    task_t  *task  = get_current_task();
-    path_t   path  = vfs_path_from_relative(path_str, task ? task->current_directory : NULL);
+    INode_t *base = NULL;
+    if (path_str[0] != '/') {
+        int b = vfs_at_base(dirfd, &base);
+        if (b < 0) return b;
+    }
+    path_t   path  = vfs_path_from_relative(path_str, base);
     INode_t *inode = NULL;
     int      r     = vfs_lookup(&path, &inode);
     if (r < 0)

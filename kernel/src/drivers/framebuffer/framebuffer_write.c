@@ -198,7 +198,11 @@ void framebuffer_put_char(fb_console_t *fb, uint32_t c) {
     case '\n': fb_text_wrap(fb, fb->cursor_y, 0); fb->cursor_x = 0; fb->cursor_y++; break;
     case '\r': fb->cursor_x = 0; break;
     case '\b': if (fb->cursor_x) fb->cursor_x--; break;
-    case '\t': fb->cursor_x = (fb->cursor_x + 8) & ~7; break;
+    case '\t':
+        fb->cursor_x = (fb->cursor_x + 8) & ~7;
+        if (fb->no_wrap && fb->cursor_x >= max_cols)
+            fb->cursor_x = max_cols - 1;
+        break;
     default:
         idx = psf_lookup_glyph(fb->font, c);
         framebuffer_render_glyph_index(fb, fb->cursor_y, fb->cursor_x, idx, fb->fg, fb->bg);
@@ -207,7 +211,9 @@ void framebuffer_put_char(fb_console_t *fb, uint32_t c) {
         break;
     }
 
-    if (fb->cursor_x >= max_cols) {
+    if (fb->cursor_x >= max_cols && fb->no_wrap) {
+        fb->cursor_x = max_cols - 1;
+    } else if (fb->cursor_x >= max_cols) {
         // ran off the end without a newline, so the next row is more of the same line
         fb_text_wrap(fb, fb->cursor_y, 1);
         fb->cursor_x = 0;

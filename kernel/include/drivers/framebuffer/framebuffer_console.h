@@ -48,6 +48,7 @@ typedef struct {
 
     size_t cursor_x;
     size_t cursor_y;
+    uint8_t no_wrap;
 
     size_t dirty_top;
     size_t dirty_bottom;

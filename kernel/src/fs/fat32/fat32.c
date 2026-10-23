@@ -691,6 +691,37 @@ static int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen,
     return -ENOENT;
 }
 
+// no free count is kept, so the fat gets counted a chunk at a time
+static int fat32_statfs(INode_t *root, uint64_t *block_size, uint64_t *total, uint64_t *free) {
+    fat32_inode_t *fi = root->internal_data;
+    if (!fi) return -EINVAL;
+    fat32_fs_t *fs = fi->fs;
+
+    uint32_t *chunk = kmalloc(4096);
+    if (!chunk) return -ENOMEM;
+
+    // entries 0 and 1 are reserved, the data clusters start at 2
+    uint64_t entries = (uint64_t)fs->total_clusters + 2;
+    uint64_t freed = 0;
+    for (uint64_t first = 0; first < entries; first += 1024) {
+        uint64_t n = entries - first < 1024 ? entries - first : 1024;
+        if (fat32_read_bytes(fs, fs->fat_start_lba, (size_t)(first * 4), chunk, (size_t)(n * 4)) < 0) {
+            kfree(chunk);
+            return -EIO;
+        }
+        for (uint64_t i = 0; i < n; i++) {
+            if (first + i >= 2 && (chunk[i] & FAT32_CLUSTER_MASK) == FAT32_CLUSTER_FREE)
+                freed++;
+        }
+    }
+    kfree(chunk);
+
+    *block_size = fs->bytes_per_cluster;
+    *total      = fs->total_clusters;
+    *free       = freed;
+    return 0;
+}
+
 static void fat32_times(INode_t *inode, int64_t *atime, int64_t *mtime, int64_t *ctime) {
     fat32_inode_t *fi = inode->internal_data;
     if (!fi) return;
@@ -707,6 +738,7 @@ static const INodeOps_t fat32_dir_ops = {
     .rename  = fat32_rename,
     .drop    = fat32_drop,
     .times   = fat32_times,
+    .statfs  = fat32_statfs,
 };
 
 static const INodeOps_t fat32_file_ops = {

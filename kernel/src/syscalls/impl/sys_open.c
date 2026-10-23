@@ -6,7 +6,7 @@
 #include <string.h>
 #include <user/errno.h>
 
-int sys_open(char *path_str, int flags) {
+static int open_common(int dirfd, char *path_str, int flags) {
     if (!path_str)
         return -EFAULT;
 
@@ -23,5 +23,13 @@ int sys_open(char *path_str, int flags) {
     if (plen < 0)
         return -EFAULT;
 
-    return vfs_open(kpath, flags);
+    return vfs_open_at(dirfd, kpath, flags);
+}
+
+int sys_open(char *path_str, int flags) {
+    return open_common(AT_FDCWD, path_str, flags);
+}
+
+int sys_openat(int dirfd, char *path_str, int flags) {
+    return open_common(dirfd, path_str, flags);
 }

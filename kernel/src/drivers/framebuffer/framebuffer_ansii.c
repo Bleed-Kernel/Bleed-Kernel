@@ -31,6 +31,11 @@ static void framebuffer_ansi_csi(fb_console_t *fb, ansii_state_t *st, uint32_t c
             fb->cursor_x = ansi_clamp(st->param_count >= 1 && st->params[1] ? st->params[1] - 1 : 0, cols);
             break;
 
+        case 'h':
+        case 'l':
+            if (st->priv && p0 == 7)
+                fb->no_wrap = (c == 'l');
+            break;
         case 'K':
             if (p0 == 0) framebuffer_erase(fb, y, x, cols);
             if (p0 == 1) framebuffer_erase(fb, y, 0, x + 1);
@@ -59,6 +64,23 @@ static void framebuffer_ansi_csi(fb_console_t *fb, ansii_state_t *st, uint32_t c
     framebuffer_flush(fb);
 }
 
+static const uint32_t ansi_palette[16] = {
+    0x000000, 0xCD0000, 0x00CD00, 0xCDCD00, 0x0000EE, 0xCD00CD, 0x00CDCD, 0xE5E5E5,
+    0x7F7F7F, 0xFF0000, 0x00FF00, 0xFFFF00, 0x5C5CFF, 0xFF00FF, 0x00FFFF, 0xFFFFFF,
+};
+
+static uint32_t ansi_256(int n) {
+    if (n < 16)
+        return 0xFF000000 | ansi_palette[n < 0 ? 0 : n];
+    if (n < 232) {
+        static const uint8_t level[6] = { 0, 95, 135, 175, 215, 255 };
+        n -= 16;
+        return 0xFF000000 | (level[n / 36] << 16) | (level[(n / 6) % 6] << 8) | level[n % 6];
+    }
+    uint8_t grey = (uint8_t)(8 + (n > 255 ? 23 : n - 232) * 10);
+    return 0xFF000000 | (grey << 16) | (grey << 8) | grey;
+}
+
 /// @brief evaluate c and track its ansii state
 /// @param c target
 void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii_state_t *st, uint32_t c) {
@@ -70,6 +92,7 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
             st->param_count = 0;
             memset(st->params, 0, sizeof(st->params));
             st->substate = 0;
+            st->priv = 0;
         }
         st->esc = 0;
         return;
@@ -97,6 +120,24 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
                 if (p == 0) {
                     fb->fg = 0xFFFFFFFF;
                     fb->bg = 0x00000000;
+                } else if (p >= 30 && p <= 37) {
+                    fb->fg = 0xFF000000 | ansi_palette[p - 30];
+                } else if (p >= 90 && p <= 97) {
+                    fb->fg = 0xFF000000 | ansi_palette[p - 90 + 8];
+                } else if (p == 39) {
+                    fb->fg = 0xFFFFFFFF;
+                } else if (p >= 40 && p <= 47) {
+                    fb->bg = 0xFF000000 | ansi_palette[p - 40];
+                } else if (p >= 100 && p <= 107) {
+                    fb->bg = 0xFF000000 | ansi_palette[p - 100 + 8];
+                } else if (p == 49) {
+                    fb->bg = 0x00000000;
+                } else if ((p == 38 || p == 48) && (i + 2 <= st->param_count) && st->params[i + 1] == 5) {
+                    if (p == 38)
+                        fb->fg = ansi_256(st->params[i + 2]);
+                    else
+                        fb->bg = ansi_256(st->params[i + 2]);
+                    i += 2;
                 } else if (p == 38 && (i + 4 <= st->param_count) && st->params[i + 1] == 2) {
                     uint8_t r = st->params[i+2];
                     uint8_t g = st->params[i+3];
@@ -116,7 +157,12 @@ void framebuffer_ansi_char(fb_console_t *fb, spinlock_t *framebuffer_lock, ansii
             return;
         }
 
-        // anything else up to the final byte (like the ? in ESC[?25l) is ignored
+        if (c == '?') {
+            st->priv = 1;
+            return;
+        }
+
+        // anything else up to the final byte is ignored
         if (c < 0x40 || c > 0x7E)
             return;
 

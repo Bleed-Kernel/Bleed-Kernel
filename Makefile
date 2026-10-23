@@ -97,6 +97,7 @@ USER_REPOS := \
     "https://github.com/Bleed-Kernel/Bleed-Coreutils write" \
 	"https://github.com/Bleed-Kernel/Bleed-Coreutils ioctl" \
 	"https://github.com/Bleed-Kernel/Bleed-TCC tcc" \
+	"https://github.com/Bleed-Kernel/Bleed-Fastfetch fastfetch" \
 
 USER_BIN_DIR := external/
 INITRD_BIN := initrd/bin
@@ -264,7 +265,7 @@ define build_iso
 endef
 
 .PHONY: initrd
-initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs initrd-files
+initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs
 	$(build_initrd_tar)
 
 $(IMAGE_NAME).iso: limine/limine $(KERNEL_BIN) initrd

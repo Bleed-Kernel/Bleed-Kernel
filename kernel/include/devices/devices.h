@@ -9,3 +9,4 @@ typedef struct INode INode_t;
 
 long device_register(INode_t *device, char *name);
 INode_t *device_get_by_name(const char *name);
+const char *device_get_name(INode_t *inode);

@@ -8,3 +8,10 @@ long sys_getpid(void) {
         return -ESRCH;
     return (long)task->id;
 }
+
+long sys_getppid(void) {
+    task_t *task = get_current_task();
+    if (!task)
+        return -ESRCH;
+    return (long)task->ppid;
+}

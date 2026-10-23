@@ -561,6 +561,15 @@ static int ext2_truncate(INode_t *inode, size_t new_size) {
     return ext2_write_disk_inode(fs, ei->ino, di);
 }
 
+static int ext2_statfs(INode_t *root, uint64_t *block_size, uint64_t *total, uint64_t *free) {
+    ext2_inode_t *ei = root->internal_data;
+    if (!ei) return -EINVAL;
+    *block_size = ei->fs->block_size;
+    *total      = ei->fs->sb.s_blocks_count;
+    *free       = ei->fs->sb.s_free_blocks_count;
+    return 0;
+}
+
 static void ext2_times(INode_t *inode, int64_t *atime, int64_t *mtime, int64_t *ctime) {
     ext2_inode_t *ei = inode->internal_data;
     if (!ei) return;
@@ -1031,6 +1040,7 @@ static const INodeOps_t ext2_dir_ops = {
     .rename  = ext2_rename,
     .drop    = ext2_drop,
     .times   = ext2_times,
+    .statfs  = ext2_statfs,
 };
 
 static const INodeOps_t ext2_file_ops = {

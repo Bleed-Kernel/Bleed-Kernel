@@ -20,3 +20,7 @@ int vfs_umount(const char *path);
 
 // unmount everything, for when the power is about to go. returns how many wouldnt come off
 int vfs_umount_all(void);
+
+struct user_mount_info;
+
+int vfs_mount_info(int index, struct user_mount_info *out);
