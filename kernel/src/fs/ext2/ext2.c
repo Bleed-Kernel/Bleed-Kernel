@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <drivers/serial/serial.h>
 #include <ansii.h>
+#include <ACPI/acpi_time.h>
 #include <user/errno.h>
 #include <stddef.h>
 
@@ -496,6 +497,10 @@ static long ext2_write(INode_t *inode, const void *buf, size_t count, size_t off
 
     kfree(block_buf);
 
+    uint32_t now = (uint32_t)clock_now();
+    int dirty = di->i_mtime != now;
+    di->i_mtime = di->i_ctime = now;
+
     // Update inode size if we extended the file 
     size_t new_end = offset + total;
     if (new_end > di->i_size) {
@@ -503,6 +508,9 @@ static long ext2_write(INode_t *inode, const void *buf, size_t count, size_t off
         // Update upper 32 bits too (rev1 large files) 
         di->i_dir_acl = (uint32_t)(new_end >> 32);
         di->i_blocks  = (uint32_t)(((uint64_t)new_end + 511) / 512);
+        dirty = 1;
+    }
+    if (dirty) {
         memcpy(&ei->disk, di, sizeof(*di));
         ext2_write_disk_inode(fs, ei->ino, di);
     }
@@ -548,8 +556,17 @@ static int ext2_truncate(INode_t *inode, size_t new_size) {
         di->i_size = (uint32_t)new_size;
     }
 
+    di->i_mtime = di->i_ctime = (uint32_t)clock_now();
     memcpy(&ei->disk, di, sizeof(*di));
     return ext2_write_disk_inode(fs, ei->ino, di);
+}
+
+static void ext2_times(INode_t *inode, int64_t *atime, int64_t *mtime, int64_t *ctime) {
+    ext2_inode_t *ei = inode->internal_data;
+    if (!ei) return;
+    *atime = ei->disk.i_atime;
+    *mtime = ei->disk.i_mtime;
+    *ctime = ei->disk.i_ctime;
 }
 
 static void ext2_drop(INode_t *inode) {
@@ -807,6 +824,7 @@ static int ext2_create(INode_t *parent, const char *name, size_t namelen,
     memset(&new_di, 0, sizeof(new_di));
     new_di.i_mode        = is_dir ? (EXT2_S_IFDIR | 0755) : (EXT2_S_IFREG | 0644);
     new_di.i_links_count = is_dir ? 2 : 1; // dir: self + parent's entry 
+    new_di.i_atime = new_di.i_ctime = new_di.i_mtime = (uint32_t)clock_now();
     if (ext2_write_disk_inode(fs, new_ino, &new_di) < 0) {
         ext2_free_inode(fs, new_ino, is_dir);
         return -ENOMEM;
@@ -1012,6 +1030,7 @@ static const INodeOps_t ext2_dir_ops = {
     .unlink  = ext2_unlink,
     .rename  = ext2_rename,
     .drop    = ext2_drop,
+    .times   = ext2_times,
 };
 
 static const INodeOps_t ext2_file_ops = {
@@ -1020,6 +1039,7 @@ static const INodeOps_t ext2_file_ops = {
     .truncate = ext2_truncate,
     .size     = ext2_size,
     .drop     = ext2_drop,
+    .times    = ext2_times,
 };
 
 int ext2_mount(INode_t *dev_inode, INode_t **root) {

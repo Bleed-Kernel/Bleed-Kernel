@@ -11,6 +11,7 @@
 #include <ansii.h>
 #include <string.h>
 #include <cpu/features/fpu.h>
+#include <cpu/msrs.h>
 
 static const char *exec_display_name(const char *path, const char *inode_name) {
     if (inode_name && inode_name[0] != '\0')
@@ -28,7 +29,9 @@ static const char *exec_display_name(const char *path, const char *inode_name) {
     return (*base) ? base : "Unknown Program";
 }
 
-long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc) {
+// has_env 0 is the old 3 argument exec, which gets the default environment
+static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc,
+                    int has_env, uint64_t user_envp_ptr) {
     task_t *task = get_current_task();
 
     if (!user_path_ptr || !user_ptr_valid(user_path_ptr)) {
@@ -49,6 +52,14 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     long args_err = exec_args_copy_from_user(task, user_argv_ptr, user_argc, kpath, &args);
     if (args_err < 0)
         return args_err;
+
+    if (has_env) {
+        args_err = exec_env_copy_from_user(task, user_envp_ptr, &args);
+        if (args_err < 0) {
+            exec_args_free(&args);
+            return args_err;
+        }
+    }
 
     long ret = -EIO;
     paddr_t new_cr3 = 0;
@@ -102,7 +113,8 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     ctx->rflags |= 0x200ULL;
     ctx->rax = 0;
 
-    if (elf_setup_user_args(task, args.argc, (const char *const *)args.argv) != 0) {
+    if (elf_setup_user_args(task, args.argc, (const char *const *)args.argv,
+                            args.envc, (const char *const *)args.envp) != 0) {
         *ctx = old_ctx;
         ret = -EFAULT;
         goto rollback_task;
@@ -117,6 +129,8 @@ long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc
     memset(task->sig_flags, 0, sizeof(task->sig_flags));
     memset(task->sig_restorers, 0, sizeof(task->sig_restorers));
     fpu_task_reset(task);
+    task->fs_base = 0;
+    wrmsr(MSR_FS_BASE, 0);
 
     paging_switch_address_space(new_cr3);
 
@@ -156,4 +170,12 @@ done:
                       kpath);
     }
     return ret;
+}
+
+long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc) {
+    return do_exec(user_path_ptr, user_argv_ptr, user_argc, 0, 0);
+}
+
+long sys_execve(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc, uint64_t user_envp_ptr) {
+    return do_exec(user_path_ptr, user_argv_ptr, user_argc, 1, user_envp_ptr);
 }

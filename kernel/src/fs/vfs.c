@@ -922,7 +922,7 @@ long vfs_seek(int fd, long offset, int whence) {
     return new_offset;
 }
 
-// theres no owners or permissions yet so everything is open to everyone, and no clock
+// theres no owners or permissions yet so everything is open to everyone
 static void stat_fill(INode_t *inode, user_stat_t *st) {
     memset(st, 0, sizeof(*st));
     st->dev     = 1;
@@ -944,6 +944,9 @@ static void stat_fill(INode_t *inode, user_stat_t *st) {
         break;
     }
     st->blocks = (st->size + 511) / 512;
+
+    if (inode->ops && inode->ops->times)
+        inode->ops->times(inode, &st->atime, &st->mtime, &st->ctime);
 }
 
 int vfs_stat(const char *path_str, user_stat_t *st) {

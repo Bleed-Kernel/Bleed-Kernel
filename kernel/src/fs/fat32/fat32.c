@@ -1,3 +1,4 @@
+#include <ACPI/acpi_time.h>
 #include <fs/fat32/fat32.h>
 #include <fs/vfs.h>
 
@@ -225,6 +226,11 @@ static INode_t *fat32_make_inode(fat32_fs_t *fs, const fat32_dirent_t *de,
     fi->file_size      = is_dir ? 0 : de->file_size;
     fi->dirent_cluster = dirent_cluster;
     fi->dirent_offset  = dirent_off;
+    fi->crt_date       = de->crt_date;
+    fi->crt_time       = de->crt_time;
+    fi->wrt_date       = de->wrt_date;
+    fi->wrt_time       = de->wrt_time;
+    fi->acc_date       = de->lst_acc_date;
 
     INode_t *inode = kmalloc(sizeof(*inode));
     if (!inode) { kfree(fi); return NULL; }
@@ -411,15 +417,26 @@ static long fat32_write(INode_t *inode, const void *buf, size_t count, size_t of
         cluster        = fat32_read_fat(fs, cluster);
     }
 
+    // fat times go in 2 second steps, so most writes leave the dirent alone
+    uint32_t now = clock_to_dos(clock_now());
+    int dirty = fi->wrt_date != (now >> 16) || fi->wrt_time != (now & 0xFFFF);
+    fi->wrt_date = (uint16_t)(now >> 16);
+    fi->wrt_time = (uint16_t)now;
+
     size_t new_end = offset + written_total;
     if (new_end > fi->file_size) {
         fi->file_size = (uint32_t)new_end;
+        dirty = 1;
+    }
 
+    if (dirty) {
         uint32_t dc_lba = fat32_cluster_to_lba(fs, fi->dirent_cluster);
         size_t   doff   = fi->dirent_offset % fs->bytes_per_cluster;
         fat32_dirent_t de;
         fat32_read_bytes(fs, dc_lba, doff, &de, sizeof(de));
         de.file_size = fi->file_size;
+        de.wrt_date  = fi->wrt_date;
+        de.wrt_time  = fi->wrt_time;
         fat32_write_bytes(fs, dc_lba, doff, &de, sizeof(de));
     }
 
@@ -553,6 +570,10 @@ static int fat32_create(INode_t *parent, const char *name, size_t namelen,
     de.first_cluster_hi = (uint16_t)(new_cluster >> 16);
     de.file_size        = 0;
 
+    uint32_t now = clock_to_dos(clock_now());
+    de.crt_date = de.wrt_date = de.lst_acc_date = (uint16_t)(now >> 16);
+    de.crt_time = de.wrt_time = (uint16_t)now;
+
     uint32_t slot_lba = fat32_cluster_to_lba(fs, slot_cluster);
     fat32_write_bytes(fs, slot_lba, slot_off, &de, sizeof(de));
 
@@ -585,6 +606,8 @@ static int fat32_create(INode_t *parent, const char *name, size_t namelen,
     fi->file_size      = 0;
     fi->dirent_cluster = slot_cluster;
     fi->dirent_offset  = slot_off;
+    fi->crt_date       = fi->wrt_date = fi->acc_date = de.crt_date;
+    fi->crt_time       = fi->wrt_time = de.crt_time;
 
     INode_t *inode = kmalloc(sizeof(*inode));
     if (!inode) { kfree(fi); return -ENOMEM; }
@@ -668,6 +691,14 @@ static int fat32_rename(INode_t *dir, const char *oldname, size_t oldlen,
     return -ENOENT;
 }
 
+static void fat32_times(INode_t *inode, int64_t *atime, int64_t *mtime, int64_t *ctime) {
+    fat32_inode_t *fi = inode->internal_data;
+    if (!fi) return;
+    *atime = clock_from_dos(fi->acc_date, 0);
+    *mtime = clock_from_dos(fi->wrt_date, fi->wrt_time);
+    *ctime = clock_from_dos(fi->crt_date, fi->crt_time);
+}
+
 static const INodeOps_t fat32_dir_ops = {
     .lookup  = fat32_lookup,
     .readdir = fat32_readdir,
@@ -675,6 +706,7 @@ static const INodeOps_t fat32_dir_ops = {
     .unlink  = fat32_unlink,
     .rename  = fat32_rename,
     .drop    = fat32_drop,
+    .times   = fat32_times,
 };
 
 static const INodeOps_t fat32_file_ops = {
@@ -683,6 +715,7 @@ static const INodeOps_t fat32_file_ops = {
     .truncate = fat32_truncate,
     .size     = fat32_size,
     .drop     = fat32_drop,
+    .times    = fat32_times,
 };
 
 int fat32_mount(INode_t *dev_inode, INode_t **root) {

@@ -392,6 +392,7 @@ task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
     child->wait_next = NULL;
     child->dead_next = NULL;
     child->exit_code = 0;
+    child->fs_base = parent->fs_base;
     child->exit_signal = 0;
     child->sig_pending = 0;
     child->sig_blocked = parent->sig_blocked;

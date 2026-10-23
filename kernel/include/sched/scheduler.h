@@ -126,6 +126,8 @@ typedef struct task {
     uintptr_t       sig_restorers[NSIG];
     uintptr_t       sig_active_frame;
 
+    uint64_t        fs_base;
+
     int             exit_signal;
     int             exit_code;
 

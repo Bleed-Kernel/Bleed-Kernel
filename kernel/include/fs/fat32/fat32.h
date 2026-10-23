@@ -103,6 +103,9 @@ typedef struct fat32_inode {
     uint32_t    file_size;
     uint32_t    dirent_cluster;
     uint32_t    dirent_offset;
+    uint16_t    crt_date, crt_time;
+    uint16_t    wrt_date, wrt_time;
+    uint16_t    acc_date;
 } fat32_inode_t;
 
 int fat32_mount(INode_t *dev_inode, INode_t **root);

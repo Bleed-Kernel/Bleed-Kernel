@@ -19,6 +19,7 @@ enum {
     SYS_LSTAT           = 6,
     SYS_SEEK            = 8,
     SYS_MMAP            = 9,
+    SYS_MPROTECT        = 10,
     SYS_MUNMAP          = 11,
     SYS_IOCTL           = 16,
     SYS_DUP2            = 33,
@@ -40,6 +41,7 @@ enum {
     SYS_SIGPROCMASK     = 14,
     SYS_SIGRETURN       = 15,
     SYS_TIME            = 201,
+    SYS_ARCH_PRCTL      = 158,
     SYS_EPOLL_CREATE1   = 291,
     SYS_EPOLL_CTL       = 233,
     SYS_EPOLL_WAIT      = 232,
@@ -60,6 +62,8 @@ enum {
     SYS_TASKUSAGE       = 525,
     SYS_TASKPATH        = 526,
     SYS_SHM_MAP_AT      = 527,
+    SYS_EXECVE          = 528,
+    SYS_WAITSTATUS      = 529,
 };
 
 int sys_open(char *path_str, int flags);
@@ -73,14 +77,18 @@ int sys_rename(const char *user_oldpath, const char *user_newpath);
 int sys_mkdir(const char *user_path, int mode);
 
 int sys_close(int fd);
-void sys_exit(void);
+void sys_exit(int code);
 void sys_yield(void);
 uint64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg);
 
 uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc);
 long sys_fork(void);
 long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc);
+long sys_mprotect(uint64_t addr, uint64_t len, uint64_t prot);
+long sys_arch_prctl(uint64_t code, uint64_t addr);
+long sys_execve(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc, uint64_t user_envp_ptr);
 long sys_waitpid(uint64_t pid);
+long sys_waitstatus(uint64_t pid, int *user_status);
 
 void sys_shutdown(void);
 void sys_reboot(void);

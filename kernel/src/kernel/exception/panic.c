@@ -93,6 +93,8 @@ void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
         get_current_task()->id,
         exception_name(sf->vector));
 
+    task->exit_signal = sig ? sig : SIGKILL;
+    task->exit_code = 128 + task->exit_signal;
     exit();
 
     __builtin_unreachable();

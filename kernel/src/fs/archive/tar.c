@@ -173,6 +173,8 @@ int tar_extract(const void* tar_data, size_t tar_size){
             }
         }
 
+        tempfs_set_mtime(inode, (int64_t)tar_octal_to_size(header->mtime, sizeof(header->mtime)));
+
         // the tree keeps its own ref, ours was only for the write
         vfs_drop(inode);
 

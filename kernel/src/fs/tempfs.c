@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include <ACPI/acpi_time.h>
+
 #include "priv_tempfs.h"
 
 /// @brief sanity check chunk pointers to make sure theyre not silly
@@ -61,6 +63,7 @@ INode_t* tempfs_create_inode(int type, const INodeOps_t* ops){
             data->capacity = 0;
             data->data = NULL;
             data->borrowed = NULL;
+            data->mtime = data->ctime = clock_now();
         }else{
             kfree(inode);
         }
@@ -129,6 +132,25 @@ int tempfs_adopt(INode_t* inode, const void* contents, size_t size){
     return 0;
 }
 
+void tempfs_set_mtime(INode_t* inode, int64_t mtime){
+    if (!inode || !inode->internal_data || (inode->ops != &file_ops && inode->ops != &dir_ops))
+        return;
+
+    tempfs_INode_t* tempfs_inode = inode->internal_data;
+    tempfs_inode->mtime = tempfs_inode->ctime = mtime;
+}
+
+static void tempfs_touch(INode_t* inode){
+    tempfs_INode_t* tempfs_inode = inode->internal_data;
+    tempfs_inode->mtime = tempfs_inode->ctime = clock_now();
+}
+
+static void tempfs_times(INode_t* inode, int64_t* atime, int64_t* mtime, int64_t* ctime){
+    tempfs_INode_t* tempfs_inode = inode->internal_data;
+    *atime = *mtime = tempfs_inode->mtime;
+    *ctime = tempfs_inode->ctime;
+}
+
 /// @brief truncate a file inode to new_size bytes, freeing excess chunks
 /// @param inode target file inode
 /// @param new_size new size in bytes
@@ -141,6 +163,7 @@ static int tempfs_truncate(INode_t* inode, size_t new_size){
 
     if (new_size == tempfs_inode->capacity)
         return 0;
+    tempfs_touch(inode);
 
     int owned = tempfs_own(inode);
     if (owned < 0)
@@ -317,6 +340,7 @@ long tempfs_write(INode_t* inode, const void* in_buffer, size_t count, size_t of
     tempfs_INode_t* tempfs_inode = inode->internal_data;
     if (tempfs_own(inode) < 0)
         return -ENOMEM;
+    tempfs_touch(inode);
 
     size_t start_offset = offset;
     tempfs_data_t** previous_next = &tempfs_inode->data;
@@ -565,6 +589,7 @@ const INodeOps_t dir_ops = {
     .unlink = tempfs_unlink,
     .rename = tempfs_rename,
     .drop   = tempfs_drop,
+    .times  = tempfs_times,
 };
 
 const INodeOps_t file_ops = {
@@ -572,7 +597,8 @@ const INodeOps_t file_ops = {
     .write    = tempfs_write,
     .truncate = tempfs_truncate,
     .drop     = tempfs_drop,
-    .size     = tempfs_size
+    .size     = tempfs_size,
+    .times    = tempfs_times,
 };
 
 const filesystem tempfs = {

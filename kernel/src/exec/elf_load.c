@@ -24,9 +24,38 @@ static const uint8_t exec_exit_trampoline[] = {
     0x0F, 0x0B
 };
 
-int elf_setup_user_args(task_t *task, int argc, const char *const argv[]) {
+// what kernel started tasks and old style exec callers get
+static const char *const default_env[] = { "PATH=/initrd/bin", "HOME=/" };
+
+// strings are packed downward from sp,
+static int push_user_strings(task_t *task, uintptr_t *sp, uintptr_t stack_floor,
+                             int count, const char *const strs[], uint64_t *out) {
+    for (int i = count - 1; i >= 0; i--) {
+        if (!strs[i]) return -1;
+
+        size_t len = strlen(strs[i]) + 1;
+        if (*sp - stack_floor < len) return -1;
+        *sp = (*sp - len) & ~0x7ULL;
+
+        if (*sp < stack_floor) return -1;
+        if (copy_to_user(task, (void *)*sp, strs[i], len) != 0) return -1;
+
+        out[i] = (uint64_t)*sp;
+    }
+
+    out[count] = 0;
+    return 0;
+}
+
+int elf_setup_user_args(task_t *task, int argc, const char *const argv[],
+                        int envc, const char *const envp[]) {
     if (!task || argc < 0 || argc > EXEC_MAX_ARGS) return -1;
     if (argc > 0 && !argv) return -1;
+    if (!envp) {
+        envp = default_env;
+        envc = sizeof(default_env) / sizeof(default_env[0]);
+    }
+    if (envc < 0 || envc > EXEC_MAX_ENV) return -1;
 
     uintptr_t tramp_addr = (USER_STACK_TOP - sizeof(exec_exit_trampoline)) & ~0xFULL;
     uintptr_t sp = tramp_addr;
@@ -35,51 +64,39 @@ int elf_setup_user_args(task_t *task, int argc, const char *const argv[]) {
     if (tramp_addr < stack_floor) return -1;
     if (copy_to_user(task, (void *)tramp_addr, exec_exit_trampoline, sizeof(exec_exit_trampoline)) != 0) return -1;
 
+    // argv then envp, each NULL terminated, the same as linux minus the auxv
     size_t argv_bytes = (size_t)(argc + 1) * sizeof(uint64_t);
-    uint64_t *argv_user = kmalloc(argv_bytes);
-    if (!argv_user) return -1;
+    size_t table_bytes = argv_bytes + (size_t)(envc + 1) * sizeof(uint64_t);
+    uint64_t *table = kmalloc(table_bytes);
+    if (!table) return -1;
 
-    for (int i = argc - 1; i >= 0; i--) {
-        if (!argv[i]) goto fail;
+    if (push_user_strings(task, &sp, stack_floor, envc, envp, table + argc + 1) != 0) goto fail;
+    if (push_user_strings(task, &sp, stack_floor, argc, argv, table) != 0) goto fail;
 
-        size_t len = strlen(argv[i]) + 1;
-
-        // strings are packed downward from the trampoline, never let one cross the stack floor
-        if (sp - stack_floor < len) goto fail;
-        sp -= len;
-        sp &= ~0x7ULL;
-
-        if (sp < stack_floor) goto fail;
-        if (copy_to_user(task, (void *)sp, argv[i], len) != 0) goto fail;
-
-        argv_user[i] = (uint64_t)sp;
-    }
-
-    argv_user[argc] = 0;
-
-    size_t frame_bytes = sizeof(uint64_t) + argv_bytes;
+    size_t frame_bytes = sizeof(uint64_t) + table_bytes;
     if (sp - stack_floor < frame_bytes) goto fail;
 
     uintptr_t frame_base = (sp - frame_bytes) & ~0xFULL;
     uintptr_t user_argv = frame_base + sizeof(uint64_t);
     if (frame_base < stack_floor) goto fail;
-    if (user_argv + argv_bytes > sp) goto fail;
+    if (user_argv + table_bytes > sp) goto fail;
 
     uint64_t ret_addr = (uint64_t)tramp_addr;
     if (copy_to_user(task, (void *)frame_base, &ret_addr, sizeof(ret_addr)) != 0) goto fail;
-    if (copy_to_user(task, (void *)user_argv, argv_user, argv_bytes) != 0) goto fail;
-    kfree(argv_user);
+    if (copy_to_user(task, (void *)user_argv, table, table_bytes) != 0) goto fail;
+    kfree(table);
 
     sp = frame_base;
 
     task->context->rsp = (uint64_t)sp;
     task->context->rdi = (uint64_t)argc;
     task->context->rsi = (uint64_t)user_argv;
+    task->context->rdx = (uint64_t)(user_argv + argv_bytes);
 
     return 0;
 
 fail:
-    kfree(argv_user);
+    kfree(table);
     return -1;
 }
 
@@ -121,6 +138,7 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
 
         uint64_t pflags = PTE_USER | PTE_PRESENT;
         if (phdr[i].p_flags & PF_W) pflags |= PTE_WRITABLE;
+        if (!(phdr[i].p_flags & PF_X)) pflags |= PTE_NX;
 
         uintptr_t seg_start = PAGE_ALIGN_DOWN(phdr[i].p_vaddr);
         uintptr_t seg_end;
@@ -168,6 +186,8 @@ int elf_load(INode_t *elf_file, paddr_t cr3, uintptr_t* entry){
                        load_buffer + (lo - seg_start),
                        hi - lo);
                 *pte |= pflags & PTE_WRITABLE;
+                if (!(pflags & PTE_NX))
+                    *pte &= ~PTE_NX;
                 continue;
             }
 
@@ -239,7 +259,7 @@ task_t *elf_sched(INode_t *file, int argc, const char *const argv[]){
     if (!task) return NULL;
     if (vfs_inode_path(file, task->exec_path, sizeof(task->exec_path)) != 0)
         task->exec_path[0] = '\0';
-    if (elf_setup_user_args(task, argc, argv) != 0) {
+    if (elf_setup_user_args(task, argc, argv, 0, NULL) != 0) {
         sched_mark_task_dead(task);
         return NULL;
     }

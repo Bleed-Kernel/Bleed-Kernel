@@ -1,3 +1,4 @@
+#include <ACPI/acpi_time.h>
 #include <fs/exfat/exfat.h>
 #include <fs/vfs.h>
 
@@ -304,6 +305,9 @@ static INode_t *exfat_make_inode(exfat_fs_t *fs, const exfat_entryset_t *es, INo
     fi->dirent_cluster    = es->prim_cluster;
     fi->dirent_offset     = es->prim_off;
     fi->secondary_count   = es->file.secondary_count;
+    fi->create_timestamp   = es->file.create_timestamp;
+    fi->modified_timestamp = es->file.last_modified_timestamp;
+    fi->accessed_timestamp = es->file.last_accessed_timestamp;
 
     INode_t *inode = kmalloc(sizeof(*inode));
     if (!inode) { kfree(fi); return NULL; }
@@ -333,6 +337,8 @@ static void exfat_patch_entryset(exfat_inode_t *fi) {
     stream.first_cluster     = fi->first_cluster;
     stream.data_length       = fi->file_size;
     exfat_write_bytes(fs, lba, soff, &stream, sizeof(stream));
+    exfat_write_bytes(fs, lba, fi->dirent_offset + offsetof(exfat_file_dentry_t, last_modified_timestamp),
+                      &fi->modified_timestamp, sizeof(fi->modified_timestamp));
 
     size_t total = (size_t)(fi->secondary_count + 1) * sizeof(exfat_raw_dentry_t);
     if (total > 768) total = 768; // clamp, matches EXFAT_MAX_NAME_CHARS worst case
@@ -505,12 +511,18 @@ static long exfat_write(INode_t *inode, const void *buf, size_t count, size_t of
         }
     }
 
+    uint32_t now = clock_to_dos(clock_now());
+    int dirty = fi->modified_timestamp != now;
+    fi->modified_timestamp = now;
+
     size_t new_end = offset + written_total;
     if (new_end > fi->file_size) {
         fi->file_size = new_end;
         fi->valid_data_length = new_end;
-        exfat_patch_entryset(fi);
+        dirty = 1;
     }
+    if (dirty)
+        exfat_patch_entryset(fi);
 
     return (long)written_total;
 }
@@ -553,6 +565,14 @@ static int exfat_truncate(INode_t *inode, size_t new_size) {
 
     exfat_patch_entryset(fi);
     return 0;
+}
+
+static void exfat_times(INode_t *inode, int64_t *atime, int64_t *mtime, int64_t *ctime) {
+    exfat_inode_t *fi = inode->internal_data;
+    if (!fi) return;
+    *atime = clock_from_dos(fi->accessed_timestamp >> 16, fi->accessed_timestamp & 0xFFFF);
+    *mtime = clock_from_dos(fi->modified_timestamp >> 16, fi->modified_timestamp & 0xFFFF);
+    *ctime = clock_from_dos(fi->create_timestamp >> 16, fi->create_timestamp & 0xFFFF);
 }
 
 static size_t exfat_size(INode_t *inode) {
@@ -693,6 +713,7 @@ static int exfat_create(INode_t *parent, const char *name, size_t namelen,
     file.entry_type      = EXFAT_ENTRY_FILE;
     file.secondary_count = secondary_count;
     file.file_attributes = (node_type == INODE_DIRECTORY) ? EXFAT_ATTR_DIRECTORY : EXFAT_ATTR_ARCHIVE;
+    file.create_timestamp = file.last_modified_timestamp = file.last_accessed_timestamp = clock_to_dos(clock_now());
 
     exfat_stream_dentry_t stream;
     memset(&stream, 0, sizeof(stream));
@@ -723,6 +744,9 @@ static int exfat_create(INode_t *parent, const char *name, size_t namelen,
     fi->dirent_cluster    = slot_cluster;
     fi->dirent_offset     = slot_off;
     fi->secondary_count   = secondary_count;
+    fi->create_timestamp   = file.create_timestamp;
+    fi->modified_timestamp = file.last_modified_timestamp;
+    fi->accessed_timestamp = file.last_accessed_timestamp;
 
     INode_t *inode = kmalloc(sizeof(*inode));
     if (!inode) { kfree(fi); return -ENOMEM; }
@@ -851,6 +875,7 @@ static const INodeOps_t exfat_dir_ops = {
     .unlink  = exfat_unlink,
     .rename  = exfat_rename,
     .drop    = exfat_drop,
+    .times   = exfat_times,
 };
 
 static const INodeOps_t exfat_file_ops = {
@@ -859,6 +884,7 @@ static const INodeOps_t exfat_file_ops = {
     .truncate = exfat_truncate,
     .size     = exfat_size,
     .drop     = exfat_drop,
+    .times    = exfat_times,
 };
 
 int exfat_mount(INode_t *dev_inode, INode_t **root) {

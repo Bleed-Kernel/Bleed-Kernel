@@ -52,6 +52,7 @@ typedef struct INodeOps{
     size_t (*size)    (INode_t* inode);
     int    (*poll)    (INode_t* inode);   // POLL* bits ready right now
     wait_queue_t *(*wait_queue)(INode_t* inode);
+    void   (*times)   (INode_t* inode, int64_t *atime, int64_t *mtime, int64_t *ctime);
 } INodeOps_t;
 
 /*

@@ -164,6 +164,10 @@ typedef struct {
     uint32_t dirent_cluster;
     uint32_t dirent_offset;
     uint8_t  secondary_count;
+
+    uint32_t create_timestamp;
+    uint32_t modified_timestamp;
+    uint32_t accessed_timestamp;
 } exfat_inode_t;
 
 int exfat_mount(INode_t *dev_inode, INode_t **root);

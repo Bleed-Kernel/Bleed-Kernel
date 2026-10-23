@@ -7,3 +7,5 @@ extern const filesystem tempfs;
 
 // point an empty tempfs file at contents already in memory, nothing is copied until its written to
 int tempfs_adopt(INode_t* inode, const void* contents, size_t size);
+
+void tempfs_set_mtime(INode_t* inode, int64_t mtime);

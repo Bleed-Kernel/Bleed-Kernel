@@ -137,7 +137,7 @@ void* task_mmap(task_t* task, size_t pages) {
 
         void *at = (void *)(base + done * PAGE_SIZE);
         if (!phys || paging_map_range(task->page_map, phys, (uint64_t)at, want,
-                                      PTE_PRESENT | PTE_WRITABLE | PTE_USER) != 0) {
+                                      PTE_PRESENT | PTE_WRITABLE | PTE_USER | PTE_NX) != 0) {
             if (phys) {
                 vmm_unmap_pages(task->page_map, at, want);
                 pmm_free_pages(phys, want);

@@ -10,6 +10,7 @@
 #include <mm/spinlock.h>
 #include <fs/vfs.h>
 #include <cpu/features/fpu.h>
+#include <cpu/msrs.h>
 
 #include "priv_scheduler.h"
 
@@ -163,6 +164,7 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
 
     // the fpu registers are left alone, the next task traps if it wants them
     fpu_switch(current_task);
+    wrmsr(MSR_FS_BASE, current_task->fs_base);
 
     return (void*)next_task->context;
 }

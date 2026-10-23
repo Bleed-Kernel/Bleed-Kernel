@@ -21,6 +21,8 @@ typedef struct tempfs_INode{
     size_t capacity;
     tempfs_data_t* data;
     const uint8_t* borrowed;
+    int64_t mtime;
+    int64_t ctime;
 }tempfs_INode_t;
 
 extern const INodeOps_t dir_ops;

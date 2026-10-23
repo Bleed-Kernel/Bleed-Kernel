@@ -3,8 +3,9 @@
 #include <user/errno.h>
 #include <user/signal.h>
 #include <mm/spinlock.h>
+#include <user/user_copy.h>
 
-long sys_waitpid(uint64_t pid) {
+static long wait_child(uint64_t pid, int *status) {
     if (pid == 0)
         return -EINVAL;
 
@@ -39,6 +40,7 @@ long sys_waitpid(uint64_t pid) {
 
         if (child->state == TASK_ZOMBIE) {
             uint64_t child_pid = child->id;
+            *status = child->exit_signal ? (child->exit_signal & 0x7F) : (child->exit_code & 0xFF) << 8;
             current->wait_target_pid = 0;
             irq_restore(flags);
             sched_mark_task_dead(child);
@@ -61,4 +63,20 @@ long sys_waitpid(uint64_t pid) {
 
         sched_yield(get_current_task());
     }
+}
+
+long sys_waitpid(uint64_t pid) {
+    int status;
+    return wait_child(pid, &status);
+}
+
+long sys_waitstatus(uint64_t pid, int *user_status) {
+    int status = 0;
+    long r = wait_child(pid, &status);
+    if (r < 0 || !user_status)
+        return r;
+
+    if (copy_to_user(get_current_task(), user_status, &status, sizeof(status)) != 0)
+        return -EFAULT;
+    return r;
 }
