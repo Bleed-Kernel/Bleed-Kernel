@@ -1,5 +1,4 @@
 #include <drivers/usb/usb_hid.h>
-#include <drivers/usb/ohci.h>
 #include <drivers/usb/usb.h>
 
 bool usb_hid_boot_probe(usb_device_t *dev, const uint8_t *config, size_t len,
@@ -45,13 +44,13 @@ int usb_hid_set_boot_protocol(usb_device_t *dev, uint8_t interface) {
         .value        = USB_HID_PROTOCOL_BOOT,
         .index        = interface,
     };
-    int r = ohci_control(dev, &setup, NULL);
+    int r = usb_control(dev, &setup, NULL);
 
     // idle rate 0 = only talk when something changed, some devices
     // stall this and thats allowed so the result doesnt matter
     setup.request = USB_HID_SET_IDLE;
     setup.value   = 0;
-    ohci_control(dev, &setup, NULL);
+    usb_control(dev, &setup, NULL);
 
     return r;
 }

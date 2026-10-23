@@ -1,8 +1,7 @@
 #include <stdint.h>
 #include <drivers/ps2/PS2_keyboard.h>
 #include <drivers/ps2/PS2_mouse.h>
-#include <drivers/usb/ohci.h>
-#include <drivers/usb/usb_keyboard.h>
+#include <drivers/usb/usb.h>
 #include <drivers/ac97/ac97.h>
 #include <drivers/i2c/i2c_trackpad.h>
 #include <drivers/serial/serial.h>
@@ -12,8 +11,7 @@ volatile uint64_t timer_ticks = 0;
 
 cpu_context_t *timer_handle(cpu_context_t *ctx) {
     // usb has no irq of its own here, it gets serviced off the tick instead
-    ohci_poll();
-    usb_keyboard_tick();
+    usb_poll();
     ac97_poll();
 
     // before the tick so a task whose sleep just ran out can be picked straight away

@@ -20,3 +20,5 @@
 /// @param len length of config
 /// @return true if a mouse interface was claimed
 bool usb_mouse_probe(usb_device_t *dev, const uint8_t *config, size_t len);
+
+void usb_mouse_disconnect(usb_device_t *dev);

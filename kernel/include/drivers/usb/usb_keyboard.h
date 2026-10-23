@@ -33,3 +33,6 @@ bool usb_keyboard_probe(usb_device_t *dev, const uint8_t *config, size_t len);
 
 /// @brief key repeat, usb keyboards dont do typematic themselves like PS2 ones
 void usb_keyboard_tick(void);
+
+// Forget any keyboard on dev, whatever was held down gets let go
+void usb_keyboard_disconnect(usb_device_t *dev);

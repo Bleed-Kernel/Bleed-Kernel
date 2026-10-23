@@ -291,7 +291,9 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     ctx->cs  = cs;
     ctx->ss  = ss;
     ctx->rflags = 0x202;
-    ctx->rsp = (cs & 0x3) ? USER_STACK_TOP : kernel_stack_top;
+    // a kernel task starts as if entry was called, so rsp is 8 off 16 like the abi wants.
+    // flat 16 here put every local 8 out and fxsave in memset faulted on its save area
+    ctx->rsp = (cs & 0x3) ? USER_STACK_TOP : kernel_stack_top - 8;
     
     task->task_privilege = (cs & 0x3) ? P_USER : P_KERNEL;
     task->context = ctx;

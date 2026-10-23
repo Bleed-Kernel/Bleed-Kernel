@@ -31,7 +31,8 @@
 
 #include <drivers/ps2/PS2_mouse.h>
 #include <drivers/ps2/PS2_keyboard.h>
-#include <drivers/usb/ohci.h>
+#include <drivers/usb/usb.h>
+#include <drivers/usb/usb_storage.h>
 #include <drivers/i2c/dw_i2c.h>
 #include <drivers/i2c/i2c_trackpad.h>
 #include <devices/type/null_device.h>
@@ -215,8 +216,8 @@ void init_devices(){
     mouse_device_init();
     BLOG_OK("mouse Device Ready");
 
-    BLOG_INFO("Enumerating OHCI Controller");
-    ohci_init();
+    BLOG_INFO("Enumerating USB Controllers");
+    usb_init();
 
     BLOG_INFO("Enumerating I2C Controllers");
     dw_i2c_init();
@@ -227,6 +228,8 @@ void init_devices(){
     BLOG_INFO("Starting serial Device");
     serial_device_register();
     BLOG_OK("serial Device Ready");
+    if (serial_log_separate())
+        BLOG_OK("serial log on COM3, shell on COM1");
 
     if (serial_tty_init() == 0)
         BLOG_OK("serial terminal Ready");
@@ -266,6 +269,9 @@ void init_block_devices(){
         vfs_mount("/mnt/nvme", nvme0p1);
         BLOG_OK("\t - NVMe Device Ready");
     }
+
+    // usb_init already found the drives, usb_service does the same for ones plugged in later
+    usb_storage_automount();
 
     BLOG_OK("Block Device Probing");
 }
@@ -372,6 +378,9 @@ bool init_userspace(){
     // after init so it keeps the pid it always had
     if (sched_create_task(read_cr3(), (uint64_t)power_button_watch, KERNEL_CS, KERNEL_SS, "power_service"))
         BLOG_OK("Power watchdog started");
+
+    if (sched_create_task(read_cr3(), (uint64_t)usb_hotplug_watch, KERNEL_CS, KERNEL_SS, "usb_service"))
+        BLOG_OK("USB hotplug service started");
 
     if (i2c_trackpad_present() &&
         sched_create_task(read_cr3(), (uint64_t)i2c_trackpad_watch, KERNEL_CS, KERNEL_SS, "i2c_service"))

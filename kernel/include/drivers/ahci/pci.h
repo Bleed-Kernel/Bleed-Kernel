@@ -40,6 +40,7 @@
 #define PCI_PROGIF_UHCI         0x00
 #define PCI_PROGIF_OHCI         0x10
 #define PCI_PROGIF_EHCI         0x20
+#define PCI_PROGIF_XHCI         0x30
 
 //Intel LPSS (i2c and spi) has no subclass of its own, it sits under "other"
 #define PCI_CLASS_SIGNAL        0x11

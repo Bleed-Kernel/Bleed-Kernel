@@ -1,11 +1,11 @@
 #include <drivers/usb/usb_keyboard.h>
 #include <drivers/usb/usb_hid.h>
-#include <drivers/usb/ohci.h>
 #include <drivers/usb/usb.h>
 #include <drivers/serial/serial.h>
 #include <input/keyboard_dispatch.h>
 #include <input/keyboard_input.h>
 #include <ACPI/acpi_hpet.h>
+#include <mm/spinlock.h>
 #include <ansii.h>
 #include <string.h>
 #include <stdio.h>
@@ -145,7 +145,7 @@ static bool usb_keyboard_holds(const uint8_t *report, uint8_t usage) {
 // presses and releases fall out of comparing it with the one before
 static void usb_keyboard_report(void *ctx, const uint8_t *report, size_t len) {
     usb_keyboard_t *kbd = ctx;
-    if (len < USB_KBD_REPORT_SIZE) return;
+    if (!kbd->used || len < USB_KBD_REPORT_SIZE) return;
 
     // too many keys down, every slot reads rollover and tells us nothing
     if (report[2] == USB_KBD_USAGE_ROLLOVER) return;
@@ -221,8 +221,7 @@ static bool usb_keyboard_attach(usb_device_t *dev, uint8_t interface,
     if (usb_hid_set_boot_protocol(dev, interface) < 0)
         serial_printf(LOG_WARN "usbkbd: SET_PROTOCOL failed, hoping its in boot protocol already\n");
 
-    if (ohci_interrupt_in(dev, ep->address, ep->max_packet & 0x7FF,
-                          usb_keyboard_report, kbd) < 0)
+    if (usb_interrupt_in(dev, ep, usb_keyboard_report, kbd) < 0)
         return false;
 
     kbd->used = true;
@@ -233,4 +232,21 @@ static bool usb_keyboard_attach(usb_device_t *dev, uint8_t interface,
 
 bool usb_keyboard_probe(usb_device_t *dev, const uint8_t *config, size_t len) {
     return usb_hid_boot_probe(dev, config, len, USB_HID_PROTO_KEYBOARD, usb_keyboard_attach);
+}
+
+void usb_keyboard_disconnect(usb_device_t *dev) {
+    static const uint8_t nothing_held[USB_KBD_REPORT_SIZE] = { 0 };
+
+    for (int i = 0; i < USB_KBD_MAX; i++) {
+        usb_keyboard_t *kbd = &keyboards[i];
+        if (!kbd->used || kbd->dev != dev) continue;
+        
+        unsigned long flags = irq_push();
+        usb_keyboard_report(kbd, nothing_held, sizeof(nothing_held));
+        kbd->used = false;
+        kbd->dev  = NULL;
+        irq_restore(flags);
+
+        serial_printf(LOG_INFO "usbkbd: keyboard %04x:%04x gone\n", dev->vendor_id, dev->product_id);
+    }
 }

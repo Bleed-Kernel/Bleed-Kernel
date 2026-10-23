@@ -1,10 +1,10 @@
 #include <drivers/usb/usb_mouse.h>
 #include <drivers/usb/usb_hid.h>
-#include <drivers/usb/ohci.h>
 #include <drivers/usb/usb.h>
 #include <drivers/serial/serial.h>
 #include <input/mouse_dispatch.h>
 #include <input/mouse_input.h>
+#include <mm/spinlock.h>
 #include <ansii.h>
 #include <string.h>
 #include <stdio.h>
@@ -19,8 +19,8 @@ static usb_mouse_t mice[USB_MOUSE_MAX];
 
 // unlike the keyboard a mouse report is already an event, deltas since the last one
 static void usb_mouse_report(void *ctx, const uint8_t *report, size_t len) {
-    (void)ctx;
-    if (len < USB_MOUSE_REPORT_SIZE) return;
+    usb_mouse_t *mouse = ctx;
+    if (!mouse->used || len < USB_MOUSE_REPORT_SIZE) return;
 
     // usb counts +y as towards you which is already down the screen, PS/2 is
     // the one thats upside down so no flip here
@@ -59,8 +59,7 @@ static bool usb_mouse_attach(usb_device_t *dev, uint8_t interface,
     if (usb_hid_set_boot_protocol(dev, interface) < 0)
         serial_printf(LOG_WARN "usbmouse: SET_PROTOCOL failed, hoping its in boot protocol already\n");
 
-    if (ohci_interrupt_in(dev, ep->address, ep->max_packet & 0x7FF,
-                          usb_mouse_report, mouse) < 0)
+    if (usb_interrupt_in(dev, ep, usb_mouse_report, mouse) < 0)
         return false;
 
     mouse->used = true;
@@ -71,4 +70,20 @@ static bool usb_mouse_attach(usb_device_t *dev, uint8_t interface,
 
 bool usb_mouse_probe(usb_device_t *dev, const uint8_t *config, size_t len) {
     return usb_hid_boot_probe(dev, config, len, USB_HID_PROTO_MOUSE, usb_mouse_attach);
+}
+
+void usb_mouse_disconnect(usb_device_t *dev) {
+    for (int i = 0; i < USB_MOUSE_MAX; i++) {
+        usb_mouse_t *mouse = &mice[i];
+        if (!mouse->used || mouse->dev != dev) continue;
+
+        mouse_event_t ev = { 0 };
+        unsigned long flags = irq_push();
+        mouse_input_dispatch(&ev);
+        mouse->used = false;
+        mouse->dev  = NULL;
+        irq_restore(flags);
+
+        serial_printf(LOG_INFO "usbmouse: mouse %04x:%04x gone\n", dev->vendor_id, dev->product_id);
+    }
 }

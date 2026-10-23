@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <mm/pmm.h>
+#include <mm/spinlock.h>
 #include <drivers/usb/usb.h>
 
 /*
@@ -112,6 +113,7 @@
 #define OHCI_PORT_RESET_MS      100
 #define OHCI_CTRL_TIMEOUT_MS    500
 #define OHCI_PIPE_MAX_ERRORS    8       // strikes before we decide a device is gone
+#define OHCI_DEBOUNCE_MS        100     // usb2 spec wants 100ms between attach and reset
 
 #define OHCI_POLL_FRAMES        8       // interrupt endpoints get serviced every 8ms
 
@@ -166,6 +168,7 @@ typedef struct ohci_dma {
 
 typedef struct ohci_pipe {
     bool               used;
+    usb_device_t      *dev;
     ohci_ed_t         *ed;
     ohci_td_t         *td;      // the one the controller is working on
     ohci_td_t         *tail;    // spare, swaps with td every report
@@ -182,26 +185,20 @@ typedef struct ohci_hc {
     paddr_t      dma_phys;
     ohci_dma_t  *dma;
     uint8_t      port_count;
-    uint8_t      next_address;
 
+    spinlock_t   lock;
     uint32_t     ctrl_retired;  // bitmask of control TDs the controller has handed back
     uint32_t     ctrl_cc;       // first bad condition code seen, 0 if clean
 
     ohci_pipe_t  pipes[OHCI_MAX_PIPES];
     usb_device_t devices[OHCI_MAX_DEVICES];
-    int          device_count;
+    usb_device_t *port_dev[OHCI_MAX_PORTS];
 } ohci_hc_t;
 
 // Find every OHCI controller, take it off the firmware and enumerate the root ports
 void ohci_init(void);
 
-// Run a control transfer on endpoint 0 and wait for it
-// returns the number of data bytes moved or negative on failure
-int ohci_control(usb_device_t *dev, const usb_setup_t *setup, void *data);
-
-// Start polling an interrupt IN endpoint, cb fires from ohci_poll() for every report
-int ohci_interrupt_in(usb_device_t *dev, uint8_t endpoint, uint16_t max_packet,
-                      usb_interrupt_cb_t cb, void *ctx);
-
 // Collect finished transfers, called off the timer tick since we dont route the PCI interrupt
 void ohci_poll(void);
+
+void ohci_hotplug(void);

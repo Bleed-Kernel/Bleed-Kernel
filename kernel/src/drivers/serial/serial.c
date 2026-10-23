@@ -14,10 +14,20 @@
 #include <drivers/serial/serial.h>
 
 #define PORT_COM1   0x3F8
+#define PORT_COM3   0x3E8
 #define SERIAL_TIMEOUT 100000
 #define SERIAL_LOG_SIZE 65536
 
-static int serial_available = 0;
+typedef struct {
+    uint16_t base;
+    int      available;
+} serial_port_t;
+
+// COM1 is the shell, logs go down COM3 if theres one and share COM1 if not
+static serial_port_t com1 = { .base = PORT_COM1 };
+static serial_port_t com3 = { .base = PORT_COM3 };
+static serial_port_t *log_port = &com1;
+
 static spinlock_t serial_lock = {0};
 static serial_rx_t serial_rx = NULL;
 
@@ -25,18 +35,18 @@ static serial_rx_t serial_rx = NULL;
 static char serial_log_buffer[SERIAL_LOG_SIZE];
 static size_t serial_log_total = 0;
 
-static int is_serial_transmit_empty(void) {
-    return inb(PORT_COM1 + 5) & 0x20;
+static int is_serial_transmit_empty(serial_port_t *port) {
+    return inb(port->base + 5) & 0x20;
 }
 
-static void serial_port_put(char c) {
+static void serial_port_put(serial_port_t *port, char c) {
     for (int t = 0; t < SERIAL_TIMEOUT; t++) {
-        if (is_serial_transmit_empty()) {
-            outb(PORT_COM1, c);
+        if (is_serial_transmit_empty(port)) {
+            outb(port->base, c);
             return;
         }
     }
-    serial_available = 0;
+    port->available = 0;
 }
 
 // the log is kept whether or not theres a port to send it down, on a laptop
@@ -44,12 +54,12 @@ static void serial_port_put(char c) {
 static void serial_emit_char(char c) {
     serial_log_buffer[serial_log_total++ % SERIAL_LOG_SIZE] = c;
 
-    if (!serial_available) return;
+    if (!log_port->available) return;
 
     if (c == '\n')
-        serial_port_put('\r');
-    if (serial_available)
-        serial_port_put(c);
+        serial_port_put(log_port, '\r');
+    if (log_port->available)
+        serial_port_put(log_port, c);
 }
 
 static void serial_emit_str(const char *str) {
@@ -64,36 +74,45 @@ static void serial_emit_n(const char *buf, size_t len) {
     }
 }
 
-/// @brief initialse and test the serial port so its ready for writing
-/// @return success
+// mcr is what the port is left with, OUT2 (0x08) is what lets it pull its irq line
+static int serial_port_probe(serial_port_t *port, uint8_t mcr) {
+    uint16_t base = port->base;
+    port->available = 0;
+
+    outb(base + 4, 0x0F);
+    if (inb(base + 4) != 0x0F)
+        return -ENODEV;
+
+    outb(base + 1, 0x00);
+    outb(base + 3, 0x80);
+    outb(base + 0, 0x03);
+    outb(base + 1, 0x00);
+    outb(base + 3, 0x03);
+    outb(base + 2, 0xC7);
+    outb(base + 4, 0x0B);
+    outb(base + 4, 0x1E);
+    outb(base + 0, 0xAE);
+
+    if (inb(base + 0) != 0xAE)
+        return -ENODEV;
+
+    outb(base + 4, mcr);
+    port->available = 1;
+    return 0;
+}
+
+/// @brief initialse and test the serial ports so theyre ready for writing
+/// @return success if any port came up
 int serial_init(void) {
     spinlock_init(&serial_lock);
 
-    outb(PORT_COM1 + 4, 0x0F);
-    uint8_t test = inb(PORT_COM1 + 4);
-    if (test != 0x0F) {
-        serial_available = 0;
-        return -ENODEV;
-    }
+    serial_port_probe(&com1, 0x0F);
 
-    outb(PORT_COM1 + 1, 0x00);
-    outb(PORT_COM1 + 3, 0x80);
-    outb(PORT_COM1 + 0, 0x03);
-    outb(PORT_COM1 + 1, 0x00);
-    outb(PORT_COM1 + 3, 0x03);
-    outb(PORT_COM1 + 2, 0xC7);
-    outb(PORT_COM1 + 4, 0x0B);
-    outb(PORT_COM1 + 4, 0x1E);
-    outb(PORT_COM1 + 0, 0xAE);
+    // COM3 shares IRQ4 with COM1 and only ever sends, so OUT2 stays off
+    if (serial_port_probe(&com3, 0x03) == 0)
+        log_port = &com3;
 
-    if (inb(PORT_COM1 + 0) != 0xAE) {
-        serial_available = 0;
-        return -ENODEV;
-    }
-
-    outb(PORT_COM1 + 4, 0x0F);
-    serial_available = 1;
-    return 0;
+    return com1.available || com3.available ? 0 : -ENODEV;
 }
 
 /// @brief put a single char, handles newline ansii
@@ -132,25 +151,29 @@ void serial_write_n(const char *buf, size_t len) {
 // straight down the port and not kept in the log, a char at a time so a long write
 // doesnt sit there with interrupts off
 void serial_send_n(const char *buf, size_t len) {
-    for (size_t i = 0; i < len && serial_available; i++) {
+    for (size_t i = 0; i < len && com1.available; i++) {
         unsigned long flags = irq_push();
         asm volatile("cli" ::: "memory");
         spinlock_acquire(&serial_lock);
         if (buf[i] == '\n')
-            serial_port_put('\r');
-        serial_port_put(buf[i]);
+            serial_port_put(&com1, '\r');
+        serial_port_put(&com1, buf[i]);
         spinlock_release(&serial_lock);
         irq_restore(flags);
     }
 }
 
 int serial_present(void) {
-    return serial_available;
+    return com1.available;
+}
+
+int serial_log_separate(void) {
+    return log_port != &com1;
 }
 
 void serial_rx_listen(serial_rx_t rx) {
     serial_rx = rx;
-    if (serial_available)
+    if (com1.available)
         outb(PORT_COM1 + 1, 0x01);  // data available interrupt only
 }
 
@@ -265,7 +288,7 @@ static void serial_print_num(uint64_t val, int base, int is_signed, int uppercas
     }
 }
 
-/// @brief Write a formatted string to COM1
+/// @brief Write a formatted string to the log port
 /// @param fmt formatted string
 /// @param  VARDIC
 void serial_printf(const char *fmt, ...) {

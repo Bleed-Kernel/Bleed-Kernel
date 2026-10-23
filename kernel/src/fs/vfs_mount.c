@@ -219,6 +219,82 @@ int vfs_umount(const char *path) {
     return -EINVAL;
 }
 
+bool vfs_device_busy(INode_t *dev_inode) {
+    bool busy = false;
+
+    spinlock_acquire(&mount_lock);
+    for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (mount_table[i].active && mount_table[i].fs_root &&
+            mount_table[i].dev_inode == dev_inode && mount_table[i].fs_root->shared > 1)
+            busy = true;
+    }
+    spinlock_release(&mount_lock);
+    return busy;
+}
+
+int vfs_device_mount_path(INode_t *dev_inode, char *out, size_t size) {
+    int r = -ENOENT;
+
+    spinlock_acquire(&mount_lock);
+    for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (mount_table[i].active && mount_table[i].fs_root && mount_table[i].dev_inode == dev_inode) {
+            strncpy(out, mount_table[i].mount_path, size - 1);
+            out[size - 1] = '\0';
+            r = 0;
+            break;
+        }
+    }
+    spinlock_release(&mount_lock);
+    return r;
+}
+
+int vfs_umount_device(INode_t *dev_inode) {
+    int count = 0;
+    if (!dev_inode) return 0;
+
+    for (;;) {
+        char path[PATH_MAX];
+
+        spinlock_acquire(&mount_lock);
+        int slot = -1;
+        for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+            if (mount_table[i].active && mount_table[i].fs_root &&
+                mount_table[i].dev_inode == dev_inode) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) {
+            spinlock_release(&mount_lock);
+            return count;
+        }
+
+        INode_t *fs_root = mount_table[slot].fs_root;
+        INode_t *mp      = mount_table[slot].mountpoint;
+        bool     busy    = fs_root->shared > 1;
+        strncpy(path, mount_table[slot].mount_path, PATH_MAX - 1);
+        path[PATH_MAX - 1] = '\0';
+
+        mp->mounted = NULL;
+        mount_table[slot].fs_root       = NULL;
+        mount_table[slot].mountpoint    = NULL;
+        mount_table[slot].dev_inode     = NULL;
+        mount_table[slot].mount_path[0] = '\0';
+        mount_table[slot].active        = false;
+        spinlock_release(&mount_lock);
+
+        // busy or not it goes, whatever is open in there holds its own refs and
+        // gets errors back from the device from now on
+        vfs_drop(fs_root);
+        vfs_drop(mp);
+        if (busy)
+            serial_printf(LOG_WARN "vfs_umount: pulled %s out with files still open in it\n", path);
+        else
+            serial_printf(LOG_OK "vfs_umount: unmounted %s\n", path);
+        count++;
+    }
+}
+
 int vfs_umount_all(void) {
     int busy = 0;
 

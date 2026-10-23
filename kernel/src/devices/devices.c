@@ -92,6 +92,37 @@ long device_register(INode_t *device, char *name){
     return 0;
 }
 
+/// @brief take a device back out of /dev, for things that can be unplugged
+/// @param name name it was registered as
+/// @return 0 on success, negative status code on failure
+long device_unregister(const char *name){
+    if (!name)
+        return -EINVAL;
+
+    spinlock_acquire(&device_list_lock);
+    INode_t *inode = NULL;
+    for (size_t i = 0; i < device_list_count; i++){
+        if (strcmp(device_list[i].name, name) == 0){
+            inode = device_list[i].inode;
+            kfree(device_list[i].name);
+            device_list[i] = device_list[device_list_count - 1];
+            device_list_count--;
+            break;
+        }
+    }
+    spinlock_release(&device_list_lock);
+
+    if (!inode)
+        return -ENOENT;
+
+    char dev_path_buffer[128] = {0};
+    snprintf(dev_path_buffer, sizeof(dev_path_buffer), "/dev/%s", name);
+    vfs_unlink(dev_path_buffer);
+
+    vfs_drop(inode);
+    return 0;
+}
+
 /// @brief get a device by its name
 /// @param name in name
 /// @return return device structure pointer, null indicates an error.

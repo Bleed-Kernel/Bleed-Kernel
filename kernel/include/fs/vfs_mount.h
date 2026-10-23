@@ -1,4 +1,6 @@
 #pragma once
+#include <stdbool.h>
+#include <stddef.h>
 
 #include <fs/vfs.h>
 #include <devices/type/blk_device.h>
@@ -20,6 +22,15 @@ int vfs_umount(const char *path);
 
 // unmount everything, for when the power is about to go. returns how many wouldnt come off
 int vfs_umount_all(void);
+
+// unmount everything sitting on dev_inode even if its busy, for a device thats already gone.
+int vfs_umount_device(INode_t *dev_inode);
+
+// true if something mounted from dev_inode has files open or a cwd in it
+bool vfs_device_busy(INode_t *dev_inode);
+
+// where dev_inode is mounted, -ENOENT if it isnt
+int vfs_device_mount_path(INode_t *dev_inode, char *out, size_t size);
 
 struct user_mount_info;
 

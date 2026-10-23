@@ -1,5 +1,7 @@
 export MAKEFLAGS = -j8
 
+QEMU_NAME ?= The Bleed Kernel
+
 IMAGE_NAME := bleed-kernel
 OBJDIR := bin/obj
 KERNEL_BIN := bin/bleed-kernel
@@ -16,6 +18,8 @@ MAKEFLAGS += --no-print-directory
 IDE_DISK := idedisk.img
 SATA_DISK := satadisk.img
 NVME_DISK := nvmedisk.img
+USB_DISK := usbdisk.img
+DISKS := $(IDE_DISK) $(SATA_DISK) $(NVME_DISK) $(USB_DISK)
 DISK_SIZE_MB := 128
 
 LIMINE_VERSION := 12.9.2
@@ -110,7 +114,7 @@ INITRD_BIN := initrd/bin
 USERPROG_SRC ?= ..
 
 .PHONY: all
-all: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+all: $(IMAGE_NAME).iso $(DISKS)
 
 $(PROC_VERSION_FILE): FORCE
 	@mkdir -p $(dir $@)
@@ -295,13 +299,37 @@ else
 QEMU_HOST := --enable-kvm -display sdl
 endif
 
+USB ?= ohci
+ifeq ($(USB),xhci)
+QEMU_USB_HC := -device qemu-xhci,id=usb
+else ifeq ($(USB),ohci)
+QEMU_USB_HC := -device pci-ohci,id=usb
+else
+$(error USB=$(USB) isnt a thing, use USB=ohci or USB=xhci)
+endif
+QEMU_USB := $(QEMU_USB_HC) -device usb-kbd,bus=usb.0 -device usb-mouse,bus=usb.0 \
+            -drive file=$(USB_DISK),format=raw,if=none,id=usbstick \
+            -device usb-storage,bus=usb.0,drive=usbstick
+
+# asking for a controller by name means you want to test it, so no PS/2 to fall back on
+ifneq ($(filter command line environment,$(origin USB)),)
+QEMU_USB += -machine pc,i8042=off
+endif
+
+LOG_SOCK ?= /tmp/bleed-com3-$(shell id -u).sock
+QEMU_SERIAL_SETUP = rm -f "$(LOG_SOCK)"; serial="-serial mon:stdio"; \
+	if [ "$(LOG)" != shared ] && sh tools/logterm.sh "$(LOG_SOCK)"; then \
+		serial="$$serial -serial null -serial unix:$(LOG_SOCK),server=on,wait=on"; \
+	fi;
+
 define run_qemu
-	qemu-system-x86_64 \
+	$(QEMU_SERIAL_SETUP) qemu-system-x86_64 \
+		-name "$(QEMU_NAME)" \
 		-cdrom $(IMAGE_NAME).iso \
 		$(QEMU_HOST) \
 		-boot d \
 		-m $(MEMSZ) \
-		-serial mon:stdio \
+		$$serial \
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
@@ -309,29 +337,30 @@ define run_qemu
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
 		$(QEMU_AUDIO) \
+		$(QEMU_USB) \
 		$(1)
 endef
 
-# what an intel mac looks like to us: no PS/2 controller at all, the keyboard and trackpad hang off OHCI root ports
-QEMU_OHCI_INPUT := -machine pc,i8042=off -device pci-ohci,id=ohci -device usb-kbd,bus=ohci.0 -device usb-mouse,bus=ohci.0
+# what an intel mac looks like to us: no PS/2 controller at all, the keyboard and trackpad hang off the usb root ports
+QEMU_OHCI_INPUT := -machine pc,i8042=off
 
 .PHONY: run
-run: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+run: $(IMAGE_NAME).iso $(DISKS)
 	$(run_qemu)
 
 # no window, the desktop still runs but the way in is the shell on this terminal. ctrl+a x quits
 .PHONY: run-headless
-run-headless: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+run-headless: $(IMAGE_NAME).iso $(DISKS)
 	$(call run_qemu,-display none)
 
-# same as run but the only keyboard and mouse are usb ones on an OHCI controller, for testing the usb stack
+# same as run but the only keyboard and mouse are the usb ones, for testing the usb stack (USB=xhci works here too)
 .PHONY: run-ohci
-run-ohci: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+run-ohci: $(IMAGE_NAME).iso $(DISKS)
 	$(call run_qemu,$(QEMU_OHCI_INPUT))
 
 # boot the existing iso as-is: no rebuild, no clone or pull, pair with `make repack` to avoid git entirely
 .PHONY: runlocal
-runlocal: $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+runlocal: $(DISKS)
 	@if [ ! -f $(IMAGE_NAME).iso ]; then \
 		echo "ERROR: $(IMAGE_NAME).iso not found, run 'make repack' first"; \
 		exit 1; \
@@ -339,34 +368,37 @@ runlocal: $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 	$(run_qemu)
 
 .PHONY: run-uefi
-run-uefi: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
-	qemu-system-x86_64 \
+run-uefi: $(IMAGE_NAME).iso $(DISKS)
+	$(QEMU_SERIAL_SETUP) qemu-system-x86_64 \
+		-name "$(QEMU_NAME)" \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		-cdrom $(IMAGE_NAME).iso \
 		$(QEMU_HOST) \
 		-boot d \
 		-m $(MEMSZ) \
-		-serial mon:stdio \
+		$$serial \
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
 		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
-		$(QEMU_AUDIO)
+		$(QEMU_AUDIO) \
+		$(QEMU_USB)
 
 #apple silicon emulation sucks, if you are getting performance issues, please test it on an x86_64 machine before submitting an issue!
 #SMAP and SMEP are known to be funny on mac, it may not emulate it at all, just be careful but bleed should handle it.
 .PHONY: run-mac
-run-mac: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
-	qemu-system-x86_64 \
+run-mac: $(IMAGE_NAME).iso $(DISKS)
+	$(QEMU_SERIAL_SETUP) qemu-system-x86_64 \
+		-name "$(QEMU_NAME)" \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_FW) \
 		-cdrom $(IMAGE_NAME).iso \
 		-accel tcg,thread=multi,tb-size=1024 \
 		-cpu max \
 		-m $(MEMSZ) \
 		-boot d \
-		-serial mon:stdio \
+		$$serial \
 		-display $(QEMU_MAC_DISPLAY) \
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
@@ -374,7 +406,8 @@ run-mac: $(IMAGE_NAME).iso $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
 		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
-		$(QEMU_AUDIO)
+		$(QEMU_AUDIO) \
+		$(QEMU_USB)
 
 define create_ext2_disk
     @echo "[DISK] Creating $(1) ($(2))"
@@ -442,9 +475,12 @@ $(SATA_DISK):
 $(NVME_DISK):
 	$(call create_ext2_disk,$@,gpt,if your seeing this the nvme driver works which is the most awesomest)
 
+$(USB_DISK):
+	$(call create_ext2_disk,$@,msdos,if your seeing this usb mass storage works and we can finally move files around)
+
 .PHONY: clean
 clean:
-	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+	rm -rf bin $(IMAGE_NAME).iso iso_root $(DISKS)
 	rm -f $(PROC_VERSION_FILE)
 	rm -f $(KERNEL_SYM)
 	find kernel klibc -name '*.o' -delete
@@ -458,7 +494,7 @@ clean:
 FORCE:
 
 distclean:
-	rm -rf bin $(IMAGE_NAME).iso iso_root $(IDE_DISK) $(SATA_DISK) $(NVME_DISK)
+	rm -rf bin $(IMAGE_NAME).iso iso_root $(DISKS)
 	rm -rf initrd/lib initrd/include
 	rm -f $(PROC_VERSION_FILE)
 	rm -f $(KERNEL_SYM)
