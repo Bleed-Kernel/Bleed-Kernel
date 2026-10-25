@@ -1,6 +1,6 @@
 DEFAULT_PROFILE ?= DEV
 
-PROGRAMS_MINIMAL := verdict crime-scene about cabinet taskv tvi cat echo write ioctl
+PROGRAMS_MINIMAL := verdict crime-scene about cabinet taskv tvi coreutils
 PROGRAMS_DEV     := $(PROGRAMS_MINIMAL) doom tetris specseek uikit-demo exhibit playback tcc
 PROGRAMS_RELEASE := $(PROGRAMS_DEV) quake2 fastfetch halflife hlds
 

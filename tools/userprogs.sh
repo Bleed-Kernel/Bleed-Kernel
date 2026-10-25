@@ -19,6 +19,15 @@ lib_arg() {
     fi
 }
 
+repo_done() {
+    for pair in $done_repos; do
+        if [ "${pair%%=*}" = "$1" ]; then
+            echo "${pair#*=}"
+            return
+        fi
+    done
+}
+
 build() {
     blibc_arg=$(lib_arg BLIBC_DIR blibc)
     crime_arg=$(lib_arg CRIME_DIR Crime-Scene)
@@ -26,26 +35,33 @@ build() {
     mkdir -p "$USER_BIN_DIR" "$INITRD/bin"
 
     names=""
+    done_repos=""
     for entry; do
         repo=${entry%% *}
         name=${entry##* }
         names="$names $name"
-        dir=$(find_dir "$repo" "$name")
 
-        if [ "$dir" != "$USER_BIN_DIR/$name" ]; then
-            echo "[USER] Using local checkout $dir for $name"
-        elif [ ! -d "$dir" ]; then
-            echo "[USER] Cloning $name from $repo"
-            git clone "$repo" "$dir"
-        else
-            echo "[USER] Pulling latest for $name"
-            (cd "$dir" && git pull --rebase)
+        # one repo can make lots of programs (coreutils), get it and build it once
+        dir=$(repo_done "$repo")
+        if [ -z "$dir" ]; then
+            dir=$(find_dir "$repo" "$name")
+
+            if [ "$dir" != "$USER_BIN_DIR/$name" ]; then
+                echo "[USER] Using local checkout $dir for $name"
+            elif [ ! -d "$dir" ]; then
+                echo "[USER] Cloning $name from $repo"
+                git clone "$repo" "$dir"
+            else
+                echo "[USER] Pulling latest for $name"
+                (cd "$dir" && git pull --rebase)
+            fi
+
+            echo "[USER] Preparing blibc for $name"
+            $MAKE -s -C "$dir" blibc $USERPROG_TOOLCHAIN $blibc_arg
+            echo "[USER] Building $name"
+            $MAKE -s -C "$dir" $USERPROG_TOOLCHAIN $blibc_arg $crime_arg $audio_arg
+            done_repos="$done_repos $repo=$dir"
         fi
-
-        echo "[USER] Preparing blibc for $name"
-        $MAKE -s -C "$dir" blibc $USERPROG_TOOLCHAIN $blibc_arg
-        echo "[USER] Building $name"
-        $MAKE -s -C "$dir" $USERPROG_TOOLCHAIN $blibc_arg $crime_arg $audio_arg
 
         if [ ! -f "$dir/bin/$name" ]; then
             echo "ERROR: $name binary not found"

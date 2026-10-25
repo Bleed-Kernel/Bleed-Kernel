@@ -23,8 +23,9 @@ NO_BUILD := $(filter runlocal repack,$(MAKECMDGOALS))
 include mk/programs.mk
 
 # keep the build order from ALL_PROGRAMS whatever order the profile lists them in
-PROGRAMS := $(filter $(PROGRAMS_$(PROFILE)),$(ALL_PROGRAMS))
-UNKNOWN_PROGRAMS := $(filter-out $(ALL_PROGRAMS),$(PROGRAMS_$(PROFILE)))
+PROFILE_PROGRAMS := $(patsubst coreutils,$(COREUTILS),$(PROGRAMS_$(PROFILE)))
+PROGRAMS := $(filter $(PROFILE_PROGRAMS),$(ALL_PROGRAMS))
+UNKNOWN_PROGRAMS := $(filter-out $(ALL_PROGRAMS),$(PROFILE_PROGRAMS))
 ifneq ($(UNKNOWN_PROGRAMS),)
 $(error PROGRAMS_$(PROFILE) has $(UNKNOWN_PROGRAMS) which arent in mk/programs.mk)
 endif
