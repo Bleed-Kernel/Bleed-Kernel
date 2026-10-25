@@ -25,4 +25,4 @@ initrd/proc/version
 
 *.img
 **/*.DS_Store
-.nvme_files/
+.nvme_files/config.local.mk
