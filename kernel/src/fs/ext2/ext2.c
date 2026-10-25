@@ -440,9 +440,11 @@ static long ext2_read(INode_t *inode, void *buf, size_t count, size_t offset) {
         uint32_t logical = (uint32_t)((offset + total) / fs->block_size);
         size_t   boff    = (offset + total) % fs->block_size;
         uint32_t phys    = ext2_get_data_block(fs, di, logical);
-        if (!phys) break;
 
-        if (ext2_read_block(fs, phys, block_buf) < 0) break;
+        if (!phys)
+            memset(block_buf, 0, fs->block_size);
+        else if (ext2_read_block(fs, phys, block_buf) < 0)
+            break;
 
         size_t avail = fs->block_size - boff;
         size_t chunk = count - total;

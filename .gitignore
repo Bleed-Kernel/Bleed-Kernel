@@ -17,6 +17,7 @@ initrd/bin/*
 # put there by programs that need more than their binary, tcc has its headers and libc in these
 initrd/lib/
 initrd/include/
+initrd/include/hlx
 
 tools/mksymtab
 initrd/etc/kernel.sym
@@ -24,3 +25,4 @@ initrd/proc/version
 
 *.img
 **/*.DS_Store
+.nvme_files/

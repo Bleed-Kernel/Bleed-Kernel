@@ -6,7 +6,7 @@ IMAGE_NAME := bleed-kernel
 OBJDIR := bin/obj
 KERNEL_BIN := bin/bleed-kernel
 OVMF_FW := edk2-ovmf/OVMF-pure-efi.fd
-MEMSZ := 512M
+MEMSZ := 1G
 PROC_VERSION_FILE := initrd/proc/version
 BUILD_GIT_HASH := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_GIT_COUNT := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
@@ -21,6 +21,13 @@ NVME_DISK := nvmedisk.img
 USB_DISK := usbdisk.img
 DISKS := $(IDE_DISK) $(SATA_DISK) $(NVME_DISK) $(USB_DISK)
 DISK_SIZE_MB := 128
+
+# programs that put files on the nvme disk with a `disk` make target, found next to us the same
+# way local program checkouts are. half life is the only one, its game files live in its own repo
+DISK_PROGRAMS = Bleed-HalfLife
+DISK_PROGRAM_DIRS = $(foreach p,$(DISK_PROGRAMS),$(wildcard $(USERPROG_SRC)/$(p)))
+NVME_FILES := .nvme_files
+NVME_DISK_SIZE_MB = $(if $(DISK_PROGRAM_DIRS),1024,$(DISK_SIZE_MB))
 
 LIMINE_VERSION := 12.9.2
 LIMINE_URL := https://github.com/Limine-Bootloader/Limine/releases/download/v$(LIMINE_VERSION)/limine-binary.tar.gz
@@ -102,6 +109,8 @@ USER_REPOS := \
 	"https://github.com/Bleed-Kernel/Bleed-Coreutils ioctl" \
 	"https://github.com/Bleed-Kernel/Bleed-TCC tcc" \
 	"https://github.com/Bleed-Kernel/Bleed-Fastfetch fastfetch" \
+	"https://github.com/Bleed-Kernel/Bleed-HalfLife halflife" \
+	"https://github.com/Bleed-Kernel/Bleed-HalfLife hlds" \
 
 USER_BIN_DIR := external/
 INITRD_BIN := initrd/bin
@@ -418,17 +427,18 @@ define create_ext2_disk
         echo "[DISK] ERROR: mkfs.ext2 not found. On macOS: brew install e2fsprogs"; \
         exit 1; \
     fi; \
-    dd if=/dev/zero of=$(1) bs=1M count=$(DISK_SIZE_MB) status=none; \
+    dd if=/dev/zero of=$(1) bs=1M count=$(or $(4),$(DISK_SIZE_MB)) status=none; \
     if [ "$(2)" = "gpt" ]; then \
         sgdisk -n 1:2048:0 -t 1:8300 $(1) > /dev/null 2>&1; \
     elif [ "$$(uname)" = "Darwin" ]; then \
-        echo "2048,$$(($(DISK_SIZE_MB) * 2048 - 2048)),0x83,-" | fdisk -y -r $(1) > /dev/null 2>&1; \
+        echo "2048,$$(($(or $(4),$(DISK_SIZE_MB)) * 2048 - 2048)),0x83,-" | fdisk -y -r $(1) > /dev/null 2>&1; \
     else \
         { printf 'o\nn\np\n1\n2048\n\nw\n'; } | fdisk $(1) > /dev/null 2>&1; \
     fi; \
     mkdir -p $(TMP_DIR); \
     echo "$(3)" > $(TMP_DIR)/hello.txt; \
-    truncate -s $$(($(DISK_SIZE_MB) - 1))M $(TMP_IMG); \
+    if [ -n "$(5)" ] && [ -d "$(5)" ]; then COPYFILE_DISABLE=1 cp -R "$(5)"/. $(TMP_DIR)/; fi; \
+    truncate -s $$(($(or $(4),$(DISK_SIZE_MB)) - 1))M $(TMP_IMG); \
     mkfs.ext2 -F -d $(TMP_DIR) $(TMP_IMG); \
     dd if=$(TMP_IMG) of=$(1) bs=1M seek=1 conv=notrunc status=none; \
     rm -rf $(TMP_IMG) $(TMP_DIR)
@@ -473,7 +483,14 @@ $(SATA_DISK):
 	$(call create_exfat_disk,$@,gpt,if your seeing this the sata driver AND exfat both work which is even more awesome)
 
 $(NVME_DISK):
-	$(call create_ext2_disk,$@,gpt,if your seeing this the nvme driver works which is the most awesomest)
+	@rm -rf $(NVME_FILES) && mkdir -p $(NVME_FILES)
+	@for dir in $(DISK_PROGRAM_DIRS); do \
+		grep -q '^disk:' "$$dir/Makefile" 2>/dev/null || continue; \
+		echo "[DISK] Getting $${dir##*/}'s files for $@"; \
+		$(MAKE) -s -C "$$dir" disk DISK=$(abspath $(NVME_FILES)) || exit 1; \
+	done
+	$(call create_ext2_disk,$@,gpt,if your seeing this the nvme driver works which is the most awesomest,$(NVME_DISK_SIZE_MB),$(NVME_FILES))
+	@rm -rf $(NVME_FILES)
 
 $(USB_DISK):
 	$(call create_ext2_disk,$@,msdos,if your seeing this usb mass storage works and we can finally move files around)
