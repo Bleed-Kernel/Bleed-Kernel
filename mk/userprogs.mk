@@ -3,6 +3,7 @@ INITRD_BIN   := initrd/bin
 
 USERPROGS_SH = MAKE="$(MAKE)" USERPROG_SRC="$(USERPROG_SRC)" USER_BIN_DIR="$(USER_BIN_DIR)" \
                INITRD="$(abspath initrd)" USERPROG_TOOLCHAIN="$(USERPROG_TOOLCHAIN)" SHARED_LIBS="$(SHARED_LIBS)" \
+               DATA_PROGRAMS="$(DATA_PROGRAMS)" \
                sh tools/userprogs.sh
 
 # clones/pulls/builds whatever the profile wants and leaves only those in initrd/bin

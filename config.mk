@@ -1,8 +1,8 @@
 DEFAULT_PROFILE ?= DEV
 
 PROGRAMS_MINIMAL := verdict crime-scene about cabinet taskv tvi coreutils
-PROGRAMS_DEV     := $(PROGRAMS_MINIMAL) doom tetris specseek uikit-demo exhibit playback tcc
-PROGRAMS_RELEASE := $(PROGRAMS_DEV) quake2 fastfetch halflife hlds
+PROGRAMS_DEV     := $(PROGRAMS_MINIMAL) doom tetris specseek uikit-demo exhibit playback tcc halflife hlds
+PROGRAMS_RELEASE := $(PROGRAMS_DEV) quake2 fastfetch
 
 USERPROG_SRC ?= ..
 
@@ -17,4 +17,4 @@ LOG       ?=
 # QEMU_AUDIODEV ?= coreaudio,out.buffer-count=10
 
 DISK_SIZE_MB ?= 128
-NVME_BIG_MB  ?= 1024
+DATA_SPARE_MB ?= 64

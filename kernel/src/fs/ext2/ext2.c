@@ -19,12 +19,19 @@
 static const INodeOps_t ext2_dir_ops;
 static const INodeOps_t ext2_file_ops;
 
+#define EXT2_READ_RUN   64
+
 static int ext2_read_bytes(ext2_fs_t *fs, size_t byte_off, void *buf, size_t count) {
     long r = inode_read(fs->dev, buf, count, byte_off);
     return (r == (long)count) ? 0 : -1;
 }
 
 static int ext2_write_bytes(ext2_fs_t *fs, size_t byte_off, const void *buf, size_t count) {
+    for (int i = 0; i < EXT2_MAP_CACHE; i++) {
+        size_t at = (size_t)fs->map_cache[i].block * fs->block_size;
+        if (fs->map_cache[i].block && byte_off < at + fs->block_size && at < byte_off + count)
+            fs->map_cache[i].block = 0;
+    }
     long r = inode_write(fs->dev, buf, count, byte_off);
     return (r == (long)count) ? 0 : -1;
 }
@@ -82,6 +89,30 @@ static int ext2_write_disk_inode(ext2_fs_t *fs, uint32_t ino, const ext2_disk_in
 }
 
 // Block mapping (single/double/triple indirect)
+// entry idx of an indirect block, out of map_cache when its one of the last few looked at
+static uint32_t ext2_map_entry(ext2_fs_t *fs, uint32_t block, uint32_t idx) {
+    if (!block) return 0;
+
+    int pick = 0;
+    for (int i = 0; i < EXT2_MAP_CACHE; i++) {
+        if (fs->map_cache[i].block == block) {
+            fs->map_cache[i].last_used = ++fs->map_clock;
+            return fs->map_cache[i].data[idx];
+        }
+        if (fs->map_cache[i].last_used < fs->map_cache[pick].last_used)
+            pick = i;
+    }
+
+    if (!fs->map_cache[pick].data && !(fs->map_cache[pick].data = kmalloc(fs->block_size)))
+        return 0;
+    fs->map_cache[pick].block = 0;
+    if (ext2_read_block(fs, block, fs->map_cache[pick].data) < 0)
+        return 0;
+    fs->map_cache[pick].block     = block;
+    fs->map_cache[pick].last_used = ++fs->map_clock;
+    return fs->map_cache[pick].data[idx];
+}
+
 static uint32_t ext2_get_data_block(ext2_fs_t *fs, const ext2_disk_inode_t *di,
                                      uint32_t logical_block) {
     uint32_t ptrs_per_block = fs->block_size / 4;
@@ -91,66 +122,21 @@ static uint32_t ext2_get_data_block(ext2_fs_t *fs, const ext2_disk_inode_t *di,
     }
     logical_block -= 12;
 
-    if (logical_block < ptrs_per_block) { // singly indirect
-        if (!di->i_block[12]) return 0;
-        uint32_t *indirect = kmalloc(fs->block_size);
-        if (!indirect) return 0;
-        ext2_read_block(fs, di->i_block[12], indirect);
-        uint32_t blk = indirect[logical_block];
-        kfree(indirect);
-        return blk;
-    }
+    if (logical_block < ptrs_per_block) // singly indirect
+        return ext2_map_entry(fs, di->i_block[12], logical_block);
     logical_block -= ptrs_per_block;
 
     if (logical_block < ptrs_per_block * ptrs_per_block) { // doubly indirect
-        if (!di->i_block[13]) return 0;
-        uint32_t *dind = kmalloc(fs->block_size);
-        if (!dind) return 0;
-        ext2_read_block(fs, di->i_block[13], dind);
-
-        uint32_t idx1 = logical_block / ptrs_per_block;
-        uint32_t idx2 = logical_block % ptrs_per_block;
-        uint32_t ind_blk = dind[idx1];
-        kfree(dind);
-        if (!ind_blk) return 0;
-
-        uint32_t *ind = kmalloc(fs->block_size);
-        if (!ind) return 0;
-        ext2_read_block(fs, ind_blk, ind);
-        uint32_t blk = ind[idx2];
-        kfree(ind);
-        return blk;
+        uint32_t ind_blk = ext2_map_entry(fs, di->i_block[13], logical_block / ptrs_per_block);
+        return ext2_map_entry(fs, ind_blk, logical_block % ptrs_per_block);
     }
 
     // tripply indirect
     logical_block -= ptrs_per_block * ptrs_per_block;
-    if (!di->i_block[14]) return 0;
-
-    uint32_t *tind = kmalloc(fs->block_size);
-    if (!tind) return 0;
-    ext2_read_block(fs, di->i_block[14], tind);
-
-    uint32_t idx1 = logical_block / (ptrs_per_block * ptrs_per_block);
-    uint32_t rem1 = logical_block % (ptrs_per_block * ptrs_per_block);
-    uint32_t dind_blk = tind[idx1];
-    kfree(tind);
-    if (!dind_blk) return 0;
-
-    uint32_t *dind = kmalloc(fs->block_size);
-    if (!dind) return 0;
-    ext2_read_block(fs, dind_blk, dind);
-    uint32_t idx2   = rem1 / ptrs_per_block;
-    uint32_t idx3   = rem1 % ptrs_per_block;
-    uint32_t ind_blk = dind[idx2];
-    kfree(dind);
-    if (!ind_blk) return 0;
-
-    uint32_t *ind = kmalloc(fs->block_size);
-    if (!ind) return 0;
-    ext2_read_block(fs, ind_blk, ind);
-    uint32_t blk = ind[idx3];
-    kfree(ind);
-    return blk;
+    uint32_t rem1     = logical_block % (ptrs_per_block * ptrs_per_block);
+    uint32_t dind_blk = ext2_map_entry(fs, di->i_block[14], logical_block / (ptrs_per_block * ptrs_per_block));
+    uint32_t ind_blk  = ext2_map_entry(fs, dind_blk, rem1 / ptrs_per_block);
+    return ext2_map_entry(fs, ind_blk, rem1 % ptrs_per_block);
 }
 
 // alloc a new data block on the fs, returns block number or 0 on failure.
@@ -440,6 +426,18 @@ static long ext2_read(INode_t *inode, void *buf, size_t count, size_t offset) {
         uint32_t logical = (uint32_t)((offset + total) / fs->block_size);
         size_t   boff    = (offset + total) % fs->block_size;
         uint32_t phys    = ext2_get_data_block(fs, di, logical);
+
+        if (phys && boff == 0 && count - total >= fs->block_size) {
+            uint32_t run = 1;
+            while (run < EXT2_READ_RUN && (size_t)(run + 1) * fs->block_size <= count - total &&
+                   ext2_get_data_block(fs, di, logical + run) == phys + run)
+                run++;
+            if (ext2_read_bytes(fs, (size_t)phys * fs->block_size, (uint8_t *)buf + total,
+                                (size_t)run * fs->block_size) < 0)
+                break;
+            total += (size_t)run * fs->block_size;
+            continue;
+        }
 
         if (!phys)
             memset(block_buf, 0, fs->block_size);

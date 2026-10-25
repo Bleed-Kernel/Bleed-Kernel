@@ -105,6 +105,8 @@ typedef struct __attribute__((packed)) {
     // char name[] follows 
 } ext2_dirent_t;
 
+#define EXT2_MAP_CACHE  4
+
 typedef struct {
     INode_t  *dev;                  // backing block device inode  
     uint32_t  block_size;           // bytes per block             
@@ -116,6 +118,14 @@ typedef struct {
     uint32_t  total_inodes;
     // cached superblock copy 
     ext2_superblock_t sb;
+
+    // the indirect blocks a lookup walks get read for every data block in a big file
+    struct {
+        uint32_t  block;            // 0 = empty
+        uint32_t  last_used;
+        uint32_t *data;
+    } map_cache[EXT2_MAP_CACHE];
+    uint32_t map_clock;
 } ext2_fs_t;
 
 typedef struct {

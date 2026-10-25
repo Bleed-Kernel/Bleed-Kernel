@@ -29,13 +29,16 @@
  * lookup lands on the same inode. Going up out of a mount works because the root is given the
  * covered directory's parent as its own.
  */
+#define MOUNT_PATH_MAX  256
+
 typedef struct {
-    char      mount_path[PATH_MAX];
+    char      mount_path[MOUNT_PATH_MAX];
     INode_t  *mountpoint;   // the directory we cover, pinned by a ref
     INode_t  *fs_root;      // root of the mounted filesystem, the mount owns one ref
     INode_t  *dev_inode;
     fs_type_t fs_type;
     bool      active;
+    bool      dev_owned;    // dev_inode is a file (vfs_mount_file), the mount holds a ref on it
 } mount_entry_t;
 
 static mount_entry_t mount_table[VFS_MAX_MOUNTS];
@@ -83,6 +86,7 @@ static void mount_slot_release(int slot) {
 
 int vfs_mount(const char *path, INode_t *dev_inode) {
     if (!path || !dev_inode) return -EINVAL;
+    if (strlen(path) >= MOUNT_PATH_MAX) return -ENAMETOOLONG;
 
     spinlock_acquire(&mount_lock);
     int slot = -1;
@@ -95,6 +99,7 @@ int vfs_mount(const char *path, INode_t *dev_inode) {
         return -ENOMEM;
     }
     mount_table[slot].active     = true;
+    mount_table[slot].dev_owned  = false;
     mount_table[slot].fs_root    = NULL;
     mount_table[slot].mountpoint = NULL;
     spinlock_release(&mount_lock);
@@ -164,8 +169,8 @@ int vfs_mount(const char *path, INode_t *dev_inode) {
     fs_root->attached = 1;
 
     spinlock_acquire(&mount_lock);
-    strncpy(mount_table[slot].mount_path, path, PATH_MAX - 1);
-    mount_table[slot].mount_path[PATH_MAX - 1] = '\0';
+    strncpy(mount_table[slot].mount_path, path, MOUNT_PATH_MAX - 1);
+    mount_table[slot].mount_path[MOUNT_PATH_MAX - 1] = '\0';
     mount_table[slot].mountpoint = mp;      // keeps the ref the lookup gave us
     mount_table[slot].fs_root    = fs_root;
     mount_table[slot].dev_inode  = dev_inode;
@@ -180,13 +185,90 @@ int vfs_mount(const char *path, INode_t *dev_inode) {
     return 0;
 }
 
+// true if inode is somewhere inside the filesystem whose root is fs_root
+static bool inode_under(INode_t *inode, INode_t *fs_root) {
+    for (INode_t *n = inode; n; n = n->parent) {
+        if (n == fs_root)
+            return true;
+    }
+    return false;
+}
+
+// a file mount holds a ref on its file, so whatever it sits on is busy until it comes off.
+static int umount_files_on(INode_t *fs_root, bool force) {
+    for (;;) {
+        char     path[MOUNT_PATH_MAX];
+        INode_t *file = NULL;
+
+        spinlock_acquire(&mount_lock);
+        for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+            if (mount_table[i].active && mount_table[i].fs_root && mount_table[i].dev_owned &&
+                inode_under(mount_table[i].dev_inode, fs_root)) {
+                file = mount_table[i].dev_inode;
+                strncpy(path, mount_table[i].mount_path, MOUNT_PATH_MAX - 1);
+                path[MOUNT_PATH_MAX - 1] = '\0';
+                break;
+            }
+        }
+        spinlock_release(&mount_lock);
+
+        if (!file)
+            return 0;
+        if (force)
+            vfs_umount_device(file);
+        else if (vfs_umount(path) != 0)
+            return -EBUSY;
+    }
+}
+
+int vfs_mount_file(const char *path, const char *file_path) {
+    if (!path || !file_path) return -EINVAL;
+
+    path_t   fp   = vfs_path_from_abs(file_path);
+    INode_t *file = NULL;
+    if (vfs_lookup(&fp, &file) < 0)
+        return -ENOENT;
+    if (file->type != INODE_FILE) {
+        vfs_drop(file);
+        return -EINVAL;
+    }
+
+    // the lookups ref becomes the mounts, dropped when it comes off
+    int r = vfs_mount(path, file);
+    if (r != 0) {
+        vfs_drop(file);
+        return r;
+    }
+
+    spinlock_acquire(&mount_lock);
+    for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (mount_table[i].active && mount_table[i].dev_inode == file)
+            mount_table[i].dev_owned = true;
+    }
+    spinlock_release(&mount_lock);
+    return 0;
+}
+
 int vfs_umount(const char *path) {
     if (!path) return -EINVAL;
+
+    INode_t *root = NULL;
+    spinlock_acquire(&mount_lock);
+    for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (mount_table[i].active && mount_table[i].fs_root &&
+            strncmp(mount_table[i].mount_path, path, MOUNT_PATH_MAX) == 0)
+            root = mount_table[i].fs_root;
+    }
+    spinlock_release(&mount_lock);
+    if (root && umount_files_on(root, false) != 0) {
+        serial_printf(LOG_WARN "vfs_umount: %s is busy, theres a file mounted from it in use\n", path);
+        return -EBUSY;
+    }
 
     spinlock_acquire(&mount_lock);
     for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
         if (!mount_table[i].active || !mount_table[i].fs_root ||
-            strncmp(mount_table[i].mount_path, path, PATH_MAX) != 0)
+            strncmp(mount_table[i].mount_path, path, MOUNT_PATH_MAX) != 0)
             continue;
 
         INode_t *fs_root = mount_table[i].fs_root;
@@ -201,16 +283,20 @@ int vfs_umount(const char *path) {
             return -EBUSY;
         }
 
+        INode_t *owned = mount_table[i].dev_owned ? mount_table[i].dev_inode : NULL;
         mp->mounted = NULL;
         mount_table[i].fs_root       = NULL;
         mount_table[i].mountpoint    = NULL;
         mount_table[i].dev_inode     = NULL;
+        mount_table[i].dev_owned     = false;
         mount_table[i].mount_path[0] = '\0';
         mount_table[i].active        = false;
         spinlock_release(&mount_lock);
 
         vfs_drop(fs_root);
         vfs_drop(mp);
+        if (owned)
+            vfs_drop(owned);
         serial_printf(LOG_OK "vfs_umount: unmounted %s\n", path);
         return 0;
     }
@@ -253,7 +339,7 @@ int vfs_umount_device(INode_t *dev_inode) {
     if (!dev_inode) return 0;
 
     for (;;) {
-        char path[PATH_MAX];
+        char path[MOUNT_PATH_MAX];
 
         spinlock_acquire(&mount_lock);
         int slot = -1;
@@ -270,15 +356,27 @@ int vfs_umount_device(INode_t *dev_inode) {
         }
 
         INode_t *fs_root = mount_table[slot].fs_root;
+        spinlock_release(&mount_lock);
+
+        // a data.img on a stick thats been pulled goes with it
+        umount_files_on(fs_root, true);
+
+        spinlock_acquire(&mount_lock);
+        if (!mount_table[slot].active || mount_table[slot].fs_root != fs_root) {
+            spinlock_release(&mount_lock);
+            continue;
+        }
         INode_t *mp      = mount_table[slot].mountpoint;
+        INode_t *owned   = mount_table[slot].dev_owned ? mount_table[slot].dev_inode : NULL;
         bool     busy    = fs_root->shared > 1;
-        strncpy(path, mount_table[slot].mount_path, PATH_MAX - 1);
-        path[PATH_MAX - 1] = '\0';
+        strncpy(path, mount_table[slot].mount_path, MOUNT_PATH_MAX - 1);
+        path[MOUNT_PATH_MAX - 1] = '\0';
 
         mp->mounted = NULL;
         mount_table[slot].fs_root       = NULL;
         mount_table[slot].mountpoint    = NULL;
         mount_table[slot].dev_inode     = NULL;
+        mount_table[slot].dev_owned     = false;
         mount_table[slot].mount_path[0] = '\0';
         mount_table[slot].active        = false;
         spinlock_release(&mount_lock);
@@ -287,6 +385,8 @@ int vfs_umount_device(INode_t *dev_inode) {
         // gets errors back from the device from now on
         vfs_drop(fs_root);
         vfs_drop(mp);
+        if (owned)
+            vfs_drop(owned);
         if (busy)
             serial_printf(LOG_WARN "vfs_umount: pulled %s out with files still open in it\n", path);
         else
@@ -299,16 +399,16 @@ int vfs_umount_all(void) {
     int busy = 0;
 
     for (int i = VFS_MAX_MOUNTS - 1; i >= 0; i--) {
-        char path[PATH_MAX];
+        char path[MOUNT_PATH_MAX];
 
         spinlock_acquire(&mount_lock);
         bool active = mount_table[i].active && mount_table[i].fs_root;
         if (active)
-            strncpy(path, mount_table[i].mount_path, PATH_MAX);
+            strncpy(path, mount_table[i].mount_path, MOUNT_PATH_MAX);
         spinlock_release(&mount_lock);
 
         if (!active) continue;
-        path[PATH_MAX - 1] = '\0';
+        path[MOUNT_PATH_MAX - 1] = '\0';
         if (vfs_umount(path) != 0)
             busy++;
     }

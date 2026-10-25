@@ -116,6 +116,11 @@ void xhci_ports_probe(xhci_hc_t *hc) {
 
     for (uint32_t port = 1; port <= hc->max_ports; port++) {
         uint32_t portsc = xhci_portsc(hc, port);
+
+        // real controllers flag a connect change for whatever was in when they started 
+        if (portsc & XHCI_PORTSC_CHANGE_MASK)
+            xhci_portsc_write(hc, port, portsc & XHCI_PORTSC_CHANGE_MASK);
+
         if (!(portsc & XHCI_PORTSC_CCS)) {
             xhci_trace("xhci%d: port %u empty, portsc=0x%08x\n", hc->index, port, portsc);
             continue;

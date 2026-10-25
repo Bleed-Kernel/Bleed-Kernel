@@ -20,6 +20,7 @@
 
 #include <fs/vfs.h>
 #include <fs/vfs_mount.h>
+#include <fs/data_image.h>
 #include <fs/archive/tar.h>
 #include <fonts/psf.h>
 #include <boot/splash_image.h>
@@ -272,6 +273,7 @@ void init_block_devices(){
 
     // usb_init already found the drives, usb_service does the same for ones plugged in later
     usb_storage_automount();
+    data_image_scan();
 
     BLOG_OK("Block Device Probing");
 }

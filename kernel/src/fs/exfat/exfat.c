@@ -119,16 +119,26 @@ static void exfat_free_extent(exfat_fs_t *fs, uint32_t start, bool no_fat_chain,
     }
 }
 
-static uint32_t exfat_cluster_at(exfat_fs_t *fs, uint32_t first_cluster, bool no_fat_chain, uint64_t byte_offset) {
-    uint32_t idx = (uint32_t)(byte_offset / fs->bytes_per_cluster);
-    if (no_fat_chain)
-        return first_cluster + idx;
+// files get read front to back
+static uint32_t exfat_file_cluster_at(exfat_inode_t *fi, uint64_t byte_offset) {
+    exfat_fs_t *fs  = fi->fs;
+    uint32_t    idx = (uint32_t)(byte_offset / fs->bytes_per_cluster);
+    if (fi->no_fat_chain)
+        return fi->first_cluster + idx;
 
-    uint32_t c = first_cluster;
-    for (uint32_t i = 0; i < idx; i++) {
+    uint32_t i = 0;
+    uint32_t c = fi->first_cluster;
+    if (fi->hint_cluster && fi->hint_index <= idx) {
+        i = fi->hint_index;
+        c = fi->hint_cluster;
+    }
+    for (; i < idx; i++) {
         c = exfat_read_fat(fs, c);
         if (c < EXFAT_FIRST_DATA_CLUSTER || c >= EXFAT_CLUSTER_BAD) return 0;
     }
+
+    fi->hint_index   = idx;
+    fi->hint_cluster = c;
     return c;
 }
 
@@ -302,6 +312,8 @@ static INode_t *exfat_make_inode(exfat_fs_t *fs, const exfat_entryset_t *es, INo
     fi->valid_data_length  = es->stream.valid_data_length;
     fi->no_fat_chain      = (es->stream.flags & EXFAT_FLAG_NO_FAT_CHAIN) != 0;
     fi->attributes        = es->file.file_attributes;
+    fi->hint_index        = 0;
+    fi->hint_cluster      = 0;
     fi->dirent_cluster    = es->prim_cluster;
     fi->dirent_offset     = es->prim_off;
     fi->secondary_count   = es->file.secondary_count;
@@ -392,7 +404,7 @@ static long exfat_read(INode_t *inode, void *buf, size_t count, size_t offset) {
     if (count > fi->file_size - offset) count = fi->file_size - offset;
     if (count == 0) return 0;
 
-    uint32_t cluster = exfat_cluster_at(fs, fi->first_cluster, fi->no_fat_chain, offset);
+    uint32_t cluster = exfat_file_cluster_at(fi, offset);
     if (cluster < EXFAT_FIRST_DATA_CLUSTER) return 0;
 
     size_t read_total  = 0;
@@ -455,6 +467,7 @@ static long exfat_write(INode_t *inode, const void *buf, size_t count, size_t of
         if (!c) return -ENOMEM;
         fi->first_cluster = c;
         fi->no_fat_chain  = false;
+        fi->hint_cluster  = 0;
         exfat_patch_entryset(fi);
     }
 
@@ -484,7 +497,7 @@ static long exfat_write(INode_t *inode, const void *buf, size_t count, size_t of
         }
     }
 
-    uint32_t cluster = exfat_cluster_at(fs, fi->first_cluster, fi->no_fat_chain, offset);
+    uint32_t cluster = exfat_file_cluster_at(fi, offset);
     if (cluster < EXFAT_FIRST_DATA_CLUSTER) return -EINVAL;
 
     size_t written_total = 0;
@@ -532,6 +545,7 @@ static int exfat_truncate(INode_t *inode, size_t new_size) {
     exfat_fs_t    *fs = fi->fs;
 
     if (new_size == fi->file_size) return 0;
+    fi->hint_cluster = 0;
 
     if (new_size == 0) {
         exfat_free_extent(fs, fi->first_cluster, fi->no_fat_chain, fi->file_size);
@@ -776,6 +790,8 @@ static int exfat_create(INode_t *parent, const char *name, size_t namelen,
     fi->valid_data_length = stream.valid_data_length;
     fi->no_fat_chain      = false;
     fi->attributes        = file.file_attributes;
+    fi->hint_index        = 0;
+    fi->hint_cluster      = 0;
     fi->dirent_cluster    = slot_cluster;
     fi->dirent_offset     = slot_off;
     fi->secondary_count   = secondary_count;

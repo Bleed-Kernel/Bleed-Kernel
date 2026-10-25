@@ -116,8 +116,11 @@ static void nvme_io_submit(nvme_drive_t *d, nvme_sqe_t *cmd) {
     nvme_write32(d->mmio_base, sq_tail_db_off(d, 1), d->iosq_tail);
 }
 
+#define NVME_IO_POLL_SPINS  50000000
+#define NVME_IO_TIMEOUT     (-2)
+
 static int nvme_io_poll(nvme_drive_t *d, uint16_t cid) {
-    for (int i = 0; i < 2000000; i++) {
+    for (int i = 0; i < NVME_IO_POLL_SPINS; i++) {
         volatile nvme_cqe_t *cqe = &d->iocq[d->iocq_head];
         asm volatile("" ::: "memory");  // prevent caching CQE reads
         uint8_t phase = cqe->status & 1;
@@ -125,18 +128,26 @@ static int nvme_io_poll(nvme_drive_t *d, uint16_t cid) {
             for (volatile int w = 0; w < 10; w++);
             continue;
         }
-        uint16_t sc = (cqe->status >> 1) & 0x7FFF;
+        uint16_t sc     = (cqe->status >> 1) & 0x7FFF;
+        uint16_t got    = cqe->cid;
         d->iocq_head = (d->iocq_head + 1) % NVME_IO_QUEUE_DEPTH;
         if (d->iocq_head == 0) d->iocq_phase ^= 1;
         nvme_write32(d->mmio_base, cq_head_db_off(d, 1), d->iocq_head);
+
+        // a command that timed out earlier finishing late, taking it as ours would leave every
+        // read after this one a command behind
+        if (got != cid) {
+            serial_printf(LOG_WARN "nvme: dropping late completion cid=%u (waiting on %u)\n", got, cid);
+            continue;
+        }
         if (sc != 0) {
             serial_printf(LOG_ERROR "nvme: io cmd cid=%u failed sc=0x%03x\n", cid, sc);
             return -1;
         }
         return 0;
     }
-    serial_printf(LOG_ERROR "nvme: io poll timeout\n");
-    return -1;
+    serial_printf(LOG_ERROR "nvme: io poll timeout cid=%u\n", cid);
+    return NVME_IO_TIMEOUT;
 }
 
 static bool nvme_controller_init(nvme_drive_t *d) {
@@ -313,73 +324,68 @@ static bool nvme_identify_ctrl(nvme_drive_t *d) {
 
 static spinlock_t nvme_lock = {0};
 
-int nvme_read_sectors(nvme_drive_t *drive, uint64_t lba, uint32_t count, void *buf) {
+// one command per page worth of sectors, the bounce page needs no prp list that way
+static uint32_t nvme_per_cmd(nvme_drive_t *drive) {
+    uint32_t n = PAGE_SIZE_4K / drive->sector_size;
+    return n ? n : 1;
+}
+
+static int nvme_io_sectors(nvme_drive_t *drive, uint8_t opcode, uint64_t lba, uint32_t n, paddr_t ppage) {
+    spinlock_acquire(&nvme_lock);
+    nvme_sqe_t cmd = {0};
+    cmd.opcode = opcode;
+    cmd.nsid   = drive->nsid;
+    cmd.prp1   = ppage;   // already physical, page-aligned
+    cmd.prp2   = 0;
+    cmd.cdw10  = (uint32_t)(lba & 0xFFFFFFFF);
+    cmd.cdw11  = (uint32_t)(lba >> 32);
+    cmd.cdw12  = n - 1;   // NLB is 0 based
+
+    uint16_t cid = nvme_next_cid(drive);
+    cmd.cid = cid;
+    nvme_io_submit(drive, &cmd);
+    int r = nvme_io_poll(drive, cid);
+    spinlock_release(&nvme_lock);
+    return r;
+}
+
+static int nvme_rw_sectors(nvme_drive_t *drive, uint8_t opcode, uint64_t lba, uint32_t count, void *buf) {
     if (!drive || !drive->present || !buf || count == 0) return -1;
 
-    uint32_t ss = drive->sector_size;
+    uint32_t ss  = drive->sector_size;
+    uint32_t per = nvme_per_cmd(drive);
+    bool     rd  = opcode == NVME_NVM_READ;
 
-    for (uint32_t i = 0; i < count; i++) {
-        paddr_t ppage = pmm_alloc_pages(1);
-        if (!ppage) return -1;
-        void *bounce = (void *)(uintptr_t)MMIO(ppage);
-        memset(bounce, 0, ss);
+    paddr_t ppage = pmm_alloc_pages(1);
+    if (!ppage) return -1;
+    void *bounce = (void *)(uintptr_t)MMIO(ppage);
 
-        spinlock_acquire(&nvme_lock);
-        nvme_sqe_t cmd = {0};
-        cmd.opcode = NVME_NVM_READ;
-        cmd.nsid   = drive->nsid;
-        cmd.prp1   = ppage;   // already physical, page-aligned
-        cmd.prp2   = 0;
-        cmd.cdw10  = (uint32_t)((lba + i) & 0xFFFFFFFF);
-        cmd.cdw11  = (uint32_t)((lba + i) >> 32);
-        cmd.cdw12  = 0;       // NLB=0 means 1 sector
+    for (uint32_t i = 0; i < count; i += per) {
+        uint32_t n = count - i < per ? count - i : per;
+        uint8_t *at = (uint8_t *)buf + (size_t)i * ss;
 
-        uint16_t cid = nvme_next_cid(drive);
-        cmd.cid = cid;
-        nvme_io_submit(drive, &cmd);
-        int r = nvme_io_poll(drive, cid);
-        spinlock_release(&nvme_lock);
-
-        if (r == 0)
-            memcpy((uint8_t *)buf + (i * ss), bounce, ss);
-
-        pmm_free_pages(ppage, 1);
-        if (r != 0) return r;
+        if (!rd)
+            memcpy(bounce, at, (size_t)n * ss);
+        int r = nvme_io_sectors(drive, opcode, lba + i, n, ppage);
+        if (r == NVME_IO_TIMEOUT)
+            return -1;      // the controller can still dma into it, so the page is lost
+        if (r != 0) {
+            pmm_free_pages(ppage, 1);
+            return r;
+        }
+        if (rd)
+            memcpy(at, bounce, (size_t)n * ss);
     }
+    pmm_free_pages(ppage, 1);
     return 0;
 }
 
+int nvme_read_sectors(nvme_drive_t *drive, uint64_t lba, uint32_t count, void *buf) {
+    return nvme_rw_sectors(drive, NVME_NVM_READ, lba, count, buf);
+}
+
 int nvme_write_sectors(nvme_drive_t *drive, uint64_t lba, uint32_t count, const void *buf) {
-    if (!drive || !drive->present || !buf || count == 0) return -1;
-
-    uint32_t ss = drive->sector_size;
-
-    for (uint32_t i = 0; i < count; i++) {
-        paddr_t ppage = pmm_alloc_pages(1);
-        if (!ppage) return -1;
-        void *bounce = (void *)(uintptr_t)MMIO(ppage);
-        memcpy(bounce, (const uint8_t *)buf + (i * ss), ss);
-
-        spinlock_acquire(&nvme_lock);
-        nvme_sqe_t cmd = {0};
-        cmd.opcode = NVME_NVM_WRITE;
-        cmd.nsid   = drive->nsid;
-        cmd.prp1   = ppage;
-        cmd.prp2   = 0;
-        cmd.cdw10  = (uint32_t)((lba + i) & 0xFFFFFFFF);
-        cmd.cdw11  = (uint32_t)((lba + i) >> 32);
-        cmd.cdw12  = 0;
-
-        uint16_t cid = nvme_next_cid(drive);
-        cmd.cid = cid;
-        nvme_io_submit(drive, &cmd);
-        int r = nvme_io_poll(drive, cid);
-        spinlock_release(&nvme_lock);
-
-        pmm_free_pages(ppage, 1);
-        if (r != 0) return r;
-    }
-    return 0;
+    return nvme_rw_sectors(drive, NVME_NVM_WRITE, lba, count, (void *)buf);
 }
 
 // block device stuff here
@@ -399,25 +405,30 @@ static long nvme_blk_read(INode_t *inode, void *buf, size_t count, size_t offset
     if (offset >= max) return 0;
     if (count > max - offset) count = max - offset;
 
+    uint32_t per     = nvme_per_cmd(blk->drive);
     uint64_t abs_lba = blk->lba_start + offset / ss;
     size_t   skip    = offset % ss;
     size_t   total   = 0;
 
-    uint8_t *tmp = kmalloc(ss);
+    uint8_t *tmp = kmalloc((size_t)per * ss);
     if (!tmp) return -1;
 
     while (total < count) {
-        if (nvme_read_sectors(blk->drive, abs_lba, 1, tmp) < 0) {
+        // as many sectors as whats left covers, up to a page
+        size_t   want = skip + (count - total);
+        uint32_t n    = (uint32_t)((want + ss - 1) / ss);
+        if (n > per) n = per;
+
+        if (nvme_read_sectors(blk->drive, abs_lba, n, tmp) < 0) {
             kfree(tmp);
             return total > 0 ? (long)total : -1;
         }
-        size_t src_off = (total == 0) ? skip : 0;
-        size_t avail   = ss - src_off;
-        size_t chunk   = count - total;
-        if (chunk > avail) chunk = avail;
-        memcpy((uint8_t *)buf + total, tmp + src_off, chunk);
-        total += chunk;
-        abs_lba++;
+        size_t chunk = (size_t)n * ss - skip;
+        if (chunk > count - total) chunk = count - total;
+        memcpy((uint8_t *)buf + total, tmp + skip, chunk);
+        total  += chunk;
+        abs_lba += n;
+        skip    = 0;
     }
 
     kfree(tmp);

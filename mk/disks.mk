@@ -4,10 +4,8 @@ NVME_DISK := nvmedisk.img
 USB_DISK  := usbdisk.img
 DISKS     := $(IDE_DISK) $(SATA_DISK) $(NVME_DISK) $(USB_DISK)
 
-NVME_FILES         := .nvme_files
-NVME_DISK_PROGRAMS := $(if $(NO_BUILD),,$(filter $(DISK_PROGRAMS),$(PROGRAMS)))
-NVME_DISK_SIZE_MB  := $(if $(NVME_DISK_PROGRAMS),$(NVME_BIG_MB),$(DISK_SIZE_MB))
-NVME_TOO_SMALL     := $(shell [ -f $(NVME_DISK) ] && [ $$(wc -c < $(NVME_DISK)) -lt $$(($(NVME_DISK_SIZE_MB) * 1048576)) ] && echo yes)
+NVME_DATA    := $(if $(PROFILE_DATA),$(DATA_IMG))
+NVME_FILES   := .nvme_files
 
 define create_ext2_disk
     @echo "[DISK] Creating $(1) ($(2))"
@@ -73,11 +71,12 @@ $(IDE_DISK):
 $(SATA_DISK):
 	$(call create_exfat_disk,$@,gpt,if your seeing this the sata driver AND exfat both work which is even more awesome)
 
-# anything in DISK_PROGRAMS gets put in here
-$(NVME_DISK): $(if $(NVME_TOO_SMALL),FORCE) | $(if $(NVME_DISK_PROGRAMS),userprogs)
+$(DATA_IMG): $(if $(NO_BUILD),,data-img)
+
+$(NVME_DISK): $(NVME_DATA)
 	@rm -rf $(NVME_FILES) && mkdir -p $(NVME_FILES)
-	@$(USERPROGS_SH) disk $(abspath $(NVME_FILES)) $(call program_entries,$(NVME_DISK_PROGRAMS))
-	$(call create_ext2_disk,$@,gpt,if your seeing this the nvme driver works which is the most awesomest,$(NVME_DISK_SIZE_MB),$(NVME_FILES))
+	@$(if $(NVME_DATA),cp $(DATA_IMG) $(NVME_FILES)/)
+	$(call create_ext2_disk,$@,gpt,if your seeing this the nvme driver works which is the most awesomest,$(if $(NVME_DATA),$$(( $$(wc -c < $(DATA_IMG)) / 1048576 + $(DISK_SIZE_MB) ))),$(NVME_FILES))
 	@rm -rf $(NVME_FILES)
 
 $(USB_DISK):

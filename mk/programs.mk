@@ -28,16 +28,16 @@ REPO_halflife    := $(GH)/Bleed-HalfLife
 REPO_hlds        := $(GH)/Bleed-HalfLife
 
 # stuff under initrd/ that only goes in the tar when one of its programs is in initrd/bin
-ASSETS_doom     := doom1.wad soundfonts
+ASSETS_doom     := doom1.wad
 ASSETS_quake2   := baseq2
 ASSETS_playback := player soundfonts etc/1038.mp3
 ASSETS_tcc      := lib include
-ASSETS_halflife := halflife
-ASSETS_hlds     := halflife
 
-DISK_PROGRAMS :=
+# these go on the isos data partition (/mnt/data) instead of the initrd
+DATA_PROGRAMS := doom quake2 halflife hlds
 
 SHARED_LIBS := blibc libaudio Bleed-Mediakit
 
 program_entries = $(foreach p,$(1),"$(REPO_$(p)) $(p)")
 INITRD_ASSETS   = $(foreach p,$(ALL_PROGRAMS),$(foreach a,$(ASSETS_$(p)),$(a):$(p)))
+DATA_ASSETS     = $(foreach p,$(DATA_PROGRAMS),$(foreach a,$(ASSETS_$(p)),$(a):$(p)))

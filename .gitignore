@@ -18,7 +18,6 @@ initrd/bin/*
 initrd/lib/
 initrd/include/
 initrd/include/hlx
-initrd/halflife/
 
 tools/mksymtab
 initrd/etc/kernel.sym
@@ -26,4 +25,7 @@ initrd/proc/version
 
 *.img
 **/*.DS_Store
-.nvme_files/config.local.mk
+.data_img/
+.data_img.sum
+.nvme_files/
+config.local.mk

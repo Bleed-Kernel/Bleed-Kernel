@@ -39,7 +39,6 @@ build() {
     for entry; do
         repo=${entry%% *}
         name=${entry##* }
-        names="$names $name"
 
         # one repo can make lots of programs (coreutils), get it and build it once
         dir=$(repo_done "$repo")
@@ -67,6 +66,12 @@ build() {
             echo "ERROR: $name binary not found"
             exit 1
         fi
+
+        case " $DATA_PROGRAMS " in
+            *" $name "*) continue ;;
+        esac
+
+        names="$names $name"
         COPYFILE_DISABLE=1 cp "$dir/bin/$name" "$INITRD/bin/$name"
 
         if grep -q '^initrd:' "$dir/Makefile"; then
@@ -88,11 +93,26 @@ build() {
 disk() {
     out=$1
     shift
+    copied=""
     for entry; do
-        dir=$(find_dir "${entry%% *}" "${entry##* }")
-        grep -q '^disk:' "$dir/Makefile" 2>/dev/null || continue
-        echo "[DISK] Getting ${dir##*/}'s files"
-        $MAKE -s -C "$dir" disk DISK="$out"
+        name=${entry##* }
+        dir=$(find_dir "${entry%% *}" "$name")
+
+        if grep -q '^disk:' "$dir/Makefile" 2>/dev/null; then
+            case " $copied " in *" $dir "*) continue ;; esac
+            copied="$copied $dir"
+            echo "[DISK] Getting ${dir##*/}'s files"
+            $MAKE -s -C "$dir" disk DISK="$out"
+            continue
+        fi
+
+        echo "[DISK] $name"
+        mkdir -p "$out/$name"
+        COPYFILE_DISABLE=1 cp "$dir/bin/$name" "$out/$name/"
+        for pair in $DATA_ASSETS; do
+            [ "${pair##*:}" = "$name" ] || continue
+            COPYFILE_DISABLE=1 cp -R "$INITRD/${pair%%:*}" "$out/$name/"
+        done
     done
 }
 

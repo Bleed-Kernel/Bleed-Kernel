@@ -35,6 +35,15 @@ struct usb_storage_info {
 #define USB_STORAGE_MAX_NODES   16      // /dev/usbN plus its partitions
 #define USB_STORAGE_BOUNCE_PAGES 16
 #define USB_STORAGE_BOUNCE_SIZE (USB_STORAGE_BOUNCE_PAGES * PAGE_SIZE)
+#define USB_STORAGE_CACHE_WINDOWS 8
+
+// a command costs the same for 512 bytes as for 64k
+typedef struct usb_storage_window {
+    uint8_t  *data;                 // kmalloced the first time its used
+    uint64_t  lba;                  // first sector it holds, always a multiple of a window
+    uint32_t  sectors;              // 0 = holds nothing
+    uint64_t  last_used;
+} usb_storage_window_t;
 
 typedef struct INode INode_t;
 
@@ -60,6 +69,9 @@ typedef struct usb_storage {
     char          vendor[9];
     char          product[17];
     char          revision[5];
+
+    usb_storage_window_t cache[USB_STORAGE_CACHE_WINDOWS];
+    uint64_t      cache_clock;
 
     INode_t      *nodes[USB_STORAGE_MAX_NODES];
     char          names[USB_STORAGE_MAX_NODES][16];

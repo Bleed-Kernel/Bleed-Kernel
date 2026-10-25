@@ -8,6 +8,7 @@
 #include <fs/vfs.h>
 #include <fs/partition.h>
 #include <fs/vfs_mount.h>
+#include <fs/data_image.h>
 #include <mm/kalloc.h>
 #include <user/user_copy.h>
 #include <user/errno.h>
@@ -32,7 +33,54 @@ static bool usb_storage_alive(const usb_storage_blk_t *blk) {
     return ms->used && ms->gen == blk->gen && !ms->ejected && ms->dev && !ms->dev->gone;
 }
 
-// everything goes through the bounce buffer a chunk at a time
+// the window holding lba, read in whole if it isnt there already
+static usb_storage_window_t *usb_storage_window(usb_storage_t *ms, uint64_t lba) {
+    uint32_t per   = USB_STORAGE_BOUNCE_SIZE / ms->sector_size;
+    uint64_t start = lba - lba % per;
+
+    usb_storage_window_t *pick = &ms->cache[0];
+    for (int i = 0; i < USB_STORAGE_CACHE_WINDOWS; i++) {
+        usb_storage_window_t *w = &ms->cache[i];
+        if (w->sectors && w->lba == start) {
+            w->last_used = ++ms->cache_clock;
+            return w;
+        }
+        // empty ones first, then whoever was used longest ago
+        if (!w->sectors) {
+            if (pick->sectors)
+                pick = w;
+        } else if (pick->sectors && w->last_used < pick->last_used) {
+            pick = w;
+        }
+    }
+
+    if (!pick->data && !(pick->data = kmalloc(USB_STORAGE_BOUNCE_SIZE)))
+        return NULL;
+
+    uint32_t sectors = per;
+    if (start + sectors > ms->sector_count)
+        sectors = (uint32_t)(ms->sector_count - start);
+
+    pick->sectors = 0;
+    if (usb_scsi_rw(ms, start, sectors, false) < 0)
+        return NULL;
+    memcpy(pick->data, ms->bounce, (size_t)sectors * ms->sector_size);
+    pick->lba       = start;
+    pick->sectors   = sectors;
+    pick->last_used = ++ms->cache_clock;
+    return pick;
+}
+
+// a write makes whatever the windows had of those sectors stale
+static void usb_storage_window_drop(usb_storage_t *ms, uint64_t lba, uint32_t sectors) {
+    for (int i = 0; i < USB_STORAGE_CACHE_WINDOWS; i++) {
+        usb_storage_window_t *w = &ms->cache[i];
+        if (w->sectors && lba < w->lba + w->sectors && w->lba < lba + sectors)
+            w->sectors = 0;
+    }
+}
+
+// reads come out of the windows, writes go through the bounce buffer a chunk at a time
 static long usb_storage_io(usb_storage_blk_t *blk, uint8_t *buf, size_t count,
                            size_t offset, bool write) {
     usb_storage_t *ms = blk->ms;
@@ -58,23 +106,32 @@ static long usb_storage_io(usb_storage_blk_t *blk, uint8_t *buf, size_t count,
         uint64_t lba     = blk->lba_start + pos / ss;
         size_t   skip    = pos % ss;
         size_t   take    = count - done;
+
+        if (!write) {
+            usb_storage_window_t *w = usb_storage_window(ms, lba);
+            if (!w)
+                break;
+            size_t at = (size_t)(lba - w->lba) * ss + skip;
+            if (take > (size_t)w->sectors * ss - at)
+                take = (size_t)w->sectors * ss - at;
+            memcpy(buf + done, w->data + at, take);
+            done += take;
+            continue;
+        }
+
         if (take > USB_STORAGE_BOUNCE_SIZE - skip)
             take = USB_STORAGE_BOUNCE_SIZE - skip;
         uint32_t sectors = (uint32_t)((skip + take + ss - 1) / ss);
         bool     partial = skip || (skip + take) % ss;
 
-        if (!write || partial) {
+        usb_storage_window_drop(ms, lba, sectors);
+        if (partial) {
             if (usb_scsi_rw(ms, lba, sectors, false) < 0)
                 break;
         }
-
-        if (write) {
-            memcpy(ms->bounce + skip, buf + done, take);
-            if (usb_scsi_rw(ms, lba, sectors, true) < 0)
-                break;
-        } else {
-            memcpy(buf + done, ms->bounce + skip, take);
-        }
+        memcpy(ms->bounce + skip, buf + done, take);
+        if (usb_scsi_rw(ms, lba, sectors, true) < 0)
+            break;
         done += take;
     }
 
@@ -330,6 +387,11 @@ static bool usb_storage_start(usb_storage_t *ms, const uint8_t *config, size_t l
 
 // caller holds the lock or nobody else can see ms yet
 static void usb_storage_free(usb_storage_t *ms) {
+    for (int i = 0; i < USB_STORAGE_CACHE_WINDOWS; i++) {
+        kfree(ms->cache[i].data);
+        ms->cache[i].data    = NULL;
+        ms->cache[i].sectors = 0;
+    }
     if (ms->bounce) pmm_free_pages(ms->bounce_phys, USB_STORAGE_BOUNCE_PAGES);
     if (ms->cmd)    pmm_free_pages(ms->cmd_phys, 1);
     ms->bounce = NULL;
@@ -457,6 +519,7 @@ void usb_storage_disconnect(usb_device_t *dev) {
 }
 
 void usb_storage_automount(void) {
+    bool mounted = false;
     for (int i = 0; i < USB_STORAGE_MAX; i++) {
         usb_storage_t *ms = &drives[i];
         if (!ms->used || ms->mount_tried || ms->ejected || ms->dev->gone) continue;
@@ -473,10 +536,15 @@ void usb_storage_automount(void) {
             snprintf(path, sizeof(path), "/mnt/usb%d", ms->index);
 
         int r = vfs_mount(path, device_get_by_name(name));
+        mounted |= r == 0;
         if (r == 0)
             serial_printf(LOG_OK "usbstorage%d: /dev/%s mounted at %s\n", ms->index, name, path);
         else
             serial_printf(LOG_WARN "usbstorage%d: couldnt mount /dev/%s at %s (%d)\n",
                           ms->index, name, path, r);
     }
+
+    // a stick with data.img on it next to the iso. this runs every 100ms 
+    if (mounted)
+        data_image_scan();
 }

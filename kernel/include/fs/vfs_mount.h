@@ -17,6 +17,9 @@ typedef enum {
 // mount block device at path, creates it if it doesnt exist. 0 or a negative errno
 int vfs_mount(const char *path, INode_t *dev_inode);
 
+// mount the filesystem image in the file at file_path, like a loop device.
+int vfs_mount_file(const char *path, const char *file_path);
+
 // unmount whatever is at path, -EBUSY while anything inside it is still in use
 int vfs_umount(const char *path);
 

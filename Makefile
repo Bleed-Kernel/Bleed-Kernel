@@ -92,8 +92,8 @@ clean:
 
 .PHONY: distclean
 distclean: clean
-	rm -rf $(DISKS) $(NVME_FILES) limine $(USER_BIN_DIR)
-	rm -rf initrd/lib initrd/include initrd/halflife $(INITRD_BIN)/*
+	rm -rf $(DISKS) $(DATA_DIR) $(DATA_IMG) $(DATA_SUM) $(NVME_FILES) limine $(USER_BIN_DIR)
+	rm -rf initrd/lib initrd/include $(INITRD_BIN)/*
 	@$(USERPROGS_SH) distclean $(call program_entries,$(ALL_PROGRAMS))
 
 .PHONY: help

@@ -161,6 +161,9 @@ typedef struct {
     bool     no_fat_chain;        // true => cluster run is contiguous, ignore FAT 
     uint16_t attributes;
 
+    uint32_t hint_index;
+    uint32_t hint_cluster;
+
     uint32_t dirent_cluster;
     uint32_t dirent_offset;
     uint8_t  secondary_count;

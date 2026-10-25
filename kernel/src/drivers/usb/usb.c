@@ -223,8 +223,11 @@ void usb_hotplug_watch(void) {
             irq_restore(flags);
         }
 
+        // the drivers and vfs locks dont turn interrupts off
+        unsigned long flags = irq_push();
         xhci_hotplug();
         ohci_hotplug();
         usb_storage_automount();
+        irq_restore(flags);
     }
 }
