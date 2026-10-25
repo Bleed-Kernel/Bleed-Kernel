@@ -238,7 +238,8 @@ INode_t *elf_get_from_path(const char *path){
 
 task_t *elf_sched(INode_t *file, int argc, const char *const argv[]){
     if (!file) return NULL;
-    const char *argv_default[1] = { (file->internal_data) ? file->internal_data : "program" };
+    const char *name = file->name[0] ? file->name : "program";
+    const char *argv_default[1] = { name };
 
     if (argc <= 0 || !argv) {
         argc = 1;
@@ -255,7 +256,7 @@ task_t *elf_sched(INode_t *file, int argc, const char *const argv[]){
         return NULL;
     }
 
-    task_t *task = sched_create_task(cr3, entry, USER_CS, USER_SS, file->internal_data);
+    task_t *task = sched_create_task(cr3, entry, USER_CS, USER_SS, name);
     if (!task) return NULL;
     if (vfs_inode_path(file, task->exec_path, sizeof(task->exec_path)) != 0)
         task->exec_path[0] = '\0';

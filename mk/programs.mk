@@ -22,6 +22,7 @@ REPO_write       := $(GH)/Bleed-Coreutils
 REPO_ioctl       := $(GH)/Bleed-Coreutils
 REPO_tcc         := $(GH)/Bleed-TCC
 REPO_fastfetch   := $(GH)/Bleed-Fastfetch
+
 REPO_halflife    := $(GH)/Bleed-HalfLife
 REPO_hlds        := $(GH)/Bleed-HalfLife
 
@@ -30,9 +31,10 @@ ASSETS_doom     := doom1.wad soundfonts
 ASSETS_quake2   := baseq2
 ASSETS_playback := player soundfonts etc/1038.mp3
 ASSETS_tcc      := lib include
+ASSETS_halflife := halflife
+ASSETS_hlds     := halflife
 
-# programs only put in a disk cause they make boot times too long in initrd and inflate the binary like crazy
-DISK_PROGRAMS := halflife
+DISK_PROGRAMS :=
 
 SHARED_LIBS := blibc libaudio Bleed-Mediakit
 

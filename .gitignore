@@ -18,6 +18,7 @@ initrd/bin/*
 initrd/lib/
 initrd/include/
 initrd/include/hlx
+initrd/halflife/
 
 tools/mksymtab
 initrd/etc/kernel.sym

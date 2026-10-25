@@ -134,7 +134,7 @@ static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t use
 
     paging_switch_address_space(new_cr3);
 
-    const char *new_name = exec_display_name(kpath, file->internal_data);
+    const char *new_name = exec_display_name(kpath, file->name);
     strncpy(task->name, new_name, sizeof(task->name) - 1);
     task->name[sizeof(task->name) - 1] = '\0';
     if (vfs_inode_path(file, task->exec_path, sizeof(task->exec_path)) != 0)

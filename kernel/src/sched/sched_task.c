@@ -245,7 +245,7 @@ task_t *sched_reparent_children(task_t *parent) {
     return zombie;
 }
 
-task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, char *task_name) {
+task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, const char *task_name) {
     task_t *task = kmalloc(sizeof(task_t));
     if (!task) ke_panic(NULL, "Failed to allocate task");
     memset(task, 0, sizeof(task_t));

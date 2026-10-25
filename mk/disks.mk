@@ -73,7 +73,7 @@ $(IDE_DISK):
 $(SATA_DISK):
 	$(call create_exfat_disk,$@,gpt,if your seeing this the sata driver AND exfat both work which is even more awesome)
 
-# this one on a release profile will put half life in here
+# anything in DISK_PROGRAMS gets put in here
 $(NVME_DISK): $(if $(NVME_TOO_SMALL),FORCE) | $(if $(NVME_DISK_PROGRAMS),userprogs)
 	@rm -rf $(NVME_FILES) && mkdir -p $(NVME_FILES)
 	@$(USERPROGS_SH) disk $(abspath $(NVME_FILES)) $(call program_entries,$(NVME_DISK_PROGRAMS))

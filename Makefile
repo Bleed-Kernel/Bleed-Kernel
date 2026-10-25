@@ -92,9 +92,8 @@ clean:
 .PHONY: distclean
 distclean: clean
 	rm -rf $(DISKS) $(NVME_FILES) limine $(USER_BIN_DIR)
-	rm -rf initrd/lib initrd/include $(INITRD_BIN)/*
+	rm -rf initrd/lib initrd/include initrd/halflife $(INITRD_BIN)/*
 	@$(USERPROGS_SH) distclean $(call program_entries,$(ALL_PROGRAMS))
-	@$(MAKE) build PROFILE=$(PROFILE)
 
 .PHONY: help
 help:
@@ -103,7 +102,7 @@ help:
 	@echo "make runlocal           boot the iso thats already there"
 	@echo "make repack             tar up initrd/ into the iso again, no compiling or internet"
 	@echo "make clean              remove the kernels build output"
-	@echo "make distclean          remove everything built or downloaded and build it all again"
+	@echo "make distclean          remove everything built or downloaded"
 	@echo ""
 	@echo "profiles: $(PROFILES) (default $(DEFAULT_PROFILE)), the lists are in config.mk"
 	@$(foreach p,$(PROFILES),echo "  $(p): $(PROGRAMS_$(p))";)
