@@ -8,6 +8,7 @@
 #include <ansii.h>
 #include <kernel/exception/panic.h>
 #include <sched/scheduler.h>
+#include <mm/spinlock.h>
 
 #define HPET_FREQUENCY          1000
 
@@ -16,6 +17,8 @@
 #define HPET_REG_MAIN_COUNTER   0x0F0
 #define HPET_REG_T0_CONFIG      0x100
 #define HPET_REG_T0_COMPARATOR  0x108
+
+#define RFLAGS_IF               0x200ULL
 
 struct acpi_hpet *hpet = NULL;
 static volatile uint8_t *hpet_base = NULL;
@@ -83,6 +86,17 @@ void wait_fs(uint64_t femtoseconds) {
     // short waits spin: they are over before a switch would be, and drivers do them with a
     // lock held or before theres a scheduler at all. only a long one is worth giving the cpu up for
     int can_yield = femtoseconds >= femtosecondsPerMillisecond && get_current_task() != NULL;
+
+    if (can_yield) {
+        unsigned long flags = irq_push();
+        if (flags & RFLAGS_IF) {
+            while (hpet_read_counter() < target)
+                sched_sleep_until(target);
+            irq_restore(flags);
+            return;
+        }
+        irq_restore(flags);
+    }
 
     while (hpet_read_counter() < target) {
         if (can_yield)
