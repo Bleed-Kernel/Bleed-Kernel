@@ -46,11 +46,14 @@
 #include <drivers/cros_ec/cros_ec.h>
 #include <devices/type/serial_device.h>
 #include <devices/type/tty_device.h>
+#include <devices/type/net_device.h>
 
 #include <drivers/ide/ide.h>
 #include <drivers/ahci/ahci.h>
 #include <drivers/nvme/nvme.h>
 #include <drivers/ac97/ac97.h>
+#include <drivers/e1000/e1000.h>
+#include <net/net.h>
 #include <devices/type/blk_device.h>
 
 #include <sched/scheduler.h>
@@ -238,6 +241,10 @@ void init_devices(){
     BLOG_INFO("Enumerating AC97 Controller");
     ac97_init();
 
+    BLOG_INFO("Enumerating Network Controllers");
+    e1000_init();
+    net_device_init();
+
     BLOG_INFO("Starting power Device");
     cros_ec_init();
     power_device_init();
@@ -383,6 +390,10 @@ bool init_userspace(){
 
     if (sched_create_task(read_cr3(), (uint64_t)usb_hotplug_watch, KERNEL_CS, KERNEL_SS, "usb_service"))
         BLOG_OK("USB hotplug service started");
+
+    if (netif_default() &&
+        sched_create_task(read_cr3(), (uint64_t)net_service, KERNEL_CS, KERNEL_SS, "net_service"))
+        BLOG_OK("Network service started");
 
     if (i2c_trackpad_present() &&
         sched_create_task(read_cr3(), (uint64_t)i2c_trackpad_watch, KERNEL_CS, KERNEL_SS, "i2c_service"))

@@ -616,6 +616,14 @@ static int exfat_statfs(INode_t *root, uint64_t *block_size, uint64_t *total, ui
     return 0;
 }
 
+static int exfat_label(INode_t *root, char *out, size_t size) {
+    exfat_inode_t *fi = root->internal_data;
+    if (!fi || size == 0) return -EINVAL;
+    strncpy(out, fi->fs->label, size - 1);
+    out[size - 1] = '\0';
+    return out[0] ? 0 : -ENOENT;
+}
+
 static void exfat_times(INode_t *inode, int64_t *atime, int64_t *mtime, int64_t *ctime) {
     exfat_inode_t *fi = inode->internal_data;
     if (!fi) return;
@@ -928,6 +936,7 @@ static const INodeOps_t exfat_dir_ops = {
     .drop    = exfat_drop,
     .times   = exfat_times,
     .statfs  = exfat_statfs,
+    .label   = exfat_label,
 };
 
 static const INodeOps_t exfat_file_ops = {
@@ -1007,6 +1016,11 @@ int exfat_mount(INode_t *dev_inode, INode_t **root) {
             fs->bitmap_cluster    = bd.first_cluster;
             fs->bitmap_size_bytes = bd.data_length;
             have_bitmap = true;
+        } else if (raw.entry_type == EXFAT_ENTRY_LABEL) {
+            uint16_t name[EXFAT_LABEL_MAX];
+            size_t   len = raw.raw[0] < EXFAT_LABEL_MAX ? raw.raw[0] : EXFAT_LABEL_MAX;
+            memcpy(name, &raw.raw[1], len * 2);
+            exfat_utf16_to_utf8(name, len, fs->label, sizeof(fs->label));
         } else if (raw.entry_type == EXFAT_ENTRY_UPCASE) {
             exfat_upcase_dentry_t ud;
             memcpy(&ud, &raw, sizeof(ud));

@@ -722,6 +722,35 @@ static int fat32_statfs(INode_t *root, uint64_t *block_size, uint64_t *total, ui
     return 0;
 }
 
+// windows keeps the real one in the root folder and lets the boot sectors copy go stale
+static void fat32_read_label(fat32_fs_t *fs, const fat32_bpb_t *bpb) {
+    if (memcmp(bpb->volume_label, "NO NAME    ", 11) != 0)
+        memcpy(fs->label, bpb->volume_label, 11);
+
+    fat32_dir_iter_t it;
+    fat32_dirent_t   de;
+    uint32_t         rc, ro;
+    fat32_iter_init(&it, fs, fs->root_cluster);
+    while (fat32_iter_next_raw(&it, &de, &rc, &ro)) {
+        if ((uint8_t)de.name[0] == FAT32_ENTRY_FREE || de.attr == FAT32_ATTR_LFN)
+            continue;
+        if (de.attr & FAT32_ATTR_VOLUME_ID) {
+            memcpy(fs->label, de.name, 8);
+            memcpy(fs->label + 8, de.ext, 3);
+            break;
+        }
+    }
+    fs->label[11] = '\0';
+}
+
+static int fat32_label(INode_t *root, char *out, size_t size) {
+    fat32_inode_t *fi = root->internal_data;
+    if (!fi || size == 0) return -EINVAL;
+    strncpy(out, fi->fs->label, size - 1);
+    out[size - 1] = '\0';
+    return out[0] ? 0 : -ENOENT;
+}
+
 static void fat32_times(INode_t *inode, int64_t *atime, int64_t *mtime, int64_t *ctime) {
     fat32_inode_t *fi = inode->internal_data;
     if (!fi) return;
@@ -739,6 +768,7 @@ static const INodeOps_t fat32_dir_ops = {
     .drop    = fat32_drop,
     .times   = fat32_times,
     .statfs  = fat32_statfs,
+    .label   = fat32_label,
 };
 
 static const INodeOps_t fat32_file_ops = {
@@ -822,6 +852,7 @@ int fat32_mount(INode_t *dev_inode, INode_t **root) {
     }
     uint32_t data_sectors = total_sectors - fs->data_start_lba;
     fs->total_clusters    = data_sectors / bpb.sectors_per_cluster;
+    fat32_read_label(fs, &bpb);
 
     serial_printf(LOG_OK "fat32: mounted - %u clusters, %u B/cluster, root@cluster %u\n",
                   fs->total_clusters, fs->bytes_per_cluster, fs->root_cluster);

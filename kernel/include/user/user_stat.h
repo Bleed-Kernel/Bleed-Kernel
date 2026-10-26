@@ -25,3 +25,4 @@ typedef struct user_stat {
 #define STAT_IFREG  0100000
 #define STAT_IFCHR  0020000
 #define STAT_IFIFO  0010000
+#define STAT_IFSOCK 0140000

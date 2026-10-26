@@ -37,3 +37,25 @@
 #define ENAMETOOLONG 36
 #define ENOSYS   38
 #define ENOTEMPTY 39
+
+#define ENOTSOCK        88
+#define EDESTADDRREQ    89
+#define EMSGSIZE        90
+#define EPROTOTYPE      91
+#define ENOPROTOOPT     92
+#define EPROTONOSUPPORT 93
+#define EOPNOTSUPP      95
+#define EAFNOSUPPORT    97
+#define EADDRINUSE      98
+#define EADDRNOTAVAIL   99
+#define ENETDOWN        100
+#define ENETUNREACH     101
+#define ENOBUFS         105
+#define EISCONN         106
+#define ENOTCONN        107
+#define ETIMEDOUT       110
+#define ECONNRESET      104
+#define ECONNREFUSED    111
+#define EALREADY        114
+#define EINPROGRESS     115
+#define EHOSTUNREACH    113

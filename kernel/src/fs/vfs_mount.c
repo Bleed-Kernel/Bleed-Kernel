@@ -475,3 +475,40 @@ int vfs_mount_info(int index, user_mount_info_t *out) {
     vfs_drop(root);
     return 0;
 }
+
+int vfs_mount_label(int index, char *out, size_t size) {
+    if (index < 0 || !out || size == 0)
+        return -EINVAL;
+    out[0] = '\0';
+
+    // index 0 is the tempfs root, memory hasnt got a name
+    if (index == 0)
+        return -ENOENT;
+
+    spinlock_acquire(&mount_lock);
+    INode_t *root = NULL;
+    int seen = 0;
+    for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (!mount_table[i].active || !mount_table[i].fs_root)
+            continue;
+        if (++seen == index) {
+            root = mount_table[i].fs_root;
+            vfs_hold(root);
+            break;
+        }
+    }
+    spinlock_release(&mount_lock);
+    if (!root)
+        return -ENOENT;
+
+    int r = root->ops && root->ops->label ? root->ops->label(root, out, size) : -ENOENT;
+    vfs_drop(root);
+    if (r < 0)
+        return r;
+
+    // fat pads with spaces
+    size_t n = strlen(out);
+    while (n && out[n - 1] == ' ')
+        out[--n] = '\0';
+    return n ? 0 : -ENOENT;
+}

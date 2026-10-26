@@ -128,6 +128,7 @@ typedef struct __attribute__((packed)) {
 #define EXFAT_CLUSTER_BAD  0xFFFFFFF7u
 #define EXFAT_CLUSTER_EOF  0xFFFFFFFFu
 #define EXFAT_FIRST_DATA_CLUSTER 2u
+#define EXFAT_LABEL_MAX          11     // utf16 chars
 
 typedef struct {
     INode_t *dev;
@@ -149,6 +150,8 @@ typedef struct {
 
     uint16_t *upcase_table;
     size_t    upcase_count;
+
+    char      label[EXFAT_LABEL_MAX + 1];
 } exfat_fs_t;
 
 // perinode private data 

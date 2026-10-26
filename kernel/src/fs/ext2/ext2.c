@@ -570,6 +570,17 @@ static int ext2_statfs(INode_t *root, uint64_t *block_size, uint64_t *total, uin
     return 0;
 }
 
+// s_volume_name is 16 bytes and only nul terminated when its shorter so u can use the whole thing
+static int ext2_label(INode_t *root, char *out, size_t size) {
+    ext2_inode_t *ei = root->internal_data;
+    if (!ei || size == 0) return -EINVAL;
+    size_t n = 0;
+    for (; n < sizeof(ei->fs->sb.s_volume_name) && n < size - 1 && ei->fs->sb.s_volume_name[n]; n++)
+        out[n] = ei->fs->sb.s_volume_name[n];
+    out[n] = '\0';
+    return n ? 0 : -ENOENT;
+}
+
 static void ext2_times(INode_t *inode, int64_t *atime, int64_t *mtime, int64_t *ctime) {
     ext2_inode_t *ei = inode->internal_data;
     if (!ei) return;
@@ -1041,6 +1052,7 @@ static const INodeOps_t ext2_dir_ops = {
     .drop    = ext2_drop,
     .times   = ext2_times,
     .statfs  = ext2_statfs,
+    .label   = ext2_label,
 };
 
 static const INodeOps_t ext2_file_ops = {

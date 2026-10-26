@@ -50,6 +50,15 @@ enum {
     SYS_EPOLL_CTL       = 233,
     SYS_EPOLL_WAIT      = 232,
     SYS_EPOLL_PWAIT     = 281,
+    SYS_SOCKET          = 41,
+    SYS_CONNECT         = 42,
+    SYS_SENDTO          = 44,
+    SYS_RECVFROM        = 45,
+    SYS_BIND            = 49,
+    SYS_GETSOCKNAME     = 51,
+    SYS_GETPEERNAME     = 52,
+    SYS_SETSOCKOPT      = 54,
+    SYS_GETSOCKOPT      = 55,
 
     // bleed kernel specific system calls
     SYS_YIELD           = 512,
@@ -69,6 +78,7 @@ enum {
     SYS_EXECVE          = 528,
     SYS_WAITSTATUS      = 529,
     SYS_MOUNTINFO       = 530,
+    SYS_MOUNTLABEL      = 531,
 };
 
 int sys_open(char *path_str, int flags);
@@ -93,6 +103,7 @@ long sys_fork(void);
 long sys_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc);
 long sys_mprotect(uint64_t addr, uint64_t len, uint64_t prot);
 long sys_mountinfo(uint64_t index, uint64_t user_info_ptr);
+long sys_mountlabel(uint64_t index, uint64_t user_buf, uint64_t size);
 long sys_arch_prctl(uint64_t code, uint64_t addr);
 long sys_execve(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user_argc, uint64_t user_envp_ptr);
 long sys_waitpid(uint64_t pid);
@@ -140,5 +151,15 @@ long sys_shm_map_at(uint64_t id, uint64_t first, uint64_t pages, uint64_t addr);
 long sys_shm_destroy(uint64_t id);
 
 long sys_poll(uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms);
+
+long sys_socket(uint64_t domain, uint64_t type, uint64_t protocol);
+long sys_bind(uint64_t fd, uint64_t user_addr, uint64_t len);
+long sys_connect(uint64_t fd, uint64_t user_addr, uint64_t len);
+long sys_sendto(uint64_t fd, uint64_t user_buf, uint64_t len, uint64_t flags, uint64_t user_addr, uint64_t addr_len);
+long sys_recvfrom(uint64_t fd, uint64_t user_buf, uint64_t len, uint64_t flags, uint64_t user_addr, uint64_t user_addr_len);
+long sys_getsockname(uint64_t fd, uint64_t user_addr, uint64_t user_len);
+long sys_getpeername(uint64_t fd, uint64_t user_addr, uint64_t user_len);
+long sys_setsockopt(uint64_t fd, uint64_t level, uint64_t name, uint64_t user_val, uint64_t len);
+long sys_getsockopt(uint64_t fd, uint64_t level, uint64_t name, uint64_t user_val, uint64_t user_len);
 
 void syscall_init(void);

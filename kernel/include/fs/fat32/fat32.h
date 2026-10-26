@@ -94,6 +94,8 @@ typedef struct fat32_fs {
     uint32_t data_start_lba;
     uint32_t root_cluster;
     uint32_t total_clusters;
+
+    char     label[12];         // space padded like the disk has it, empty if theres none
 } fat32_fs_t;
 
 // fat32 inode intenal data section

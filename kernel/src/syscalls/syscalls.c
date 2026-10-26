@@ -67,7 +67,17 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_GETPPID, sys_getppid),
     SYSCALL(SYS_OPENAT, sys_openat),
     SYSCALL(SYS_FSTATAT, sys_fstatat),
-    SYSCALL(SYS_MOUNTINFO, sys_mountinfo)
+    SYSCALL(SYS_MOUNTINFO, sys_mountinfo),
+    SYSCALL(SYS_MOUNTLABEL, sys_mountlabel),
+    SYSCALL(SYS_SOCKET, sys_socket),
+    SYSCALL(SYS_CONNECT, sys_connect),
+    SYSCALL(SYS_SENDTO, sys_sendto),
+    SYSCALL(SYS_RECVFROM, sys_recvfrom),
+    SYSCALL(SYS_BIND, sys_bind),
+    SYSCALL(SYS_GETSOCKNAME, sys_getsockname),
+    SYSCALL(SYS_GETPEERNAME, sys_getpeername),
+    SYSCALL(SYS_SETSOCKOPT, sys_setsockopt),
+    SYSCALL(SYS_GETSOCKOPT, sys_getsockopt)
 };
 #pragma GCC diagnostic pop
 

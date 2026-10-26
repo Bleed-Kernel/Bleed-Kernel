@@ -38,3 +38,6 @@ int vfs_device_mount_path(INode_t *dev_inode, char *out, size_t size);
 struct user_mount_info;
 
 int vfs_mount_info(int index, struct user_mount_info *out);
+
+// the volume name of the mount vfs_mount_info calls index, -ENOENT if it hasnt got one
+int vfs_mount_label(int index, char *out, size_t size);

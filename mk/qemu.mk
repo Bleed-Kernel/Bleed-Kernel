@@ -18,6 +18,8 @@ QEMU_AUDIODEV ?= $(call qemu_audio_pick,pipewire pa alsa sdl oss)
 endif
 QEMU_AUDIO := -audiodev $(QEMU_AUDIODEV),id=snd0 -device AC97,audiodev=snd0
 
+QEMU_NET ?= -nic user,model=e1000,hostfwd=udp::27015-:27015
+
 #apple silicon emulation sucks, if you are getting performance issues, please test it on an x86_64 machine before submitting an issue!
 #SMAP and SMEP are known to be funny on mac, it may not emulate it at all, just be careful but bleed should handle it.
 QEMU_HOST_MAC := -accel tcg,thread=multi,tb-size=1024 -cpu max -display $(QEMU_MAC_DISPLAY)
@@ -70,6 +72,7 @@ define run_qemu
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
 		$(QEMU_AUDIO) \
+		$(QEMU_NET) \
 		$(QEMU_USB) \
 		$(1)
 endef

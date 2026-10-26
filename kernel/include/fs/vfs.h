@@ -38,7 +38,8 @@ typedef enum {
 typedef enum {
     FD_TYPE_FS,
     FD_TYPE_DEV,
-    FD_TYPE_PIPE
+    FD_TYPE_PIPE,
+    FD_TYPE_SOCKET
 } fd_type_t;
 
 typedef struct INodeOps{
@@ -57,6 +58,7 @@ typedef struct INodeOps{
     wait_queue_t *(*wait_queue)(INode_t* inode);
     void   (*times)   (INode_t* inode, int64_t *atime, int64_t *mtime, int64_t *ctime);
     int    (*statfs)  (INode_t* root, uint64_t *block_size, uint64_t *total, uint64_t *free);
+    int    (*label)   (INode_t* root, char *out, size_t size);    // the volumes name, -ENOENT if it hasnt got one
 } INodeOps_t;
 
 /*
@@ -159,6 +161,8 @@ int vfs_unlink(const char *path_str);
 int vfs_rename(const char *oldpath, const char *newpath);
 int vfs_mkdir(const char *path_str);
 int vfs_pipe(int out_fds[2]);
+
+int vfs_install(file_t *f);
 int vfs_dup2(int oldfd, int newfd);
 int vfs_dup(int oldfd);
 int vfs_chdir(const char *path_str);

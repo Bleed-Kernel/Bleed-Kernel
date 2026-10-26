@@ -16,6 +16,7 @@
 #include <mm/spinlock.h>
 #include <devices/devices.h>
 #include <fs/pipe.h>
+#include <net/socket.h>
 
 extern const filesystem tempfs;
 
@@ -72,6 +73,8 @@ static void vfs_file_put(file_t *f) {
 
     if (f->type == FD_TYPE_PIPE)
         pipe_file_release(f);
+    else if (f->type == FD_TYPE_SOCKET)
+        socket_file_release(f);
     else
         vfs_drop(f->inode);
     kfree(f);
@@ -884,6 +887,21 @@ int vfs_pipe(int out_fds[2]) {
     return 0;
 }
 
+int vfs_install(file_t *f) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table)
+        return -EMFILE;
+
+    // same as vfs_pipe avoiding my reserves
+    for (int fd = 3; fd < MAX_FDS; fd++) {
+        if (!fd_table->fds[fd]) {
+            fd_table->fds[fd] = f;
+            return fd;
+        }
+    }
+    return -EMFILE;
+}
+
 int vfs_dup2(int oldfd, int newfd) {
     fd_table_t *fd_table = vfs_get_active_fd_table();
     if (!fd_table || oldfd < 0 || oldfd >= MAX_FDS || newfd < 0 || newfd >= MAX_FDS)
@@ -1025,9 +1043,9 @@ int vfs_fstat(int fd, user_stat_t *st) {
         return -EBADF;
 
     file_t *f = fd_table->fds[fd];
-    if (f->type == FD_TYPE_PIPE) {
+    if (f->type == FD_TYPE_PIPE || f->type == FD_TYPE_SOCKET) {
         memset(st, 0, sizeof(*st));
-        st->mode    = STAT_IFIFO | 0600;
+        st->mode    = (f->type == FD_TYPE_PIPE ? STAT_IFIFO : STAT_IFSOCK) | 0600;
         st->nlink   = 1;
         st->blksize = 4096;
         return 0;
