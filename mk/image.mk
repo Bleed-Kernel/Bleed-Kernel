@@ -29,10 +29,18 @@ PROFILE_DATA := $(filter $(DATA_PROGRAMS),$(PROGRAMS))
 
 DATA_SUM     := .data_img.sum
 
-# only remade when whats going in it changed, the nvme test disk gets rebuilt every time it is
+# the copy runs every build but data.img is only touched when whats going in it changed, so the nvme
+# disk that holds it isnt remade for nothing. the staging folder is kept so the game copy is just the changes
 .PHONY: data-img
-data-img: userprogs
-	@rm -rf $(DATA_DIR) && mkdir -p $(DATA_DIR)
+data-img: $(DATA_IMG)
+
+ifeq ($(NO_BUILD),)
+$(DATA_IMG): userprogs
+	@mkdir -p $(DATA_DIR)
+	@for d in $(DATA_DIR)/*; do \
+		[ -e "$$d" ] || continue; \
+		case " $(PROFILE_DATA) " in *" $${d##*/} "*) ;; *) rm -rf "$$d" ;; esac; \
+	done
 	@DATA_ASSETS="$(DATA_ASSETS)" $(USERPROGS_SH) disk $(abspath $(DATA_DIR)) $(call program_entries,$(PROFILE_DATA))
 	@sum=$$(cd $(DATA_DIR) && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 cksum | cksum); \
 	if [ -f $(DATA_IMG) ] && [ "$$sum" = "$$(cat $(DATA_SUM) 2>/dev/null)" ]; then \
@@ -50,7 +58,9 @@ data-img: userprogs
 		mkfs.ext2 -q -F -L BLEEDDATA -d $(DATA_DIR) $(DATA_IMG) && \
 		echo "$$sum" > $(DATA_SUM); \
 	fi
-	@rm -rf $(DATA_DIR)
+else
+$(DATA_IMG):
+endif
 
 define build_iso
 	@rm -rf iso_root

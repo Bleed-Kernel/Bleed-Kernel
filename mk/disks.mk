@@ -24,11 +24,12 @@ define create_ext2_disk
     else \
         { printf 'o\nn\np\n1\n2048\n\nw\n'; } | fdisk $(1) > /dev/null 2>&1; \
     fi; \
-    mkdir -p $(TMP_DIR); \
-    echo "$(3)" > $(TMP_DIR)/hello.txt; \
-    if [ -n "$(5)" ] && [ -d "$(5)" ]; then COPYFILE_DISABLE=1 cp -R "$(5)"/. $(TMP_DIR)/; fi; \
+    src=$(TMP_DIR); \
+    if [ -n "$(5)" ] && [ -d "$(5)" ]; then src="$(5)"; fi; \
+    mkdir -p "$$src"; \
+    echo "$(3)" > "$$src"/hello.txt; \
     truncate -s $$(($(or $(4),$(DISK_SIZE_MB)) - 1))M $(TMP_IMG); \
-    mkfs.ext2 -F -d $(TMP_DIR) $(TMP_IMG); \
+    mkfs.ext2 -F -d "$$src" $(TMP_IMG); \
     dd if=$(TMP_IMG) of=$(1) bs=1M seek=1 conv=notrunc status=none; \
     rm -rf $(TMP_IMG) $(TMP_DIR)
 endef
@@ -71,11 +72,10 @@ $(IDE_DISK):
 $(SATA_DISK):
 	$(call create_exfat_disk,$@,gpt,if your seeing this the sata driver AND exfat both work which is even more awesome)
 
-$(DATA_IMG): $(if $(NO_BUILD),,data-img)
-
+# data.img goes in hard linked, cp crawls through a sparse image that size on macos
 $(NVME_DISK): $(NVME_DATA)
 	@rm -rf $(NVME_FILES) && mkdir -p $(NVME_FILES)
-	@$(if $(NVME_DATA),cp $(DATA_IMG) $(NVME_FILES)/)
+	@$(if $(NVME_DATA),ln $(DATA_IMG) $(NVME_FILES)/ 2>/dev/null || cp $(DATA_IMG) $(NVME_FILES)/)
 	$(call create_ext2_disk,$@,gpt,if your seeing this the nvme driver works which is the most awesomest,$(if $(NVME_DATA),$$(( $$(wc -c < $(DATA_IMG)) / 1048576 + $(DISK_SIZE_MB) ))),$(NVME_FILES))
 	@rm -rf $(NVME_FILES)
 

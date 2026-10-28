@@ -93,20 +93,27 @@ build() {
 disk() {
     out=$1
     shift
-    copied=""
+    done_repos=""
     for entry; do
+        repo=${entry%% *}
         name=${entry##* }
-        dir=$(find_dir "${entry%% *}" "$name")
+
+        dir=$(repo_done "$repo")
+        if [ -n "$dir" ]; then
+            grep -q '^disk:' "$dir/Makefile" 2>/dev/null && continue
+        else
+            dir=$(find_dir "$repo" "$name")
+            done_repos="$done_repos $repo=$dir"
+        fi
 
         if grep -q '^disk:' "$dir/Makefile" 2>/dev/null; then
-            case " $copied " in *" $dir "*) continue ;; esac
-            copied="$copied $dir"
             echo "[DISK] Getting ${dir##*/}'s files"
             $MAKE -s -C "$dir" disk DISK="$out"
             continue
         fi
 
         echo "[DISK] $name"
+        rm -rf "$out/$name"
         mkdir -p "$out/$name"
         COPYFILE_DISABLE=1 cp "$dir/bin/$name" "$out/$name/"
         for pair in $DATA_ASSETS; do
