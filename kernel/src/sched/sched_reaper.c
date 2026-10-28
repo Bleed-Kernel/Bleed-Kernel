@@ -73,7 +73,8 @@ void scheduler_reap(void) {
             if (!dead_task_head)
                 dead_task_tail = NULL;
 
-            if (task == current_task) {
+            // still running or switching out on some cpu
+            if (task->on_cpu) {
                 task->dead_next = NULL;
                 if (dead_task_tail) {
                     dead_task_tail->dead_next = task;
@@ -84,7 +85,7 @@ void scheduler_reap(void) {
                 }
                 spinlock_release(&sched_lock);
                 irq_restore(flags);
-                continue;
+                break;
             }
 
             sched_wait_cleanup(task);

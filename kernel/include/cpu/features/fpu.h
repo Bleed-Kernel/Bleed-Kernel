@@ -16,8 +16,8 @@ void fpu_task_reset(struct task *task);
 // child starts with whatever the parent has right now, for fork
 void fpu_task_copy(struct task *dst, struct task *src);
 
-// called on every context switch, arms the trap unless next already owns the registers
-void fpu_switch(struct task *next);
+// called on every context switch, saves prev and loads next
+void fpu_switch(struct task *prev, struct task *next);
 
 // #NM handler, returns 1 when the fault was ours and has been dealt with
 int  fpu_handle_nm(void);

@@ -10,30 +10,27 @@
 #include <ansii.h>
 
 /*
- * Lazy FPU switching. A context switch never touches the FPU registers, it only sets CR0.TS
- * when the task coming in isnt the one whose state is sitting in them. The first FPU, SSE or
- * AVX instruction that task runs traps with #NM and thats where the save and restore happen,
- * so a task that never uses them costs nothing. The kernel is built without SSE so nothing
- * in here can trip the trap by accident.
+ * Eager FPU switching. A user task's FPU, SSE and AVX state is saved when it is switched out
+ * and loaded when it is switched in, so it can come back on any cpu. Kernel tasks skip both,
+ * This could be a problem because the kernel does actually use SSE in the mem functions but I havent noticed any issues
+ * the second i do ill patch this
  *
  * XSAVE is used when the cpu has it, the area is sized by CPUID for whatever XCR0 enables so
  * turning on more state later (AVX-512 and friends) needs no changes here.
  */
-
 #define CR0_TS              (1ULL << 3)
 #define CPUID1_ECX_OSXSAVE  (1u << 27)
 
 #define FXSAVE_AREA_SIZE    512
 #define FPU_FCW_OFFSET      0
 #define FPU_MXCSR_OFFSET    24
-#define FPU_FCW_DEFAULT     0x037F      // all x87 exceptions masked, 64 bit precision
+#define FPU_FCW_DEFAULT     0x037F      // all x87 exceptions masked
 #define FPU_MXCSR_DEFAULT   0x1F80      // all sse exceptions masked
 
 static size_t   fpu_area_size  = FXSAVE_AREA_SIZE;
 static size_t   fpu_area_pages = 1;
 static int      fpu_use_xsave  = 0;
 static uint8_t *fpu_clean      = NULL;  // what a brand new task starts from
-static task_t  *fpu_owner      = NULL;  // whose state is in the registers right now
 
 static inline void clts(void) {
     asm volatile("clts");
@@ -92,25 +89,22 @@ int fpu_task_init(task_t *task) {
 void fpu_task_free(task_t *task) {
     if (!task->fpu_state) return;
 
-    // dont leave the owner pointing at a task thats about to be freed
-    unsigned long flags = irq_push();
-    if (fpu_owner == task)
-        fpu_owner = NULL;
-    irq_restore(flags);
-
     vmm_free_pages(task->fpu_state, fpu_area_pages);
     task->fpu_state = NULL;
+}
+
+// only user tasks have anything in the registers worth keeping, the kernel never touches them
+static int fpu_user(task_t *task) {
+    return task && task->task_privilege == P_USER && task->fpu_state;
 }
 
 void fpu_task_reset(task_t *task) {
     unsigned long flags = irq_push();
 
-    // whatever is in the registers belongs to the old image, disown it so the next use reloads
-    if (fpu_owner == task)
-        fpu_owner = NULL;
+    // the registers still hold the old image, they would get saved over the clean copy
     memcpy(task->fpu_state, fpu_clean, fpu_area_size);
     if (task == get_current_task())
-        cr0_set_bits(CR0_TS);
+        fpu_restore(task->fpu_state);
 
     irq_restore(flags);
 }
@@ -118,39 +112,23 @@ void fpu_task_reset(task_t *task) {
 void fpu_task_copy(task_t *dst, task_t *src) {
     unsigned long flags = irq_push();
 
-    // the saved copy is stale while src owns the registers, bring it up to date first
-    if (fpu_owner == src) {
-        uint64_t cr0 = read_cr0();
-        clts();
+    // the saved copy is stale while src is running, bring it up to date first
+    if (src == get_current_task() && fpu_user(src))
         fpu_save(src->fpu_state);
-        write_cr0(cr0);
-    }
     memcpy(dst->fpu_state, src->fpu_state, fpu_area_size);
 
     irq_restore(flags);
 }
 
-void fpu_switch(task_t *next) {
-    if (next == fpu_owner)
-        clts();
-    else
-        cr0_set_bits(CR0_TS);
+void fpu_switch(task_t *prev, task_t *next) {
+    if (fpu_user(prev))
+        fpu_save(prev->fpu_state);
+    if (fpu_user(next))
+        fpu_restore(next->fpu_state);
 }
 
 int fpu_handle_nm(void) {
-    task_t *current = get_current_task();
-    if (!current || !current->fpu_state)
-        return 0;
-
+    // TS is never set any more, this is only here for a firmware or ap that left it on
     clts();
-    if (fpu_owner == current)
-        return 1;
-
-    // the last task to use the fpu has been switched out with its state still in the registers
-    if (fpu_owner)
-        fpu_save(fpu_owner->fpu_state);
-
-    fpu_restore(current->fpu_state);
-    fpu_owner = current;
     return 1;
 }

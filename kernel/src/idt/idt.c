@@ -10,6 +10,7 @@ extern void* isr_stub_table[];
 extern void* irq_stub_table[];
 extern char irq80[];
 extern char isr_yield[];
+extern char isr_resched[];
 
 __attribute__((aligned(0x10)))
 static idt_entry_t idt[DESCRIPTORS_COUNT];
@@ -43,10 +44,15 @@ uint64_t idt_init(void){
         idt_set_descriptor(32 + irq, irq_stub_table[irq], 0x8E);
 
     idt_set_descriptor(SCHED_YIELD_VECTOR, isr_yield, 0x8E);
+    idt_set_descriptor(SCHED_RESCHED_VECTOR, isr_resched, 0x8E);
 
     // interrupt gate (not a trap gate) so int 0x80 comes in with IF clear, same as SYSCALL does
     idt_set_descriptor(0x80, irq80, 0xEE);  // syscalls
 
-    asm volatile ("lidt %0" : : "m"(idt_ptr));
+    idt_load();
     return idt_ptr.address;
+}
+
+void idt_load(void){
+    asm volatile ("lidt %0" : : "m"(idt_ptr));
 }

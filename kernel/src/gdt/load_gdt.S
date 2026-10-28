@@ -4,7 +4,6 @@ reload_segments:
     mov %ax, %ds
     mov %ax, %es
     mov %ax, %fs
-    mov %ax, %gs
     mov %ax, %ss
     
     push    $0x08

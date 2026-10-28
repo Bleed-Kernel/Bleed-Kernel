@@ -19,3 +19,6 @@ typedef struct {
 } __attribute__((packed)) idt_ptr_t;
 
 uint64_t idt_init(void);
+
+// the idt is shared, an ap only has to load it
+void idt_load(void);

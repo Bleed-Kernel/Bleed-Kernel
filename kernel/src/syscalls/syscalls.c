@@ -1,3 +1,4 @@
+#include <sched/bkl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sched/scheduler.h>
@@ -69,6 +70,7 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_FSTATAT, sys_fstatat),
     SYSCALL(SYS_MOUNTINFO, sys_mountinfo),
     SYSCALL(SYS_MOUNTLABEL, sys_mountlabel),
+    SYSCALL(SYS_CPUINFO, sys_cpuinfo),
     SYSCALL(SYS_SOCKET, sys_socket),
     SYSCALL(SYS_CONNECT, sys_connect),
     SYSCALL(SYS_SENDTO, sys_sendto),
@@ -82,6 +84,8 @@ SyscallHandler syscall_handlers[] = {
 #pragma GCC diagnostic pop
 
 uint64_t syscall_dispatch(cpu_context_t *cpu_ctx){
+    bkl_lock();
+
     uint64_t sysno = cpu_ctx->rax;
     uint64_t ret = (uint64_t)-ENOSYS;
 

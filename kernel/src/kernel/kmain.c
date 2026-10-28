@@ -14,6 +14,8 @@
 #include <gdt/gdt.h>
 #include <idt/idt.h>
 #include <tss/tss.h>
+#include <cpu/percpu.h>
+#include <cpu/smp.h>
 #include <mm/paging.h>
 #include <mm/pmm.h>
 #include <mm/smap.h>
@@ -78,7 +80,7 @@ static simd_level_t sse_level;
 
 void init_processor_state(){
     BLOG_INFO("Attempting to initialise GDT");
-    void* gdt_ptr = gdt_init();
+    void* gdt_ptr = gdt_init(this_cpu());
     if (gdt_ptr){
         BLOG_OKF("GDT Ready -- %p", gdt_ptr);
         serial_printf(LOG_OK "Global Descriptor Table Loaded (GDTR=%p)\n", gdt_ptr);
@@ -101,7 +103,7 @@ void init_processor_state(){
     // case, who knows what a rouge hypervisor will do in the future. Virtualbox.
 
     BLOG_INFO("Attempting to initialise TSS");
-    tss_init();
+    tss_init(this_cpu());
     BLOG_OK("TSS Ready");
     serial_printf(LOG_OK "TSS Ready\n");
 
@@ -405,6 +407,7 @@ bool init_userspace(){
 __attribute__((noreturn))
 void kmain(void){
     asm volatile("cli");
+    cpu_bsp_early_init();
     
     sse_level = simd_enable();
     gbi_init();
@@ -432,10 +435,14 @@ Licenced under GPLv3\n");
     asm volatile("sti");
 
     init_userspace();
+
+    if (!bootargs_has("no-smp")){
+        smp_init();
+    }
     splash_finish();
     kernel_console_init();
 
     for(;;){
-        sched_idle();
+        sched_block(get_current_task());
     }
 }

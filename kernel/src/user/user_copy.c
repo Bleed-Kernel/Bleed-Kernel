@@ -6,6 +6,7 @@
 #include <mm/smap.h>
 #include <cpu/control_registers.h>
 #include <string.h>
+#include <mm/spinlock.h>
 #include <user/user_copy.h>
 
 #define USER_MIN 0x0000000000001000ULL
@@ -56,6 +57,9 @@ int copy_to_user(task_t *user_task, void *udst, const void *src, size_t len) {
     if (!user_range_mapped(user_task, (uintptr_t)udst, len, 1))
         return -1;
 
+    // a switch while borrowing another cr3 comes back on our own page_map
+    unsigned long flags = irq_push();
+
     // almost always the caller writing to itself, a cr3 reload there just throws the tlb away
     paddr_t old_cr3 = read_cr3();
     int     switch_cr3 = (old_cr3 & PADDR_ENTRY_MASK) != (user_task->page_map & PADDR_ENTRY_MASK);
@@ -71,6 +75,7 @@ int copy_to_user(task_t *user_task, void *udst, const void *src, size_t len) {
 
     if (switch_cr3)
         paging_switch_address_space(old_cr3);
+    irq_restore(flags);
     return 0;
 }
 

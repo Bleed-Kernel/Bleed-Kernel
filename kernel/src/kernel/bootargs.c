@@ -37,7 +37,8 @@ static const char* valid_keys[] = {
     "fb-width",
     "fb-height",
     "fb-pitch",
-    "fb-bpp"
+    "fb-bpp",
+    "no-smp"
 };
 
 #define VALID_BOOTARG_COUNT (sizeof(valid_keys) / sizeof(valid_keys[0]))

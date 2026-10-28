@@ -7,24 +7,36 @@
 #include <drivers/i2c/i2c_trackpad.h>
 #include <drivers/serial/serial.h>
 #include <sched/scheduler.h>
+#include <sched/bkl.h>
+#include <cpu/percpu.h>
 
 volatile uint64_t timer_ticks = 0;
 
 cpu_context_t *timer_handle(cpu_context_t *ctx) {
-    // usb has no irq of its own here, it gets serviced off the tick instead
-    usb_poll();
-    ac97_poll();
-    e1000_poll();
+    int bsp = this_cpu()->id == 0;
 
-    // before the tick so a task whose sleep just ran out can be picked straight away
-    sched_event_tick();
+    if (bsp) {
+        bkl_lock();
+
+        // usb has no irq of its own here, it gets serviced off the tick instead
+        usb_poll();
+        ac97_poll();
+        e1000_poll();
+
+        // before the tick so a task whose sleep just ran out can be picked straight awa
+        sched_event_tick();
+    }
 
     cpu_context_t *next = sched_tick(ctx);
-    timer_ticks++;
+    if (bsp)
+        timer_ticks++;
     return next;
 }
 
+// the ioapic only sends these to the bsp
 void irq_handler(uint8_t irq) {
+    bkl_lock();
+
     switch (irq) {
         case 1:
             PS2_Keyboard_Interrupt(irq);

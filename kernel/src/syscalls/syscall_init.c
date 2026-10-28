@@ -4,9 +4,6 @@
 #include <gdt/gdt.h>
 #include <syscalls/syscall.h>
 
-#define MSR_IA32_STAR   0xC0000081
-#define MSR_IA32_LSTAR  0xC0000082
-#define MSR_IA32_FMASK  0xC0000084
 #define EFER_SCE        (1ULL << 0)
 
 #define RFLAGS_TF        (1ULL << 8)

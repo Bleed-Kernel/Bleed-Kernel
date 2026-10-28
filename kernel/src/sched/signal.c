@@ -83,21 +83,16 @@ int signal_send(task_t *task, int sig) {
         task->sig_pending &= ~sig_bit(SIGTSTP);
         task->sig_pending &= ~sig_bit(SIGTTIN);
         task->sig_pending &= ~sig_bit(SIGTTOU);
-        if (task->state == TASK_STOPPED) {
-            task->state = TASK_READY;
-            ready_enqueue(task);
-        }
+        sched_continue_task(task);
     }
     if (signal_default_stop(sig))
         task->sig_pending &= ~sig_bit(SIGCONT);
 
     task->sig_pending |= sig_bit(sig);
-    if (task->state == TASK_BLOCKED) {
+    if (task->state == TASK_BLOCKED)
         sched_wake_task(task);
-    } else if (task->state == TASK_STOPPED || sig == SIGKILL) {
-        task->state = TASK_READY;
-        ready_enqueue(task);
-    }
+    else
+        sched_continue_task(task);
     return 0;
 }
 

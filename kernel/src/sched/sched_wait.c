@@ -6,6 +6,19 @@
 
 extern volatile uint64_t timer_ticks;
 
+static spinlock_t wait_lock;
+
+static unsigned long wait_lock_irq(void) {
+    unsigned long flags = irq_push();
+    spinlock_acquire(&wait_lock);
+    return flags;
+}
+
+static void wait_unlock_irq(unsigned long flags) {
+    spinlock_release(&wait_lock);
+    irq_restore(flags);
+}
+
 // reading the hpet on every tick costs more than everything else the tick does, so its only
 // looked at on this tick or later. UINT64_MAX means nobody is waiting on a timeout at all
 static uint64_t event_check_tick = UINT64_MAX;
@@ -79,7 +92,7 @@ static void wait_entry_remove(wait_entry_t *entry) {
     entry->queue = NULL;
 }
 
-void sched_wait_cleanup(task_t *task) {
+static void wait_cleanup_locked(task_t *task) {
     for (size_t i = 0; i < task->wait_entry_count; i++)
         wait_entry_remove(&task->wait_entries[i]);
 
@@ -87,6 +100,12 @@ void sched_wait_cleanup(task_t *task) {
     task->wait_entry_count = 0;
     task->event_deadline   = 0;
     deadline_remove(task);
+}
+
+void sched_wait_cleanup(task_t *task) {
+    unsigned long flags = wait_lock_irq();
+    wait_cleanup_locked(task);
+    wait_unlock_irq(flags);
 }
 
 /// @brief the deadline for a wait of ms starting now, in hpet counter units
@@ -99,10 +118,11 @@ int sched_deadline_passed(uint64_t deadline) {
     return hpet_read_counter() >= deadline;
 }
 
-void sched_wait_entries(wait_entry_t *entries, size_t count, uint64_t deadline) {
-    task_t *task = current_task;
+void sched_prepare_wait(wait_entry_t *entries, size_t count, uint64_t deadline) {
+    task_t *task = cpu_current();
     if (!task) return;
 
+    unsigned long flags = wait_lock_irq();
     for (size_t i = 0; i < count; i++)
         wait_entry_add(&entries[i], task);
     task->wait_entries     = entries;
@@ -120,14 +140,28 @@ void sched_wait_entries(wait_entry_t *entries, size_t count, uint64_t deadline) 
     }
 
     // a signal could have put it back in line while it was still running
-    ready_dequeue(task);
-    task->state = TASK_BLOCKED;
-    asm volatile ("int $" SCHED_YIELD_VECTOR_STR);
+    sched_set_blocked(task);
+    wait_unlock_irq(flags);
+}
 
+void sched_wait_commit(void) {
+    // anything since prepare already made it READY
+    if (cpu_current()->state == TASK_BLOCKED)
+        asm volatile ("int $" SCHED_YIELD_VECTOR_STR);
+}
+
+void sched_finish_wait(void) {
+    task_t *task = cpu_current();
     sched_wait_cleanup(task);
+    sched_set_running(task);
+}
 
-    if (task->state == TASK_BLOCKED)
-        task->state = TASK_RUNNING;
+void sched_wait_entries(wait_entry_t *entries, size_t count, uint64_t deadline) {
+    if (!cpu_current()) return;
+
+    sched_prepare_wait(entries, count, deadline);
+    sched_wait_commit();
+    sched_finish_wait();
 }
 
 void sched_wait_queue(wait_queue_t *queue, uint64_t deadline) {
@@ -144,28 +178,29 @@ void sched_sleep_until(uint64_t deadline) {
 void sched_wake_queue(wait_queue_t *queue) {
     if (!queue) return;
 
-    unsigned long flags = irq_push();
+    unsigned long flags = wait_lock_irq();
     for (wait_entry_t *entry = queue->head; entry; entry = entry->next)
         sched_wake_task(entry->task);
-    irq_restore(flags);
+    wait_unlock_irq(flags);
 }
 
 void sched_wait_queue_destroy(wait_queue_t *queue) {
     if (!queue) return;
 
-    unsigned long flags = irq_push();
+    unsigned long flags = wait_lock_irq();
     while (queue->head) {
         wait_entry_t *entry = queue->head;
         sched_wake_task(entry->task);
         wait_entry_remove(entry);
     }
-    irq_restore(flags);
+    wait_unlock_irq(flags);
 }
 
 // called off the timer, wakes the waits that ran out of time
 void sched_event_tick(void) {
     if (timer_ticks < event_check_tick) return;
 
+    unsigned long flags = wait_lock_irq();
     uint64_t now = hpet_read_counter();
     while (deadline_head && now >= deadline_head->event_deadline) {
         task_t *task = deadline_head;
@@ -175,4 +210,5 @@ void sched_event_tick(void) {
 
     event_check_tick = deadline_head ? timer_ticks + event_ticks_for(deadline_head->event_deadline - now)
                                      : UINT64_MAX;
+    wait_unlock_irq(flags);
 }

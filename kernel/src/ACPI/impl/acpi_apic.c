@@ -1,3 +1,4 @@
+#include <mm/spinlock.h>
 #include <ACPI/acpi.h>
 #include <ACPI/acpi_apic.h>
 #include <stddef.h>
@@ -36,6 +37,12 @@
 #define APIC_LVT_MASKED       (1U << 16)
 #define APIC_SVR_ENABLE       (1U << 8)
 
+#define LAPIC_REG_ICR_LOW     0x300
+#define LAPIC_REG_ICR_HIGH    0x310
+#define LAPIC_ICR_NMI         (4U << 8)
+#define LAPIC_ICR_PENDING     (1U << 12)
+#define LAPIC_ICR_ASSERT      (1U << 14)
+#define LAPIC_ICR_ALL_BUT_SELF (3U << 18)
 #define LAPIC_REG_TIMER_INIT  0x380
 #define LAPIC_REG_TIMER_CUR   0x390
 #define LAPIC_REG_TIMER_DIV   0x3E0
@@ -56,6 +63,7 @@ static volatile uint32_t *ioapic = NULL;
 static int apic_enabled = 0;
 static uint32_t ioapic_max_redir = 0;
 static uint32_t bsp_lapic_id = 0;
+static uint32_t lapic_tick_count = 0;   // what the bsp calibrated, the aps reuse it
 
 static inline void lapic_write(uint32_t reg, uint32_t val) {
     lapic[reg / 4] = val;
@@ -93,6 +101,29 @@ int apic_is_enabled(void) {
 // assembly. i might end up using it in C so ill keep the macro
 void apic_eoi(void) {
     APIC_EOI();
+}
+
+static void lapic_icr_wait(void) {
+    while (lapic[LAPIC_REG_ICR_LOW / 4] & LAPIC_ICR_PENDING)
+        asm volatile("pause");
+}
+
+void lapic_send_ipi(uint32_t lapic_id, uint8_t vector) {
+    unsigned long flags = irq_push();
+    lapic_icr_wait();
+    lapic_write(LAPIC_REG_ICR_HIGH, lapic_id << 24);
+    lapic_write(LAPIC_REG_ICR_LOW, vector | LAPIC_ICR_ASSERT);
+    lapic_icr_wait();
+    irq_restore(flags);
+}
+
+void lapic_nmi_others(void) {
+    unsigned long flags = irq_push();
+    lapic_icr_wait();
+    lapic_write(LAPIC_REG_ICR_HIGH, 0);
+    lapic_write(LAPIC_REG_ICR_LOW, LAPIC_ICR_NMI | LAPIC_ICR_ASSERT | LAPIC_ICR_ALL_BUT_SELF);
+    lapic_icr_wait();
+    irq_restore(flags);
 }
 
 static uint64_t ioapic_entry_for_irq(uint8_t vector, uint32_t lapic_id, uint32_t irq) {
@@ -174,8 +205,36 @@ int lapic_timer_start(uint32_t hz) {
     lapic_write(LAPIC_REG_LVT_TIMER, LAPIC_TIMER_VECTOR | LAPIC_TIMER_PERIODIC);
     lapic_write(LAPIC_REG_TIMER_DIV, LAPIC_TIMER_DIV_16);
     lapic_write(LAPIC_REG_TIMER_INIT, (uint32_t)per_tick);
+    lapic_tick_count = (uint32_t)per_tick;
 
     serial_printf(LOG_OK "LAPIC timer ticking at %u Hz (%u counts per tick)\n", hz, (uint32_t)per_tick);
+    return 0;
+}
+
+/// @brief set up the calling aps lapic the way apic_init did the bsps and start its tick
+/// @return 0 on success, -1 if the bsp never got a timer going to copy
+int lapic_ap_init(void) {
+    if (!apic_enabled || !lapic || !lapic_tick_count)
+        return -1;
+
+    // the mapping is shared, every cpu sees its own lapic behind it
+    wrmsr(IA32_APIC_BASE_MSR, rdmsr(IA32_APIC_BASE_MSR) | IA32_APIC_BASE_ENABLE);
+    uint32_t lapic_id = lapic[LAPIC_REG_ID / 4] >> 24;
+
+    lapic_write(LAPIC_REG_TPR, 0);
+    lapic_write(LAPIC_REG_DFR, 0xFFFFFFFF);
+    lapic_write(LAPIC_REG_LDR, (1U << (lapic_id & 0xF)) << 24);
+    lapic_write(LAPIC_REG_LVT_THERMAL, APIC_LVT_MASKED);
+    lapic_write(LAPIC_REG_LVT_PMC, APIC_LVT_MASKED);
+    lapic_write(LAPIC_REG_LVT_LINT0, APIC_LVT_MASKED);
+    lapic_write(LAPIC_REG_LVT_LINT1, APIC_LVT_MASKED);
+    lapic_write(LAPIC_REG_LVT_ERROR, APIC_LVT_MASKED);
+    lapic_write(LAPIC_REG_SVR, APIC_SVR_ENABLE | 0x2F);
+    lapic_write(LAPIC_REG_EOI, 0);
+
+    lapic_write(LAPIC_REG_LVT_TIMER, LAPIC_TIMER_VECTOR | LAPIC_TIMER_PERIODIC);
+    lapic_write(LAPIC_REG_TIMER_DIV, LAPIC_TIMER_DIV_16);
+    lapic_write(LAPIC_REG_TIMER_INIT, lapic_tick_count);
     return 0;
 }
 

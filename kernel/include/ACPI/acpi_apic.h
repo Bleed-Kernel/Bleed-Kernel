@@ -41,6 +41,15 @@ int apic_init(void);
 int apic_is_enabled(void);
 int lapic_timer_start(uint32_t hz);
 
+// an aps own lapic and tick, call on the ap
+int lapic_ap_init(void);
+
+// a fixed interrupt on vector to one cpu
+void lapic_send_ipi(uint32_t lapic_id, uint8_t vector);
+
+// an nmi to every cpu but this one, gets through even with interrupts off
+void lapic_nmi_others(void);
+
 // send a gsi that isnt one of the legacy irqs to vector, -1 if the ioapic has no such pin
 int ioapic_route_gsi(uint32_t gsi, uint8_t vector, int level, int low);
 void ioapic_mask_gsi(uint32_t gsi);

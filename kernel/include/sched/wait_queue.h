@@ -18,7 +18,12 @@ typedef struct wait_queue {
 } wait_queue_t;
 
 // sleep on every entries queue till one is woken, a signal or the deadline. interrupts must be off
+// and whatever the caller checked before this has to be held still by something
 void sched_wait_entries(wait_entry_t *entries, size_t count, uint64_t deadline);
+
+void sched_prepare_wait(wait_entry_t *entries, size_t count, uint64_t deadline);
+void sched_wait_commit(void);
+void sched_finish_wait(void);
 
 // sched_wait_entries with the one queue, NULL is a plain sleep
 void sched_wait_queue(wait_queue_t *queue, uint64_t deadline);

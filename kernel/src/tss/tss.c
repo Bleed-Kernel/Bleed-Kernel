@@ -2,18 +2,19 @@
 #include <tss/tss.h>
 #include <gdt/gdt.h>
 #include <stddef.h>
-
-tss_t tss = {0};
+#include <cpu/percpu.h>
 
 /// @brief Task State Segment Initialiser
-void tss_init(void){
+void tss_init(cpu_t *cpu){
+    tss_t *tss = &cpu->tss;
+
     // past the limit means no bitmap at all. left at 0 the cpu reads the tss itself as the
     // bitmap and every zero bit in it is a port ring 3 is allowed to touch
-    tss.iopb = sizeof(tss_t);
+    tss->iopb = sizeof(tss_t);
 
-    tss_segment_t* tss_segment = &gdt.tss;
+    tss_segment_t* tss_segment = &cpu->gdt.tss;
     tss_segment->limit_low = sizeof(tss_t)-1;
-    uint64_t tss_ptr = (uint64_t)&tss;
+    uint64_t tss_ptr = (uint64_t)tss;
     tss_segment->base_low    = tss_ptr;
     tss_segment->base_middle = tss_ptr>>16;
     tss_segment->base_high   = tss_ptr>>24;

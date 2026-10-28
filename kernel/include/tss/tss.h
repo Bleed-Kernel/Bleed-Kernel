@@ -20,6 +20,6 @@ typedef struct {
     uint32_t _reserved;
 } __attribute__((packed)) tss_segment_t;
 
-extern tss_t tss;
+struct cpu;
 
-void tss_init(void);
+void tss_init(struct cpu *cpu);

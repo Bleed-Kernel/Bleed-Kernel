@@ -47,7 +47,6 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
     }
 
     child->wait_queue = NULL;
-    child->state = TASK_READY;
 
     INode_t *parent_cwd = caller->current_directory ? caller->current_directory : vfs_get_root();
     if (child->current_directory)

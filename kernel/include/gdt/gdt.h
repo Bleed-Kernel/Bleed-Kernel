@@ -23,12 +23,12 @@ typedef struct GDT{
     tss_segment_t tss;
 } gdt_t;
 
-extern gdt_t gdt;
-
 struct gdt_ptr_t{
     uint16_t length;
     void* address;
 } __attribute__((packed));
 
+struct cpu;
+
 /// @brief initalise the better gdt, replacing the one from LIMINE
-void *gdt_init();
+void *gdt_init(struct cpu *cpu);

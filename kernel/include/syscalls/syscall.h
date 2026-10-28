@@ -79,6 +79,7 @@ enum {
     SYS_WAITSTATUS      = 529,
     SYS_MOUNTINFO       = 530,
     SYS_MOUNTLABEL      = 531,
+    SYS_CPUINFO         = 532,
 };
 
 int sys_open(char *path_str, int flags);
@@ -129,6 +130,7 @@ uint64_t sys_taskinfo(uint64_t pid, uint64_t user_info_ptr);
 uint64_t sys_taskcount(void);
 long sys_taskusage(uint64_t pid, uint64_t user_usage_ptr);
 long sys_taskpath(uint64_t pid, char *buf, uint64_t size);
+long sys_cpuinfo(uint64_t index, uint64_t user_info_ptr);
 
 long sys_stat(const char *user_path, user_stat_t *user_buf);
 long sys_fstatat(int dirfd, const char *user_path, user_stat_t *user_buf, int flags);

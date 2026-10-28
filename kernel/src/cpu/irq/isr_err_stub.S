@@ -5,8 +5,17 @@
 .extern irq_handler
 .extern timer_handle
 .extern sched_yield_handle
+.extern sched_resched_handle
 .extern syscall_dispatch
 .extern apic_eoi
+.extern sched_return
+
+.macro SWAPGS_IF_USER off
+    test qword ptr [rsp + \off], 3
+    jz   1f
+    swapgs
+1:
+.endm
 
 .macro ISR_NO_ERR v
 .globl isr_\v
@@ -72,6 +81,7 @@ ISR_NO_ERR 31
 
 .type isr_common,@function
 isr_common:
+    SWAPGS_IF_USER 24
     push rax
     push rbx
     push rcx
@@ -92,6 +102,8 @@ isr_common:
     mov  rdi, rsp
     call ke_processor_exception
     mov  rsp, rax
+    mov  rdi, rsp
+    call sched_return
 
     pop r15
     pop r14
@@ -109,6 +121,7 @@ isr_common:
     pop rbx
     pop rax
 
+    SWAPGS_IF_USER 24
     add  rsp, 16
     iretq
 .size isr_common, .-isr_common
@@ -126,6 +139,7 @@ isr_stub_table:
 irq0:
     push 0
     push 32
+    SWAPGS_IF_USER 24
     push rax
     push rbx
     push rcx
@@ -147,6 +161,8 @@ irq0:
     call timer_handle
     mov  rsp, rax
     call apic_eoi
+    mov  rdi, rsp
+    call sched_return
 
     pop r15
     pop r14
@@ -164,6 +180,7 @@ irq0:
     pop rbx
     pop rax
 
+    SWAPGS_IF_USER 24
     add  rsp, 16
     iretq
 .size irq0, .-irq0
@@ -174,6 +191,7 @@ irq0:
 isr_yield:
     push 0
     push 0x81
+    SWAPGS_IF_USER 24
     push rax
     push rbx
     push rcx
@@ -194,6 +212,8 @@ isr_yield:
     mov  rdi, rsp
     call sched_yield_handle
     mov  rsp, rax
+    mov  rdi, rsp
+    call sched_return
 
     pop r15
     pop r14
@@ -211,9 +231,61 @@ isr_yield:
     pop rbx
     pop rax
 
+    SWAPGS_IF_USER 24
     add  rsp, 16
     iretq
 .size isr_yield, .-isr_yield
+
+.globl isr_resched
+.type  isr_resched,@function
+isr_resched:
+    push 0
+    push 0xF0
+    SWAPGS_IF_USER 24
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    cld
+    mov  rdi, rsp
+    call sched_resched_handle
+    mov  rsp, rax
+    call apic_eoi
+    mov  rdi, rsp
+    call sched_return
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    SWAPGS_IF_USER 24
+    add  rsp, 16
+    iretq
+.size isr_resched, .-isr_resched
 
 IRQ_STUB 1,  33
 IRQ_STUB 2,  34
@@ -233,6 +305,7 @@ IRQ_STUB 15, 47
 
 .type irq_common,@function
 irq_common:
+    SWAPGS_IF_USER 24
     push rax
     push rbx
     push rcx
@@ -254,6 +327,8 @@ irq_common:
     lea  rsi, [rsp]
     call irq_handler
     call apic_eoi
+    mov  rdi, rsp
+    call sched_return
 
     pop r15
     pop r14
@@ -271,6 +346,7 @@ irq_common:
     pop rbx
     pop rax
 
+    SWAPGS_IF_USER 24
     add  rsp, 16
     iretq
 .size irq_common, .-irq_common
@@ -288,6 +364,7 @@ irq80:
     push 0
     push 0x80
 
+    SWAPGS_IF_USER 24
     push rax
     push rbx
     push rcx
@@ -307,6 +384,9 @@ irq80:
     cld
     mov  rdi, rsp
     call syscall_dispatch
+    mov  rdi, rsp
+    call sched_return
+    mov  rax, [rsp + 112]   /* the return value, its in the frame */
 
     pop r15
     pop r14
@@ -324,5 +404,6 @@ irq80:
     pop rbx
 
     add  rsp, 24        /* saved rax (the return value stays in rax), vector and error */
+    SWAPGS_IF_USER 8
     iretq
 .size irq80, .-irq80

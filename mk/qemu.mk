@@ -65,6 +65,7 @@ define run_qemu
 		-boot d \
 		-m $(MEMSZ) \
 		$$serial \
+		-smp 4 \
 		-drive format=raw,file=$(IDE_DISK) \
 		-device ich9-ahci,id=ahci \
 		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \

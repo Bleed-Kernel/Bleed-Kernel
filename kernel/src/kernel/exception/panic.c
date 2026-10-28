@@ -1,3 +1,6 @@
+#include <cpu/percpu.h>
+#include <ACPI/acpi_apic.h>
+#include <sched/bkl.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -179,9 +182,18 @@ static inline void print_separator(const char* title) {
     serial_printf("\n--[ %s ]----------------------------------------------------\n", title);
 }
 
+// set once a cpu has started panicking, the nmi it sends everyone else checks for it
+static volatile int panic_stopping = 0;
+
 __attribute__((noreturn))
 void ke_panic(struct isr_stackframe *sf, const char *pstring){
     __asm__ volatile ("cli");
+
+    // only one cpu gets to draw the panic but the rest are stopped anyway
+    if (__atomic_exchange_n(&panic_stopping, 1, __ATOMIC_ACQ_REL))
+        hcf();
+    if (cpu_count > 1)
+        lapic_nmi_others();
     if (!sf && !pstring) hcf();
     bconsole_init(); //users who dont enable verbose will never see a panic unless we do this.
     panic_fill_screen(PANIC_SCREEN_COLOR);
@@ -224,7 +236,7 @@ there is nothing more to be done here, feel free to restart your computer via it
         const char *name = stack_trace_symbol_lookup(sf->rip, &sym_addr);
 
         bset_color(BCOL_WHITE, BCOL_BLACK); bprintf("  Instruction : ");
-        bset_color(BCOL_GREEN, BCOL_BLACK); bprintf("0x%p", (void*)sf->rip);
+        bset_color(BCOL_GREEN, BCOL_BLACK); bprintf("%p", (void*)sf->rip);
         if (name) {
             bset_color(BCOL_YELLOW, BCOL_BLACK);
             bprintf(" <%s + 0x%llx>", name, sf->rip - sym_addr);
@@ -313,6 +325,11 @@ there is nothing more to be done here, feel free to restart your computer via it
 extern void* ke_processor_exception(void *frame){
     struct isr_stackframe *sf = (struct isr_stackframe *)frame;
     task_t *responsible_task = get_current_task();
+
+    // another cpu panicked. it might hold the bkl
+    if (sf && sf->vector == 2 && __atomic_load_n(&panic_stopping, __ATOMIC_ACQUIRE))
+        hcf();
+    bkl_lock();
     
     // device not available is how lazy fpu switching gets told a task wants its registers
     if (sf && sf->vector == 7 && fpu_handle_nm())

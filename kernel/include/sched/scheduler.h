@@ -31,6 +31,9 @@
 #define SCHED_YIELD_VECTOR      0x81
 #define SCHED_YIELD_VECTOR_STR  "0x81"
 
+// another cpu wants this one to look at the run queue
+#define SCHED_RESCHED_VECTOR    0xF0
+
 typedef struct user_heap user_heap_t;
 typedef struct prio_array prio_array_t;
 typedef struct ipc_message ipc_message_t;
@@ -79,6 +82,7 @@ typedef struct task {
     uint8_t         *kernel_stack;
     uint32_t        quantum_remaining;
     uint64_t        cpu_time;       // tsc cycles spent on the cpu, up to the last switch away
+    uint64_t        run_tsc;        // when it was last given the cpu
 
     paddr_t         page_map;
     user_alloc_t    *alloc_list;
@@ -93,6 +97,9 @@ typedef struct task {
     struct task     *wait_queue;
     struct task     *wait_next;
     uint64_t        wait_target_pid;
+
+    uint8_t         on_cpu;         // running, or still being switched out, somewhere
+    uint8_t         idle;           // a cpus idle task, never queued
 
     uint8_t         prio_base;
     int8_t          prio_bonus;     // up for sleeping, down for using whole quanta
@@ -158,8 +165,16 @@ void sched_block(task_t *task);
 // a BLOCKED task can run again, and gets a bump for having slept
 void sched_wake_task(task_t *task);
 
-// the kernel tasks loop once boot is done, runs only when nothing else can
+// a STOPPED task can run again
+void sched_continue_task(task_t *task);
+
+// one turn of a cpus idle task, runs only when nothing else can
 void sched_idle(void);
+
+struct cpu;
+
+// an idle task for an ap, never on the task list so nothing but that cpu ever runs it
+task_t *sched_create_idle_task(struct cpu *cpu);
 
 // sleep till the deadline or a signal. interrupts must be off
 void sched_sleep_until(uint64_t deadline);

@@ -1,28 +1,23 @@
 .intel_syntax noprefix
-
-.section .bss
-.align 8
-.globl syscall_saved_user_rsp
-syscall_saved_user_rsp:
-    .zero 8
+#include <cpu/percpu.h>
 
 .text
 .extern syscall_dispatch
-.extern tss
+.extern sched_return
 
 .equ USER_CS, 0x1b
 .equ USER_SS, 0x23
-.equ TSS_RSP0_OFFSET, 4
 
 .globl syscall_entry
 .type syscall_entry,@function
 syscall_entry:
-    mov [rip + syscall_saved_user_rsp], rsp
-    mov rsp, [rip + tss + TSS_RSP0_OFFSET]
+    swapgs
+    mov gs:[CPU_USER_RSP], rsp
+    mov rsp, gs:[CPU_KERNEL_RSP]
 
     // cpu_context_t frame
     push USER_SS
-    push qword ptr [rip + syscall_saved_user_rsp]
+    push qword ptr gs:[CPU_USER_RSP]
     push r11
     push USER_CS
     push rcx
@@ -47,6 +42,9 @@ syscall_entry:
 
     mov rdi, rsp
     call syscall_dispatch
+    mov rdi, rsp
+    call sched_return
+    mov rax, [rsp + 112]
 
     pop r15
     pop r14
@@ -66,5 +64,11 @@ syscall_entry:
     // Switch back to the User context
     cli
     add rsp, 24 // skip saved rax. vector and error.
+
+    // sigreturn can hand back a different frame
+    test qword ptr [rsp + 8], 3
+    jz   1f
+    swapgs
+1:
     iretq
 .size syscall_entry, .-syscall_entry
