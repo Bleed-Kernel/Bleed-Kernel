@@ -16,3 +16,6 @@ typedef enum {
 
 simd_level_t simd_enable(void);
 const char  *simd_level_name(simd_level_t level);
+
+// whatever simd_enable settled on
+simd_level_t simd_get_level(void);

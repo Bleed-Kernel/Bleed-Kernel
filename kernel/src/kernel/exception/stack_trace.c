@@ -4,6 +4,8 @@
 #include <drivers/serial/serial.h>
 #include <mm/kalloc.h>
 #include <mm/smap.h>
+#include <mm/paging.h>
+#include <cpu/control_registers.h>
 #include <fs/vfs.h>
 #include <boot/bootlogger/bootlogger.h>
 
@@ -92,9 +94,13 @@ const char *stack_trace_symbol_lookup(uint64_t address, uint64_t *sym_addr_out){
     return name;
 }
 
-void stack_trace_print(uint64_t *rbp) {
-    for (int i = 0; i < 16 && rbp; i++) {
+int stack_trace_collect(uint64_t *rbp, uint64_t *rips, int max) {
+    int count = 0;
+
+    while (count < max && rbp) {
         if ((uint64_t)rbp < 0x1000 || ((uint64_t)rbp & 0xF)) break;
+        // a panic walks whatever rbp it was left with, dont fault on top of it
+        if (!paging_is_mapped(read_cr3(), (uint64_t)rbp)) break;
 
         uint64_t *next_rbp = NULL;
         uint64_t rip = 0;
@@ -106,27 +112,36 @@ void stack_trace_print(uint64_t *rbp) {
             rip = rbp[1];
         }
         if (!rip) break;
+        rips[count++] = rip;
 
+        if (!next_rbp || next_rbp <= rbp || ((uint64_t)next_rbp & 0xF))
+            break;
+        rbp = next_rbp;
+    }
+    return count;
+}
+
+void stack_trace_print(uint64_t *rbp) {
+    uint64_t rips[16];
+    int count = stack_trace_collect(rbp, rips, 16);
+
+    for (int i = 0; i < count; i++) {
         uint64_t sym_addr = 0;
-        const char *name = stack_trace_symbol_lookup(rip, &sym_addr);
+        const char *name = stack_trace_symbol_lookup(rips[i], &sym_addr);
 
         bset_color(BCOL_GREY, BCOL_BLACK);
         bprintf("  ");
 
         bset_color(BCOL_WHITE, BCOL_BLACK);
-        bprintf("%p ", (void *)rip);
+        bprintf("%p ", (void *)rips[i]);
 
         bset_color(BCOL_YELLOW, BCOL_BLACK);
         if (name) {
-            bprintf("<%s+0x%llx>\n", name, rip - sym_addr);
+            bprintf("<%s+0x%llx>\n", name, rips[i] - sym_addr);
         } else {
             bprintf("<??:?>\n");
         }
 
         breset_color();
-
-        if (!next_rbp || next_rbp <= rbp || ((uint64_t)next_rbp & 0xF))
-            break;
-        rbp = next_rbp;
     }
 }

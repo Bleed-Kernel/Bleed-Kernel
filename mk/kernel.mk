@@ -31,6 +31,10 @@ $(PROC_VERSION_FILE): FORCE
 		mv "$$tmp" "$@"; \
 	fi
 
+PANIC_REPORT_OBJ := $(OBJDIR)/kernel/src/kernel/exception/panic_report.o
+$(PANIC_REPORT_OBJ): CFLAGS += -DBLEED_VERSION='"$(BUILD_VERSION)"'
+$(PANIC_REPORT_OBJ): $(PROC_VERSION_FILE)
+
 $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	@echo "[CC] $<"

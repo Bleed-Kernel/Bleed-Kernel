@@ -26,6 +26,7 @@
 #include <fs/archive/tar.h>
 #include <fonts/psf.h>
 #include <boot/splash_image.h>
+#include <kernel/exception/panic_screen.h>
 #include <kernel/exception/stack_trace.h>
 
 #include <ACPI/acpi.h>
@@ -354,6 +355,11 @@ bool init_userspace(){
     // the shell stays hidden behind the splash until init takes the screen
     if (!same) tty_set_graphics(1);
 
+    if (panic_screen_load())
+        BLOG_OK("Panic screen loaded");
+    else
+        BLOG_WARN("Panic screen failed to load, panics stay on the console");
+
     BLOG_INFO("Attempting to start shell");
     task_t *shell = elf_sched(shell_elf, 0, NULL);
     if (shell != NULL)
@@ -441,7 +447,7 @@ Licenced under GPLv3\n");
     }
     splash_finish();
     kernel_console_init();
-
+    
     for(;;){
         sched_block(get_current_task());
     }

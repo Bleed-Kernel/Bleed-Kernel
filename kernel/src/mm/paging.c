@@ -347,7 +347,7 @@ uint64_t* paging_get_page(paddr_t cr3, uint64_t vaddr, int create) {
 }
 
 // is vaddr backed by anything at all, a 4K page or a huge one further up
-static int paging_is_mapped(paddr_t cr3, uint64_t vaddr) {
+int paging_is_mapped(paddr_t cr3, uint64_t vaddr) {
     uint64_t *table = (uint64_t *)paddr_to_vaddr(cr3 & PADDR_ENTRY_MASK);
 
     for (int shift = 39; shift >= 12; shift -= 9) {

@@ -38,6 +38,8 @@ static inline void xsetbv(uint32_t reg, uint64_t val) {
 #define CPUID7_EBX_AVX2   (1u <<  5)
 #define CPUID7_EBX_AVX512F (1u << 16)
 
+static simd_level_t simd_level = SIMD_NONE;
+
 simd_level_t simd_enable(void) {
     uint32_t eax, ebx, ecx, edx;
 
@@ -107,6 +109,7 @@ simd_level_t simd_enable(void) {
         else                                    level = SIMD_SSE;
     }
 
+    simd_level = level;
     return level;
 }
 
@@ -124,4 +127,8 @@ const char *simd_level_name(simd_level_t level) {
         case SIMD_AVX512: return "AVX-512F";
         default:          return "unknown";
     }
+}
+
+simd_level_t simd_get_level(void) {
+    return simd_level;
 }

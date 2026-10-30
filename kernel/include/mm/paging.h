@@ -81,6 +81,8 @@ uint64_t *paging_get_table(paddr_t cr3, uint64_t vaddr);
 
 void paging_unmap_page(paddr_t cr3, uint64_t vaddr);
 
+int paging_is_mapped(paddr_t cr3, uint64_t vaddr);
+
 int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3);
 int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_error);
 int paging_handle_stack_fault(struct task *task, uint64_t fault_addr);

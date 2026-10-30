@@ -14,6 +14,8 @@
 #include <drivers/serial/serial.h>
 #include <kernel/exception/panic.h>
 #include <kernel/exception/stack_trace.h>
+#include <kernel/exception/panic_screen.h>
+#include <kernel/exception/panic_report.h>
 #include <boot/bootlogger/bootlogger.h>
 #include <drivers/framebuffer/framebuffer.h>
 
@@ -108,7 +110,37 @@ void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
     __builtin_unreachable();
 }
 
+void page_fault_describe(uint64_t err, uint64_t cr2, page_fault_info_t *out) {
+    out->access    = (err & (1 << 4)) ? "EXECUTE (Instruction Fetch)" :
+                     (err & (1 << 1)) ? "WRITE" : "READ";
+    out->privilege = (err & (1 << 2)) ? "USER" : "SUPERVISOR";
+
+    if (!(err & (1 << 0))) {
+        out->violation = "PAGE NOT PRESENT";
+    } else if (err & (1 << 3)) {
+        out->violation = "RESERVED BIT VIOLATION";
+    } else if (err & (1 << 5)) {
+        out->violation = "PROTECTION KEY VIOLATION";
+    } else if (err & (1 << 15)) {
+        out->violation = "SGX VIOLATION";
+    } else {
+        out->violation = "ACCESS RIGHTS VIOLATION";
+    }
+
+    out->note = NULL;
+    if (!(err & (1 << 0)) && cr2 < 0x1000)
+        out->note = "NULL pointer dereference";
+    else if ((err & (1 << 4)) && (err & (1 << 0)))
+        out->note = "NX Violation";
+}
+
 static void dump_page_fault_info(uint64_t err, uint64_t cr2) {
+    page_fault_info_t pf;
+    page_fault_describe(err, cr2, &pf);
+    const char *access    = pf.access;
+    const char *privilege = pf.privilege;
+    const char *violation = pf.violation;
+
     bset_color(BCOL_RED, BCOL_BLACK);
     bprintf("\n  PAGE FAULT\n");
     
@@ -116,24 +148,6 @@ static void dump_page_fault_info(uint64_t err, uint64_t cr2) {
     bprintf("  Address   : ");
     bset_color(BCOL_CYAN, BCOL_BLACK);
     bprintf("0x%p\n", (void*)cr2);
-
-    const char* access = (err & (1 << 4)) ? "EXECUTE (Instruction Fetch)" :
-                         (err & (1 << 1)) ? "WRITE" : "READ";
-
-    const char* privilege = (err & (1 << 2)) ? "USER" : "SUPERVISOR";
-
-    const char* violation;
-    if (!(err & (1 << 0))) {
-        violation = "PAGE NOT PRESENT";
-    } else if (err & (1 << 3)) {
-        violation = "RESERVED BIT VIOLATION";
-    } else if (err & (1 << 5)) {
-        violation = "PROTECTION KEY VIOLATION";
-    } else if (err & (1 << 15)) {
-        violation = "SGX VIOLATION";
-    } else {
-        violation = "ACCESS RIGHTS VIOLATION";
-    }
 
     bset_color(BCOL_GREY, BCOL_BLACK);
     bprintf("  Action    : ");
@@ -150,15 +164,9 @@ static void dump_page_fault_info(uint64_t err, uint64_t cr2) {
     bset_color(BCOL_RED, BCOL_BLACK);
     bprintf("%s\n", violation);
 
-    const char *null_note = NULL;
-    if (!(err & (1 << 0)) && cr2 < 0x1000) {
+    if (pf.note) {
         bset_color(BCOL_YELLOW, BCOL_BLACK);
-        bprintf("            : NULL pointer dereference\n");
-        null_note = "NULL pointer dereference";
-    } else if ((err & (1 << 4)) && (err & (1 << 0))) {
-        bset_color(BCOL_YELLOW, BCOL_BLACK);
-        bprintf("            : NX Violation\n");
-        null_note = "NX Violation";
+        bprintf("            : %s\n", pf.note);
     }
     breset_color();
 
@@ -167,7 +175,7 @@ static void dump_page_fault_info(uint64_t err, uint64_t cr2) {
     serial_printf("  Action    : %s\n", access);
     serial_printf("  Privilege : %s\n", privilege);
     serial_printf("  Page Flags: %s\n", violation);
-    if (null_note) serial_printf("            : %s\n", null_note);
+    if (pf.note) serial_printf("            : %s\n", pf.note);
 }
 
 static inline void print_separator(const char* title) {
@@ -195,8 +203,13 @@ void ke_panic(struct isr_stackframe *sf, const char *pstring){
     if (cpu_count > 1)
         lapic_nmi_others();
     if (!sf && !pstring) hcf();
-    bconsole_init(); //users who dont enable verbose will never see a panic unless we do this.
-    panic_fill_screen(PANIC_SCREEN_COLOR);
+
+    // once userspace is up it gets the drawn panic, the console one is for early boot
+    bool graphical = panic_screen_ready();
+    if (!graphical) {
+        bconsole_init(); //users who dont enable verbose will never see a panic unless we do this.
+        panic_fill_screen(PANIC_SCREEN_COLOR);
+    }
     breset_color();
 
     bset_color(BCOL_WHITE, BCOL_BLACK);
@@ -278,15 +291,6 @@ there is nothing more to be done here, feel free to restart your computer via it
 
         print_separator("BACKTRACE");
         stack_trace_print((uint64_t*)sf->rbp);
-
-        /*
-        print_separator("DEBUG SIGNATURE");
-        bset_color(BCOL_GREY, BCOL_BLACK);
-        bprintf("  Put this code into https://bleedkernel.com/panic.html or share it to report the issue\n\n");
-        bset_color(BCOL_YELLOW, BCOL_BLACK);
-        */
-        bprintf("");
-
     } else {
         serial_write("\n[PANIC] "); serial_write(pstring); serial_write("\n");
 
@@ -319,6 +323,20 @@ there is nothing more to be done here, feel free to restart your computer via it
         stack_trace_print((uint64_t*)cur_rbp);
     }
 
+    uint64_t rbp;
+    __asm__ volatile ("mov %%rbp, %0" : "=r"(rbp));
+    const char *report = panic_report_url(sf, pstring, sf ? sf->rbp : rbp, (uint64_t)__builtin_return_address(0));
+
+    print_separator("REPORT");
+    bset_color(BCOL_GREY, BCOL_BLACK);
+    bprintf("  Open this to see everything about the panic, or share it to report the issue\n");
+    bset_color(BCOL_YELLOW, BCOL_BLACK);
+    bprintf("  %s\n", report);
+    breset_color();
+    serial_printf("  %s\n", report);
+
+    if (graphical)
+        panic_screen_draw(sf, pstring, report);
     hcf();
 }
 

@@ -18,7 +18,17 @@ struct isr_stackframe {
     uint64_t ss;
 } __attribute__((packed));
 
+typedef struct {
+    const char *access;
+    const char *privilege;
+    const char *violation;
+    const char *note;
+} page_fault_info_t;
+
 const char* exception_name(uint8_t vector);
+
+// turn a page fault error code into words
+void page_fault_describe(uint64_t err, uint64_t cr2, page_fault_info_t *out);
 
 /// @brief Raise an exception and halt the system
 /// @param reason the kernel can choose a reason to relay to the user
