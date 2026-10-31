@@ -23,9 +23,12 @@ bool usb_hid_boot_probe(usb_device_t *dev, const uint8_t *config, size_t len,
             const usb_endpoint_desc_t *ep = (const usb_endpoint_desc_t *)&config[off];
 
             if ((ep->address & USB_ENDPOINT_IN) &&
-                (ep->attributes & USB_ENDPOINT_TYPE_MASK) == USB_ENDPOINT_INTERRUPT) {
-                if (attach(dev, iface->interface_number, ep))
+                (ep->attributes & USB_ENDPOINT_TYPE_MASK) == USB_ENDPOINT_INTERRUPT &&
+                !usb_interface_claimed(dev, iface->interface_number)) {
+                if (attach(dev, iface->interface_number, ep)) {
+                    usb_interface_claim(dev, iface->interface_number);
                     claimed = true;
+                }
                 iface = NULL;   // one endpoint per interface is all we want
             }
         }
@@ -36,12 +39,11 @@ bool usb_hid_boot_probe(usb_device_t *dev, const uint8_t *config, size_t len,
     return claimed;
 }
 
-int usb_hid_set_boot_protocol(usb_device_t *dev, uint8_t interface) {
-    // devices are allowed to wake up in report protocol, make sure its the boot one
+static int usb_hid_set_protocol(usb_device_t *dev, uint8_t interface, uint16_t protocol) {
     usb_setup_t setup = {
         .request_type = USB_REQ_DIR_OUT | USB_REQ_TYPE_CLASS | USB_REQ_RCPT_INTERFACE,
         .request      = USB_HID_SET_PROTOCOL,
-        .value        = USB_HID_PROTOCOL_BOOT,
+        .value        = protocol,
         .index        = interface,
     };
     int r = usb_control(dev, &setup, NULL);
@@ -53,4 +55,33 @@ int usb_hid_set_boot_protocol(usb_device_t *dev, uint8_t interface) {
     usb_control(dev, &setup, NULL);
 
     return r;
+}
+
+// devices are allowed to wake up in report protocol, make sure its the boot one
+int usb_hid_set_boot_protocol(usb_device_t *dev, uint8_t interface) {
+    return usb_hid_set_protocol(dev, interface, USB_HID_PROTOCOL_BOOT);
+}
+
+int usb_hid_set_report_protocol(usb_device_t *dev, uint8_t interface) {
+    return usb_hid_set_protocol(dev, interface, USB_HID_PROTOCOL_REPORT);
+}
+
+int usb_hid_get_report_desc(usb_device_t *dev, uint8_t interface, void *buf, uint16_t len) {
+    usb_setup_t setup = {
+        .request_type = USB_REQ_DIR_IN | USB_REQ_TYPE_STANDARD | USB_REQ_RCPT_INTERFACE,
+        .request      = USB_REQ_GET_DESCRIPTOR,
+        .value        = (uint16_t)(USB_DESC_HID_REPORT << 8),
+        .index        = interface,
+        .length       = len,
+    };
+    return usb_control(dev, &setup, buf);
+}
+
+bool usb_interface_claimed(const usb_device_t *dev, uint8_t interface) {
+    return interface < 32 && (dev->claimed & (1u << interface));
+}
+
+void usb_interface_claim(usb_device_t *dev, uint8_t interface) {
+    if (interface < 32)
+        dev->claimed |= 1u << interface;
 }

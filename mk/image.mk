@@ -26,6 +26,7 @@ endef
 DATA_DIR     := .data_img
 DATA_IMG     := data.img
 PROFILE_DATA := $(filter $(DATA_PROGRAMS),$(PROGRAMS))
+ISO_DATA     := $(if $(PACKAGE),$(if $(PROFILE_DATA),$(DATA_IMG)))
 
 DATA_SUM     := .data_img.sum
 
@@ -74,7 +75,8 @@ define build_iso
 	@cp limine/BOOTX64.EFI iso_root/EFI/BOOT/
 	@cp limine/BOOTIA32.EFI iso_root/EFI/BOOT/
 	@cp initrd/initrd.tar iso_root/boot/
-	@echo "[ISO] $(ISO)"
+	@$(if $(ISO_DATA),ln $(DATA_IMG) iso_root/ 2>/dev/null || cp $(DATA_IMG) iso_root/)
+	@echo "[ISO] $(ISO)$(if $(ISO_DATA), with $(DATA_IMG) packaged)"
 	@xorriso -as mkisofs -R -r -J \
 		-b boot/limine/limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -89,5 +91,5 @@ endef
 initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs
 	$(build_initrd_tar)
 
-$(ISO): $(LIMINE) $(KERNEL_BIN) initrd
+$(ISO): $(LIMINE) $(KERNEL_BIN) initrd $(ISO_DATA)
 	$(build_iso)

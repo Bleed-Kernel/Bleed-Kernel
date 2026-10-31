@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <drivers/i2c/dw_i2c.h>
+#include <input/trackpad_gesture.h>
 
 /*
     Elan's own trackpad protocol, Imagine my surprise when I find out the
@@ -44,11 +45,6 @@
 #define ELAN_INFO_RIGHT         (1 << 1)
 #define ELAN_INFO_MIDDLE        (1 << 2)
 
-#define ELAN_POINTER_SPAN       1600    // pixels the pointer moves for a swipe the width of the pad
-#define ELAN_SCROLL_NOTCHES     24      // wheel clicks for a two finger swipe the height of it
-#define ELAN_TAP_MS             180
-#define ELAN_TAP_SLOP_DIV       40      // a tap can wander max_x / this before its a drag
-#define ELAN_JUMP_DIV           4       // more than max_x / this in one report isnt a finger moving
 #define ELAN_MAX_ERRORS         16
 
 typedef struct elan_dev {
@@ -59,20 +55,7 @@ typedef struct elan_dev {
     uint16_t  max_x;
     uint16_t  max_y;
 
-    // what the last report looked like
-    uint8_t   fingers;
-    uint8_t   slot;         // which finger the pointer is following
-    uint16_t  last_x;
-    uint16_t  last_y;
-    uint8_t   buttons;
-
-    int32_t   rem_x;
-    int32_t   rem_y;
-    int32_t   scroll;
-
-    uint64_t  tap_start;    // ms
-    uint8_t   tap_fingers;  // most that were down at once
-    uint32_t  tap_travel;
+    trackpad_gesture_t pad;
 } elan_dev_t;
 
 /// @brief See if the device at addr speaks the Elan protocol and put it in absolute mode

@@ -14,6 +14,7 @@ QEMU_NAME ?= The Bleed Kernel
 MEMSZ     ?= 1G
 USB       ?= ohci
 LOG       ?=
+PACKAGE   ?=
 # QEMU_AUDIODEV ?= coreaudio,out.buffer-count=10
 
 DISK_SIZE_MB ?= 128

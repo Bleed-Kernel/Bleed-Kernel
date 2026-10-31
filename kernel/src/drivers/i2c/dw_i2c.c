@@ -199,13 +199,48 @@ static int dw_transfer(dw_i2c_t *bus, uint8_t addr, const uint8_t *out, size_t o
     }
 }
 
+// dw_transfer sleeps so this cant just be a spinlock held the whole way
+static void dw_bus_take(dw_i2c_t *bus) {
+    for (;;) {
+        unsigned long flags = irq_push();
+        spinlock_acquire(&bus->lock);
+        bool got = !bus->busy;
+        if (got)
+            bus->busy = true;
+        spinlock_release(&bus->lock);
+        irq_restore(flags);
+
+        if (got) return;
+        if (get_current_task())
+            dw_sleep();
+        else
+            asm volatile("pause");
+    }
+}
+
+static void dw_bus_give(dw_i2c_t *bus) {
+    unsigned long flags = irq_push();
+    spinlock_acquire(&bus->lock);
+    bus->busy = false;
+    spinlock_release(&bus->lock);
+    irq_restore(flags);
+}
+
 int dw_i2c_xfer(dw_i2c_t *bus, uint8_t addr, const void *out, size_t out_len,
                 void *in, size_t in_len) {
-    return dw_transfer(bus, addr, out, out_len, in, in_len, false);
+    if (!bus) return -1;
+    dw_bus_take(bus);
+    int r = dw_transfer(bus, addr, out, out_len, in, in_len, false);
+    dw_bus_give(bus);
+    return r;
 }
 
 int dw_i2c_read_prefixed(dw_i2c_t *bus, uint8_t addr, void *in, size_t max) {
-    return dw_transfer(bus, addr, NULL, 0, in, max, true);
+    if (!bus) return -1;
+    dw_bus_take(bus);
+    int r = dw_transfer(bus, addr, NULL, 0, in, max, true);
+    dw_bus_give(bus);
+    return r;
 }
 
 // clock_mhz of 0 = we dont know what this is, look but dont touch until its sure

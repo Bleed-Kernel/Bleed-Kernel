@@ -22,3 +22,14 @@ bool usb_hid_boot_probe(usb_device_t *dev, const uint8_t *config, size_t len,
 // Put an interface into boot protocol and tell it to only report changes
 // returns negative if the device refused SET_PROTOCOL
 int usb_hid_set_boot_protocol(usb_device_t *dev, uint8_t interface);
+
+// Same but report protocol, what anything past a plain keyboard or mouse needs
+int usb_hid_set_report_protocol(usb_device_t *dev, uint8_t interface);
+
+// Read an interfaces report descriptor, returns the bytes read or negative
+int usb_hid_get_report_desc(usb_device_t *dev, uint8_t interface, void *buf, uint16_t len);
+
+// true if some driver already took this interface
+bool usb_interface_claimed(const usb_device_t *dev, uint8_t interface);
+
+void usb_interface_claim(usb_device_t *dev, uint8_t interface);

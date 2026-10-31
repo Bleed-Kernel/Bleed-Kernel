@@ -22,6 +22,7 @@
 
 #include <fs/vfs.h>
 #include <fs/vfs_mount.h>
+#include <fs/iso9660/iso9660.h>
 #include <fs/data_image.h>
 #include <fs/archive/tar.h>
 #include <fonts/psf.h>
@@ -39,9 +40,12 @@
 #include <drivers/usb/usb_storage.h>
 #include <drivers/i2c/dw_i2c.h>
 #include <drivers/i2c/i2c_trackpad.h>
+#include <drivers/i2c/i2c_touch.h>
+#include <drivers/virtio/virtio_input.h>
 #include <devices/type/null_device.h>
 #include <devices/type/hpet_device.h>
 #include <devices/type/mouse_device.h>
+#include <devices/type/touch_device.h>
 #include <devices/type/kbd_device.h>
 #include <devices/type/fb_device.h>
 #include <devices/type/serial_tty_device.h>
@@ -223,14 +227,22 @@ void init_devices(){
     mouse_device_init();
     BLOG_OK("mouse Device Ready");
 
+    BLOG_INFO("Checking for Touch Devices");
+    touch_device_init();
+
     BLOG_INFO("Enumerating USB Controllers");
     usb_init();
+
+    BLOG_INFO("Looking for virtio input devices");
+    virtio_input_init();
 
     BLOG_INFO("Enumerating I2C Controllers");
     dw_i2c_init();
     i2c_trackpad_init();
     if (i2c_trackpad_present())
         BLOG_OK("I2C trackpad Ready");
+    if (i2c_touch_present())
+        BLOG_OK("I2C touchscreen Ready");
 
     BLOG_INFO("Starting serial Device");
     serial_device_register();
@@ -256,30 +268,33 @@ void init_devices(){
     tty_device_init();
 }
 
+// the first partition, or the whole disk if its got the iso written straight to it
+static bool mount_drive(const char *path, const char *disk, const char *part){
+    INode_t *whole = device_get_by_name(disk);
+    if (whole && iso9660_probe(whole))
+        return vfs_mount(path, whole) == 0;
+    return vfs_mount(path, device_get_by_name(part)) == 0;
+}
+
 void init_block_devices(){
     vfs_mkdir("/mnt");
 
     BLOG_INFO("Block Devices");
     ide_init();
-    INode_t *hda1 = device_get_by_name("hda1");
-    if (hda1){
-        vfs_mount("/mnt/ide", hda1);
+    if (mount_drive("/mnt/ide", "hda", "hda1"))
         BLOG_OK("\t - IDE Device Ready");
-    }
+
+    // the disc we booted off, a PACKAGE iso has data.img on it
+    if (vfs_mount("/mnt/cdrom", device_get_by_name("cd0")) == 0)
+        BLOG_OK("\t - CD Drive Ready");
 
     ahci_init();
-    INode_t *sda1 = device_get_by_name("sda1");
-    if (sda1){
-        vfs_mount("/mnt/sata", sda1);
+    if (mount_drive("/mnt/sata", "sda", "sda1"))
         BLOG_OK("\t - SATA Device Ready");
-    }
 
     nvme_init();
-    INode_t *nvme0p1 = device_get_by_name("nvme0p1");
-    if (nvme0p1){
-        vfs_mount("/mnt/nvme", nvme0p1);
+    if (mount_drive("/mnt/nvme", "nvme0", "nvme0p1"))
         BLOG_OK("\t - NVMe Device Ready");
-    }
 
     // usb_init already found the drives, usb_service does the same for ones plugged in later
     usb_storage_automount();
@@ -406,6 +421,10 @@ bool init_userspace(){
     if (i2c_trackpad_present() &&
         sched_create_task(read_cr3(), (uint64_t)i2c_trackpad_watch, KERNEL_CS, KERNEL_SS, "i2c_service"))
         BLOG_OK("I2C trackpad task started");
+
+    if (i2c_touch_present() &&
+        sched_create_task(read_cr3(), (uint64_t)i2c_touch_watch, KERNEL_CS, KERNEL_SS, "touch_service"))
+        BLOG_OK("I2C touchscreen task started");
 
     return true;
 }

@@ -60,6 +60,76 @@ static size_t aml_owner_hid(const uint8_t *aml, size_t pos, char out[9]) {
     return 0;
 }
 
+// PkgLength, counted from its own first byte. 0 if it runs off the end
+static size_t aml_pkg_length(const uint8_t *aml, size_t len, size_t at) {
+    if (at >= len) return 0;
+
+    size_t follow = aml[at] >> 6;
+    if (!follow) return aml[at] & 0x3F;
+    if (at + follow >= len) return 0;
+
+    size_t pkg = aml[at] & 0x0F;
+    for (size_t i = 0; i < follow; i++)
+        pkg |= (size_t)aml[at + 1 + i] << (4 + 8 * i);
+    return pkg;
+}
+
+static bool aml_name_char(uint8_t c) {
+    return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '\\' || c == '^' ||
+           c == 0x2E || c == 0x2F;
+}
+
+// where a Device() op at 'at' ends, 0 if those bytes arent really one
+static size_t aml_device_end(const uint8_t *aml, size_t len, size_t at) {
+    if (at + 3 >= len || aml[at] != AML_EXT_OP || aml[at + 1] != AML_DEVICE_OP) return 0;
+
+    size_t pkg  = aml_pkg_length(aml, len, at + 2);
+    size_t name = at + 2 + 1 + (aml[at + 2] >> 6);
+    if (!pkg || name >= len || !aml_name_char(aml[name])) return 0;
+    if (at + 2 + pkg > len) return 0;
+    return at + 2 + pkg;
+}
+
+// lenovo and the intel reference code put the I2cSerialBus in a Name() before the _HID,
+// so look through the whole Device()
+static bool aml_device_ids(const uint8_t *aml, size_t len, size_t pos, char out[9], bool *hid_over_i2c) {
+    size_t start = 0, end = 0;
+    for (size_t back = 1; back <= pos && back <= ACPI_I2C_DEVICE_WINDOW; back++) {
+        size_t e = aml_device_end(aml, len, pos - back);
+        if (e > pos) {
+            start = pos - back;
+            end   = e;
+            break;
+        }
+    }
+    if (!end) return false;
+
+    out[0]        = '\0';
+    *hid_over_i2c = false;
+    for (size_t i = start + 2; i + 4 <= end; i++) {
+        size_t inner = aml_device_end(aml, end, i);
+        if (inner) {
+            i = inner - 1;
+            continue;
+        }
+
+        if (!memcmp(&aml[i], eisa_hid_over_i2c, 4) || (i + 7 <= end && !memcmp(&aml[i], ACPI_HID_OVER_I2C, 7)))
+            *hid_over_i2c = true;
+
+        if (i + 6 > end || aml[i] != AML_NAME_OP || memcmp(&aml[i + 1], "_HID", 4) || out[0]) continue;
+        const uint8_t *val = &aml[i + 5];
+        if (*val == AML_DWORD_PREFIX && i + 10 <= end) {
+            aml_eisa_to_string(val + 1, out);
+        } else if (*val == AML_STRING_PREFIX) {
+            for (size_t c = 0; c < 8 && i + 6 + c < end && val[1 + c]; c++) {
+                out[c]     = (char)val[1 + c];
+                out[c + 1] = '\0';
+            }
+        }
+    }
+    return true;
+}
+
 // walk the rest of the _CRS the I2cSerialBus at pos is in for how the device interrupts
 static void aml_find_irq(const uint8_t *aml, size_t len, size_t pos, acpi_i2c_dev_t *dev) {
     for (int guard = 0; guard < ACPI_RES_WALK_MAX && pos + 3 <= len; guard++) {
@@ -111,7 +181,9 @@ static void acpi_i2c_scan(const uint8_t *aml, size_t len, acpi_i2c_dev_t *out,
         if (addr < 0x08 || addr > 0x77) continue;
 
         acpi_i2c_dev_t dev = { .addr = addr };
-        size_t hid_at = aml_owner_hid(aml, pos, dev.hid);
+        size_t hid_at = 0;
+        if (!aml_device_ids(aml, len, pos, dev.hid, &dev.hid_over_i2c))
+            hid_at = aml_owner_hid(aml, pos, dev.hid);
         if (hid_at)
             dev.hid_over_i2c = aml_contains(&aml[hid_at], pos - hid_at, eisa_hid_over_i2c, 4) ||
                                aml_contains(&aml[hid_at], pos - hid_at, ACPI_HID_OVER_I2C, 7);

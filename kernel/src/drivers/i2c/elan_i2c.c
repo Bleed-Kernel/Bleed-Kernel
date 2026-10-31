@@ -1,9 +1,9 @@
 #include <drivers/i2c/elan_i2c.h>
 #include <drivers/i2c/dw_i2c.h>
 #include <drivers/serial/serial.h>
-#include <input/mouse_dispatch.h>
 #include <input/mouse_input.h>
 #include <ACPI/acpi_hpet.h>
+#include <input/trackpad_gesture.h>
 #include <ansii.h>
 #include <string.h>
 #include <stdio.h>
@@ -28,26 +28,7 @@ static int elan_write_cmd(elan_dev_t *dev, uint16_t reg, uint16_t cmd) {
     return dw_i2c_xfer(dev->bus, dev->addr, out, sizeof(out), NULL, 0);
 }
 
-// pad units to pixels, the remainder is kept so slow movement isnt rounded away
-static int16_t elan_scale(elan_dev_t *dev, int32_t delta, int32_t *rem) {
-    int32_t accum  = delta * ELAN_POINTER_SPAN + *rem;
-    int32_t scaled = accum / dev->max_x;
-    *rem = accum % dev->max_x;
-    return (int16_t)scaled;
-}
-
-static void elan_send(int16_t dx, int16_t dy, int8_t wheel, uint8_t buttons) {
-    mouse_event_t ev = {
-        .dx      = dx,
-        .dy      = dy,
-        .wheel   = wheel,
-        .buttons = buttons
-    };
-    mouse_input_dispatch(&ev);
-}
-
-// the pad only says where fingers are, everything a mouse does is worked out here.
-// one finger moves, two scroll, a quick touch is a click
+// the pad only says where fingers are, trackpad_gesture works out the rest
 static bool elan_report(elan_dev_t *dev, const uint8_t *report) {
     uint8_t info  = report[ELAN_TOUCH_INFO_OFFSET];
     bool    hires = report[ELAN_REPORT_ID_OFFSET] == ELAN_REPORT_ID_HIRES;
@@ -75,80 +56,13 @@ static bool elan_report(elan_dev_t *dev, const uint8_t *report) {
         finger += ELAN_FINGER_LENGTH;
     }
 
-    // a finger arriving or leaving changes which one that is, dont turn it into a jump.
     // the pad counts y from the bottom edge
-    int32_t dx = 0;
-    int32_t dy = 0;
-    if (fingers && fingers == dev->fingers && slot == dev->slot) {
-        dx = (int32_t)x - dev->last_x;
-        dy = (int32_t)dev->last_y - y;
-    }
+    y = y < dev->max_y ? dev->max_y - y : 0;
 
-    int32_t travel = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
-    if (travel > dev->max_x / ELAN_JUMP_DIV) {
-        dx = 0;
-        dy = 0;
-    }
-
-    uint64_t now = hpet_get_femtoseconds() / femtosecondsPerMillisecond;
-    if (fingers && !dev->fingers) {
-        dev->tap_start   = now;
-        dev->tap_fingers = 0;
-        dev->tap_travel  = 0;
-    }
-    if (fingers) {
-        if (fingers > dev->tap_fingers) dev->tap_fingers = fingers;
-        dev->tap_travel += (uint32_t)travel;
-
-        // pressing the pad down is a click of its own
-        if (info & (ELAN_INFO_LEFT | ELAN_INFO_RIGHT | ELAN_INFO_MIDDLE))
-            dev->tap_travel = UINT32_MAX / 2;
-    }
-    bool tapped = !fingers && dev->fingers &&
-                  now - dev->tap_start <= ELAN_TAP_MS &&
-                  dev->tap_travel <= (uint32_t)dev->max_x / ELAN_TAP_SLOP_DIV;
-
-    // theres one switch under the whole pad, two fingers on it makes it the right button
-    uint8_t buttons = (info & ELAN_INFO_RIGHT  ? MOUSE_BTN_RIGHT  : 0) |
-                      (info & ELAN_INFO_MIDDLE ? MOUSE_BTN_MIDDLE : 0);
-    if (info & ELAN_INFO_LEFT)
-        buttons |= fingers >= 2 ? MOUSE_BTN_RIGHT : MOUSE_BTN_LEFT;
-
-    int16_t move_x = 0;
-    int16_t move_y = 0;
-    int8_t  wheel  = 0;
-
-    if (fingers == 1) {
-        move_x = elan_scale(dev, dx, &dev->rem_x);
-        move_y = elan_scale(dev, dy, &dev->rem_y);
-    } else if (fingers == 2) {
-        // fingers going up the pad is the wheel rolling away from you
-        int32_t notch = dev->max_y / ELAN_SCROLL_NOTCHES;
-        if (notch < 1) notch = 1;
-
-        dev->scroll -= dy;
-        wheel        = (int8_t)(dev->scroll / notch);
-        dev->scroll -= wheel * notch;
-    }
-    if (fingers != 2)
-        dev->scroll = 0;
-
-    if (move_x || move_y || wheel || buttons != dev->buttons)
-        elan_send(move_x, move_y, wheel, buttons);
-
-    if (tapped) {
-        uint8_t tap = dev->tap_fingers >= 2 ? MOUSE_BTN_RIGHT : MOUSE_BTN_LEFT;
-        elan_send(0, 0, 0, buttons | tap);
-        elan_send(0, 0, 0, buttons);
-    }
-
-    dev->fingers = fingers;
-    dev->slot    = slot;
-    dev->last_x  = x;
-    dev->last_y  = y;
-    dev->buttons = buttons;
-
-    return fingers || buttons || tapped;
+    uint8_t switches = (info & ELAN_INFO_LEFT   ? MOUSE_BTN_LEFT   : 0) |
+                       (info & ELAN_INFO_RIGHT  ? MOUSE_BTN_RIGHT  : 0) |
+                       (info & ELAN_INFO_MIDDLE ? MOUSE_BTN_MIDDLE : 0);
+    return trackpad_gesture_frame(&dev->pad, fingers, slot, x, y, switches);
 }
 
 bool elan_i2c_poll(void) {
@@ -215,7 +129,9 @@ bool elan_i2c_probe(dw_i2c_t *bus, int bus_index, uint8_t addr) {
         return false;
     }
 
-    dev->present = true;
+    dev->pad.max_x = dev->max_x;
+    dev->pad.max_y = dev->max_y;
+    dev->present   = true;
     serial_printf(LOG_OK "elan: trackpad on bus %d at 0x%02x, %ux%u\n",
                   bus_index, addr, dev->max_x, dev->max_y);
     return true;

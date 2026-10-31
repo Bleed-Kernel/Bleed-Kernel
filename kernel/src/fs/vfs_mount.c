@@ -3,6 +3,7 @@
 #include <fs/fat32/fat32.h>
 #include <fs/ext2/ext2.h>
 #include <fs/exfat/exfat.h>
+#include <fs/iso9660/iso9660.h>
 #include <mm/kalloc.h>
 #include <mm/spinlock.h>
 #include <string.h>
@@ -45,6 +46,12 @@ static mount_entry_t mount_table[VFS_MAX_MOUNTS];
 static spinlock_t    mount_lock = {0};
 
 static fs_type_t vfs_detect_fs(INode_t *dev_inode) {
+    // first, a hybrid iso has an mbr in sector 0 that the FAT32 probe would take
+    if (iso9660_probe(dev_inode)) {
+        serial_printf(LOG_INFO "vfs_mount: detected iso9660\n");
+        return FS_TYPE_ISO9660;
+    }
+
     //ext2 probe using superblock
     uint16_t ext2_magic = 0;
     if (inode_read(dev_inode, &ext2_magic, sizeof(ext2_magic),
@@ -75,6 +82,16 @@ static fs_type_t vfs_detect_fs(INode_t *dev_inode) {
     }
 
     return FS_TYPE_UNKNOWN;
+}
+
+static const char *fs_type_name(fs_type_t type) {
+    switch (type) {
+        case FS_TYPE_EXT2:    return "ext2";
+        case FS_TYPE_FAT32:   return "fat32";
+        case FS_TYPE_EXFAT:   return "exfat";
+        case FS_TYPE_ISO9660: return "iso9660";
+        default:              return "unknown";
+    }
 }
 
 // give a slot back after a mount that didnt make it
@@ -147,9 +164,10 @@ int vfs_mount(const char *path, INode_t *dev_inode) {
     INode_t *fs_root = NULL;
     int r = -1;
     switch (fs_type) {
-        case FS_TYPE_FAT32: r = fat32_mount(dev_inode, &fs_root); break;
-        case FS_TYPE_EXT2:  r = ext2_mount (dev_inode, &fs_root); break;
-        case FS_TYPE_EXFAT: r = exfat_mount(dev_inode, &fs_root); break;
+        case FS_TYPE_FAT32:   r = fat32_mount  (dev_inode, &fs_root); break;
+        case FS_TYPE_EXT2:    r = ext2_mount   (dev_inode, &fs_root); break;
+        case FS_TYPE_EXFAT:   r = exfat_mount  (dev_inode, &fs_root); break;
+        case FS_TYPE_ISO9660: r = iso9660_mount(dev_inode, &fs_root); break;
         default: break;
     }
 
@@ -178,10 +196,7 @@ int vfs_mount(const char *path, INode_t *dev_inode) {
     mp->mounted = fs_root;
     spinlock_release(&mount_lock);
 
-    const char *fs_name = (fs_type == FS_TYPE_EXT2)  ? "ext2"  :
-                          (fs_type == FS_TYPE_FAT32)  ? "fat32" :
-                          (fs_type == FS_TYPE_EXFAT)  ? "exfat" : "unknown";
-    serial_printf(LOG_OK "vfs_mount: mounted %s at %s\n", fs_name, path);
+    serial_printf(LOG_OK "vfs_mount: mounted %s at %s\n", fs_type_name(fs_type), path);
     return 0;
 }
 
@@ -413,15 +428,6 @@ int vfs_umount_all(void) {
             busy++;
     }
     return busy;
-}
-
-static const char *fs_type_name(fs_type_t type) {
-    switch (type) {
-        case FS_TYPE_EXT2:  return "ext2";
-        case FS_TYPE_FAT32: return "fat32";
-        case FS_TYPE_EXFAT: return "exfat";
-        default:            return "unknown";
-    }
 }
 
 int vfs_mount_info(int index, user_mount_info_t *out) {

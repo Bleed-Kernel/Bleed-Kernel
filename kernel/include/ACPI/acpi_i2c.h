@@ -6,6 +6,7 @@
 
 #define ACPI_I2C_MAX_DEVICES    16
 #define ACPI_I2C_HID_WINDOW     1024    // how far back from a _CRS we look for the _HID it belongs to
+#define ACPI_I2C_DEVICE_WINDOW  16384   // how far back we look for the Device() a _CRS sits in
 
 // I2cSerialBus resource desc
 #define ACPI_RES_SERIAL_BUS     0x8E

@@ -513,8 +513,11 @@ static bool ohci_controller_init(ohci_hc_t *hc, const pci_device_t *pci_dev) {
                   (ohci_read(base, OHCI_REG_REVISION) >> 4) & 0xF,
                   ohci_read(base, OHCI_REG_REVISION) & 0xF, hc->port_count);
 
-    for (uint8_t port = 0; port < hc->port_count; port++)
+    for (uint8_t port = 0; port < hc->port_count; port++) {
+        serial_printf(LOG_INFO "ohci: port %u status 0x%08x\n", port,
+                      ohci_read(base, OHCI_REG_RH_PORT + (uint32_t)port * 4));
         ohci_port_enumerate(hc, port);
+    }
 
     return true;
 }

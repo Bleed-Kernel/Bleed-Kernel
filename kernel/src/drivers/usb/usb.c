@@ -4,6 +4,7 @@
 #include <drivers/usb/xhci/xhci.h>
 #include <drivers/usb/usb_keyboard.h>
 #include <drivers/usb/usb_mouse.h>
+#include <drivers/usb/usb_touch.h>
 #include <drivers/usb/usb_storage.h>
 #include <drivers/serial/serial.h>
 #include <sched/scheduler.h>
@@ -169,7 +170,10 @@ bool usb_device_configure(usb_device_t *dev) {
     }
 
     // a device can be several at once, the macbook keyboard and trackpad are one device???
-    bool claimed = usb_keyboard_probe(dev, config, (size_t)got);
+    // touch goes first, a tablet can claim to be a boot mouse and would get read as one
+    bool claimed = usb_touch_probe(dev, config, (size_t)got);
+    if (usb_keyboard_probe(dev, config, (size_t)got))
+        claimed = true;
     if (usb_mouse_probe(dev, config, (size_t)got))
         claimed = true;
     if (usb_storage_probe(dev, config, (size_t)got))
@@ -189,6 +193,7 @@ void usb_device_disconnect(usb_device_t *dev) {
 
     usb_keyboard_disconnect(dev);
     usb_mouse_disconnect(dev);
+    usb_touch_disconnect(dev);
     usb_storage_disconnect(dev);
 }
 

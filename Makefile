@@ -20,6 +20,11 @@ endif
 
 NO_BUILD := $(filter runlocal repack,$(MAKECMDGOALS))
 
+ifneq ($(filter PACKAGE,$(MAKECMDGOALS)),)
+PACKAGE := 1
+endif
+MODIFIERS := $(PROFILES) PACKAGE
+
 include mk/programs.mk
 
 # keep the build order from ALL_PROGRAMS whatever order the profile lists them in
@@ -108,9 +113,14 @@ help:
 	@echo "profiles: $(PROFILES) (default $(DEFAULT_PROFILE)), the lists are in config.mk"
 	@$(foreach p,$(PROFILES),echo "  $(p): $(PROGRAMS_$(p))";)
 
-.PHONY: $(PROFILES)
-$(PROFILES):
+# on their own (`make PACKAGE`) they mean build, next to a real goal they do nothing
+.PHONY: $(MODIFIERS)
+ifeq ($(filter-out $(MODIFIERS),$(MAKECMDGOALS)),)
+$(MODIFIERS): build
+else
+$(MODIFIERS):
 	@:
+endif
 
 .PHONY: FORCE
 FORCE:

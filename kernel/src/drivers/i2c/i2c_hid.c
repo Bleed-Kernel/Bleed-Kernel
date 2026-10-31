@@ -1,15 +1,14 @@
 #include <drivers/i2c/i2c_hid.h>
 #include <drivers/i2c/dw_i2c.h>
+#include <drivers/hid/hid.h>
 #include <drivers/serial/serial.h>
-#include <input/mouse_dispatch.h>
-#include <input/mouse_input.h>
 #include <mm/kalloc.h>
 #include <ACPI/acpi_hpet.h>
 #include <ansii.h>
 #include <string.h>
 #include <stdio.h>
 
-static i2c_hid_dev_t trackpad;
+static i2c_hid_dev_t devices[I2C_HID_MAX_DEVICES];
 
 // registers are 16 bits, low byte first
 static int i2c_hid_read_reg(dw_i2c_t *bus, uint8_t addr, uint16_t reg,
@@ -25,157 +24,61 @@ static int i2c_hid_command(i2c_hid_dev_t *dev, uint8_t opcode, uint8_t arg) {
     return dw_i2c_xfer(dev->bus, dev->addr, out, sizeof(out), NULL, 0);
 }
 
-static int32_t i2c_hid_field_get(const uint8_t *report, size_t len,
-                                 const i2c_hid_field_t *field, bool is_signed) {
-    uint32_t val = 0;
-    for (uint8_t i = 0; i < field->size; i++) {
-        size_t bit = (size_t)field->bit + i;
-        if (bit / 8 >= len) break;
-        val |= (uint32_t)((report[bit / 8] >> (bit % 8)) & 1) << i;
-    }
+// the command says which feature report, the report itself goes through the data register
+static int i2c_hid_set_feature(i2c_hid_dev_t *dev, uint8_t id, const uint8_t *data, size_t len) {
+    uint16_t cmd_reg  = dev->desc.command_reg;
+    uint16_t data_reg = dev->desc.data_reg;
+    uint8_t  out[16 + HID_MAX_FEATURE];
+    size_t   n = 0;
 
-    if (is_signed && field->size && field->size < 32 && (val & (1u << (field->size - 1))))
-        val |= ~0u << field->size;
-    return (int32_t)val;
+    if (len > HID_MAX_FEATURE) return -1;
+
+    out[n++] = (uint8_t)cmd_reg;
+    out[n++] = (uint8_t)(cmd_reg >> 8);
+    out[n++] = (uint8_t)((I2C_HID_REPORT_FEATURE << 4) | (id < I2C_HID_REPORT_ID_ESC ? id : I2C_HID_REPORT_ID_ESC));
+    out[n++] = I2C_HID_CMD_SET_REPORT;
+    if (id >= I2C_HID_REPORT_ID_ESC)
+        out[n++] = id;
+
+    // the length counts itself
+    size_t total = 2 + (id ? 1 : 0) + len;
+    out[n++] = (uint8_t)data_reg;
+    out[n++] = (uint8_t)(data_reg >> 8);
+    out[n++] = (uint8_t)total;
+    out[n++] = (uint8_t)(total >> 8);
+    if (id)
+        out[n++] = id;
+    memcpy(&out[n], data, len);
+    n += len;
+
+    return dw_i2c_xfer(dev->bus, dev->addr, out, n, NULL, 0);
 }
 
-// called for every input field inside the mouse collection, keeps the ones a mouse event needs
-static void i2c_hid_take_field(i2c_hid_dev_t *dev, uint8_t id, uint16_t page, uint16_t usage,
-                               bool relative, i2c_hid_field_t field) {
-    if (page == HID_PAGE_BUTTON) {
-        // buttons 1-5 are consecutive bits in the same order mouse_event_t keeps them
-        if (field.size != 1 || usage < 1 || usage > 5) return;
+// out of mouse mode, read without the interrupt it hands the last report back and deltas etc
+static void i2c_hid_touchpad_mode(i2c_hid_dev_t *dev) {
+    uint8_t mode[HID_MAX_FEATURE];
+    size_t  len = hid_touchpad_mode(&dev->hid, mode, sizeof(mode));
 
-        if (usage == 1 && !dev->buttons.size)
-            dev->buttons = field;
-        else if (usage == dev->buttons.size + 1 && field.bit == dev->buttons.bit + dev->buttons.size)
-            dev->buttons.size++;
+    if (!len || i2c_hid_set_feature(dev, dev->hid.input_mode_id, mode, len) < 0) {
+        serial_printf(LOG_WARN "i2chid: %04x:%04x wont switch to touchpad mode, leaving it a mouse\n",
+                      dev->desc.vendor_id, dev->desc.product_id);
+        dev->hid.has_touchpad = false;
         return;
     }
-
-    // absolute x/y would be the touch surface, thats a different collection anyway
-    if (page != HID_PAGE_DESKTOP || !relative || field.size > 16) return;
-
-    i2c_hid_field_t *slot = NULL;
-    if (usage == HID_USAGE_X)     slot = &dev->x;
-    if (usage == HID_USAGE_Y)     slot = &dev->y;
-    if (usage == HID_USAGE_WHEEL) slot = &dev->wheel;
-    if (!slot || slot->size) return;
-
-    *slot = field;
-    if (usage == HID_USAGE_X)
-        dev->mouse_id = id;
+    serial_printf(LOG_INFO "i2chid: %04x:%04x switched to touchpad mode\n",
+                  dev->desc.vendor_id, dev->desc.product_id);
 }
 
-// find the mouse collection and remember where its fields sit, the multitouch
-// one a precision touchpad also has stays quiet until its asked for
-static bool i2c_hid_parse(i2c_hid_dev_t *dev, const uint8_t *rd, size_t len) {
-    static uint16_t bits[256];      // how far into each report id the fields have got
-    memset(bits, 0, sizeof(bits));
-
-    uint16_t usages[I2C_HID_MAX_USAGES];
-    uint32_t usage_count = 0;
-    uint32_t usage_min   = 0;
-    uint32_t usage_max   = 0;
-
-    uint16_t page  = 0;
-    uint32_t size  = 0;
-    uint32_t count = 0;
-    uint8_t  id    = 0;
-
-    int depth       = 0;
-    int mouse_depth = 0;    // depth the mouse collection opened at, 0 while outside it
-
-    for (size_t off = 0; off < len; ) {
-        uint8_t prefix = rd[off++];
-
-        if (prefix == HID_ITEM_LONG) {
-            if (off >= len) break;
-            off += (size_t)rd[off] + 2;
-            continue;
-        }
-
-        // a size of 3 means 4 bytes
-        uint8_t n = (prefix & 3) == 3 ? 4 : (prefix & 3);
-        if (off + n > len) break;
-
-        uint32_t data = 0;
-        for (uint8_t i = 0; i < n; i++)
-            data |= (uint32_t)rd[off + i] << (i * 8);
-        off += n;
-
-        switch (prefix & HID_ITEM_TAG_MASK) {
-            case HID_ITEM_USAGE_PAGE:   page  = (uint16_t)data; break;
-            case HID_ITEM_REPORT_SIZE:  size  = data;           break;
-            case HID_ITEM_REPORT_COUNT: count = data;           break;
-            case HID_ITEM_USAGE_MIN:    usage_min = data;       break;
-            case HID_ITEM_USAGE_MAX:    usage_max = data;       break;
-
-            case HID_ITEM_REPORT_ID:
-                id = (uint8_t)data;
-                dev->has_report_ids = true;
-                break;
-
-            case HID_ITEM_USAGE:
-                if (usage_count < I2C_HID_MAX_USAGES)
-                    usages[usage_count++] = (uint16_t)data;
-                break;
-
-            case HID_ITEM_COLLECTION:
-                depth++;
-                if (data == HID_COLLECTION_APP && !mouse_depth && page == HID_PAGE_DESKTOP &&
-                    usage_count && usages[0] == HID_USAGE_MOUSE)
-                    mouse_depth = depth;
-                break;
-
-            case HID_ITEM_END_COLLECTION:
-                if (depth == mouse_depth) mouse_depth = 0;
-                if (depth) depth--;
-                break;
-
-            case HID_ITEM_INPUT:
-                if (size > 32 || count > 256) break;
-
-                for (uint32_t i = 0; mouse_depth && !(data & HID_INPUT_CONSTANT) && i < count; i++) {
-                    // short of usages the last one covers every field thats left
-                    uint32_t usage = usage_min + i < usage_max ? usage_min + i : usage_max;
-                    if (usage_count)
-                        usage = usages[i < usage_count ? i : usage_count - 1];
-
-                    i2c_hid_field_t field = {
-                        .bit  = (uint16_t)(bits[id] + i * size),
-                        .size = (uint8_t)size,
-                    };
-                    i2c_hid_take_field(dev, id, page, (uint16_t)usage,
-                                       data & HID_INPUT_RELATIVE, field);
-                }
-                bits[id] += (uint16_t)(size * count);
-                break;
-
-            default:
-                break;
-        }
-
-        // usages only last until the next main item
-        if ((prefix & HID_ITEM_TYPE_MASK) == 0) {
-            usage_count = 0;
-            usage_min   = 0;
-            usage_max   = 0;
-        }
-    }
-
-    return dev->x.size && dev->y.size;
-}
-
-bool i2c_hid_poll(void) {
-    i2c_hid_dev_t *dev = &trackpad;
-    if (!dev->present) return false;
+bool i2c_hid_poll(i2c_hid_dev_t *dev) {
+    if (!dev || !dev->present) return false;
 
     uint8_t buf[I2C_HID_MAX_INPUT];
     int got = dw_i2c_read_prefixed(dev->bus, dev->addr, buf, dev->max_input);
     if (got < 0) {
         if (++dev->errors >= I2C_HID_MAX_ERRORS) {
-            serial_printf(LOG_WARN "i2chid: trackpad stopped answering, giving up on it\n");
+            serial_printf(LOG_WARN "i2chid: %04x:%04x stopped answering, giving up on it\n",
+                          dev->desc.vendor_id, dev->desc.product_id);
+            hid_release(&dev->hid);
             dev->present = false;
         }
         return false;
@@ -186,28 +89,7 @@ bool i2c_hid_poll(void) {
     size_t len = buf[0] | ((size_t)buf[1] << 8);
     if (len <= 2 || len > (size_t)got) return false;
 
-    const uint8_t *report = buf + 2;
-    len -= 2;
-
-    if (dev->has_report_ids) {
-        if (report[0] != dev->mouse_id) return true;
-        report++;
-        len--;
-    }
-
-    int32_t wheel = i2c_hid_field_get(report, len, &dev->wheel, true);
-    if (wheel >  127) wheel =  127;
-    if (wheel < -127) wheel = -127;
-
-    // hid counts +y as down the screen same as usb, no flip here either
-    mouse_event_t ev = {
-        .dx      = (int16_t)i2c_hid_field_get(report, len, &dev->x, true),
-        .dy      = (int16_t)i2c_hid_field_get(report, len, &dev->y, true),
-        .wheel   = (int8_t)wheel,
-        .buttons = (uint8_t)i2c_hid_field_get(report, len, &dev->buttons, false)
-    };
-
-    mouse_input_dispatch(&ev);
+    hid_report(&dev->hid, buf + 2, len - 2);
     return true;
 }
 
@@ -237,7 +119,7 @@ static bool i2c_hid_start(i2c_hid_dev_t *dev) {
         serial_printf(LOG_WARN "i2chid: reset never got answered, carrying on anyway\n");
 
     uint16_t rd_len = dev->desc.report_desc_length;
-    if (rd_len == 0 || rd_len > I2C_HID_MAX_REPORT_DESC || dev->desc.max_input_length < 3) {
+    if (rd_len == 0 || rd_len > HID_MAX_REPORT_DESC || dev->desc.max_input_length < 3) {
         serial_printf(LOG_WARN "i2chid: HID descriptor makes no sense (report desc %u, input %u)\n",
                       rd_len, dev->desc.max_input_length);
         return false;
@@ -252,12 +134,13 @@ static bool i2c_hid_start(i2c_hid_dev_t *dev) {
         return false;
     }
 
-    bool mouse = i2c_hid_parse(dev, rd, rd_len);
+    bool known = hid_parse(&dev->hid, rd, rd_len);
     kfree(rd);
-    if (!mouse) {
-        serial_printf(LOG_INFO "i2chid: no mouse collection in there, not a trackpad\n");
-        return false;
-    }
+    hid_describe(&dev->hid, "i2chid");
+    if (!known) return false;
+
+    if (dev->hid.has_touchpad)
+        i2c_hid_touchpad_mode(dev);
 
     dev->max_input = dev->desc.max_input_length;
     if (dev->max_input > I2C_HID_MAX_INPUT)
@@ -266,13 +149,21 @@ static bool i2c_hid_start(i2c_hid_dev_t *dev) {
     return true;
 }
 
-bool i2c_hid_probe(dw_i2c_t *bus, int bus_index, uint8_t addr) {
-    i2c_hid_dev_t *dev = &trackpad;
+i2c_hid_dev_t *i2c_hid_probe(dw_i2c_t *bus, int bus_index, uint8_t addr) {
+    i2c_hid_dev_t *dev = NULL;
+    for (int i = 0; i < I2C_HID_MAX_DEVICES && !dev; i++) {
+        if (!devices[i].present)
+            dev = &devices[i];
+    }
+    if (!dev) {
+        serial_printf(LOG_WARN "i2chid: no room for another device at 0x%02x\n", addr);
+        return NULL;
+    }
 
     for (size_t r = 0; r < sizeof(hid_desc_regs) / sizeof(hid_desc_regs[0]); r++) {
         i2c_hid_desc_t desc;
         if (i2c_hid_read_reg(bus, addr, hid_desc_regs[r], &desc, sizeof(desc)) != (int)sizeof(desc))
-            return false;
+            return NULL;
 
         // the wrong register still answers, just not with one of these
         if (desc.length != I2C_HID_DESC_LENGTH || desc.version != I2C_HID_VERSION) {
@@ -291,12 +182,14 @@ bool i2c_hid_probe(dw_i2c_t *bus, int bus_index, uint8_t addr) {
                       desc.vendor_id, desc.product_id, bus_index, addr, hid_desc_regs[r]);
 
         if (!i2c_hid_start(dev))
-            return false;
+            return NULL;
 
         dev->present = true;
-        serial_printf(LOG_OK "i2chid: trackpad ready, mouse report id %u, %u button(s)%s\n",
-                      dev->mouse_id, dev->buttons.size, dev->wheel.size ? ", wheel" : "");
-        return true;
+        return dev;
     }
-    return false;
+    return NULL;
+}
+
+void i2c_hid_forget(i2c_hid_dev_t *dev) {
+    if (dev) dev->present = false;
 }

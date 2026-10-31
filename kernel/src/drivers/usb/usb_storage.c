@@ -8,6 +8,7 @@
 #include <fs/vfs.h>
 #include <fs/partition.h>
 #include <fs/vfs_mount.h>
+#include <fs/iso9660/iso9660.h>
 #include <fs/data_image.h>
 #include <mm/kalloc.h>
 #include <user/user_copy.h>
@@ -527,7 +528,9 @@ void usb_storage_automount(void) {
 
         char part[16];
         snprintf(part, sizeof(part), "usb%dp1", ms->index);
-        const char *name = device_get_by_name(part) ? part : ms->names[0];
+        // a stick with the iso dd'd to it is the iso9660 from the top, its first partition is an empty gap
+        const char *name = device_get_by_name(part) && !iso9660_probe(device_get_by_name(ms->names[0]))
+                         ? part : ms->names[0];
 
         char path[16];
         if (ms->index == 0)

@@ -33,6 +33,21 @@
 #define ATA_CMD_WRITE_PIO     0x30
 #define ATA_CMD_CACHE_FLUSH   0xE7
 #define ATA_CMD_IDENTIFY      0xEC
+#define ATA_CMD_PACKET        0xA0
+#define ATA_CMD_IDENTIFY_PKT  0xA1
+
+#define ATAPI_SIG_MID         0x14
+#define ATAPI_SIG_HI          0xEB
+
+// scsi commands sent in a packet
+#define ATAPI_CMD_TEST_READY  0x00
+#define ATAPI_CMD_CAPACITY    0x25
+#define ATAPI_CMD_READ_10     0x28
+
+#define ATAPI_SECTOR_SIZE     2048
+#define ATAPI_PACKET_LEN      12
+#define ATAPI_BYTE_LIMIT      0xF800
+#define ATAPI_TIMEOUT_MS      5000
 
 // drive select
 #define ATA_DRIVE_MASTER      0xA0
@@ -66,9 +81,10 @@ typedef struct __attribute__((packed)) mbr {
 typedef struct ide_drive {
     bool     present;
     bool     is_slave;
+    bool     atapi;           // a cd drive, 2048 byte blocks shown to everyone else as 512 byte sectors
     uint16_t base;            // I/O base port
     uint16_t ctrl;            // control port 
-    uint32_t sector_count;    // total LBA28 sectors 
+    uint32_t sector_count;    // total LBA28 sectors
     char     model[41];       // model string from IDENTIFY
 
     /* Partition table maxes out at 4 */

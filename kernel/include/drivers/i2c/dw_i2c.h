@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <mm/spinlock.h>
 
 /*
     the controller behind Intel LPSS and the AMD FCH, ive tried to make the comments as clear as
@@ -82,6 +83,8 @@ typedef struct dw_i2c {
     uint64_t base;      // vaddr of the registers
     uint16_t target;    // address its set up for, DW_TARGET_NONE to force setting it up again
     uint16_t rx_depth;
+    spinlock_t    lock;
+    volatile bool busy;
 } dw_i2c_t;
 
 // one run of consecutive pci device ids and the clock LPSS feeds them

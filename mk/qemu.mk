@@ -37,7 +37,18 @@ QEMU_USB_HC := -device pci-ohci,id=usb
 else
 $(error USB=$(USB) isnt a thing, use USB=ohci or USB=xhci)
 endif
-QEMU_USB := $(QEMU_USB_HC) -device usb-kbd,bus=usb.0 -device usb-mouse,bus=usb.0 \
+
+TOUCH ?=
+ifeq ($(TOUCH),usb)
+QEMU_TOUCH := -device qemu-xhci,id=touch -device usb-tablet,bus=touch.0
+else ifeq ($(TOUCH),virtio)
+QMP_SOCK   ?= /tmp/bleed-qmp-$(shell id -u).sock
+QEMU_TOUCH := -device virtio-multitouch-pci -qmp unix:$(QMP_SOCK),server=on,wait=off
+else ifneq ($(TOUCH),)
+$(error TOUCH=$(TOUCH) isnt a thing, use TOUCH=usb or TOUCH=virtio)
+endif
+
+QEMU_USB := $(QEMU_USB_HC) -device usb-kbd,bus=usb.0 -device usb-mouse,bus=usb.0 $(QEMU_TOUCH) \
             -drive file=$(USB_DISK),format=raw,if=none,id=usbstick \
             -device usb-storage,bus=usb.0,drive=usbstick
 

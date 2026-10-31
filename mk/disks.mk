@@ -4,7 +4,7 @@ NVME_DISK := nvmedisk.img
 USB_DISK  := usbdisk.img
 DISKS     := $(IDE_DISK) $(SATA_DISK) $(NVME_DISK) $(USB_DISK)
 
-NVME_DATA    := $(if $(PROFILE_DATA),$(DATA_IMG))
+NVME_DATA    := $(if $(ISO_DATA),,$(if $(PROFILE_DATA),$(DATA_IMG)))
 NVME_FILES   := .nvme_files
 
 define create_ext2_disk

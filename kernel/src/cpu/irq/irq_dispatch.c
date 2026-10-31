@@ -2,6 +2,7 @@
 #include <drivers/ps2/PS2_keyboard.h>
 #include <drivers/ps2/PS2_mouse.h>
 #include <drivers/usb/usb.h>
+#include <drivers/virtio/virtio_input.h>
 #include <drivers/ac97/ac97.h>
 #include <drivers/e1000/e1000.h>
 #include <drivers/i2c/i2c_trackpad.h>
@@ -20,6 +21,7 @@ cpu_context_t *timer_handle(cpu_context_t *ctx) {
 
         // usb has no irq of its own here, it gets serviced off the tick instead
         usb_poll();
+        virtio_input_poll();
         ac97_poll();
         e1000_poll();
 

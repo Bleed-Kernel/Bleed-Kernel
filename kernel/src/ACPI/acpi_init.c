@@ -10,6 +10,7 @@
 #include <drivers/serial/serial.h>
 #include <boot/bootloader_interface/generic_bootloader.h>
 #include <ACPI/acpi_bgrt.h>
+#include <ACPI/acpi_ventoy.h>
 #include "acpi_priv.h"
 
 #define MAX_ISO 16
@@ -136,6 +137,7 @@ void acpi_init(void) {
     // logos, so this can fail silently if it doenst find one but itll just get
     // logged.
     acpi_init_bgrt();
+    acpi_init_ventoy();
 
     madt = (struct acpi_madt *)acpi_find_sdt("APIC");
     if (!madt)

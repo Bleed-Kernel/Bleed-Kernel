@@ -47,6 +47,9 @@
 #define USB_HID_SET_IDLE        0x0A
 #define USB_HID_SET_PROTOCOL    0x0B
 #define USB_HID_PROTOCOL_BOOT   0
+#define USB_HID_PROTOCOL_REPORT 1
+#define USB_DESC_HID            0x21
+#define USB_DESC_HID_REPORT     0x22
 
 #define USB_MAX_CONFIG_LEN      512 // biggest config descriptor we bother reading
 
@@ -160,6 +163,7 @@ typedef struct usb_device {
     uint16_t    vendor_id;
     uint16_t    product_id;
     volatile bool gone;     // unplugged, everything on it fails straight away from now on
+    uint32_t    claimed;    // a bit per interface number some driver has taken
 } usb_device_t;
 
 // Find every USB controller we have a driver for and enumerate whats on them
