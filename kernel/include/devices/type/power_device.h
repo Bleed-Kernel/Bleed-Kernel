@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define POWER_DEVICE_POWEROFF       0xFFFFFFFF
 #define POWER_DEVICE_REBOOT         0xEEEEEEEE
@@ -25,7 +26,13 @@ typedef struct power_battery {
     uint32_t full;          // mAh
 } power_battery_t;
 
+// fills out in and says true, a driver that knows about a battery sets one (a chromebooks ec)
+typedef bool (*power_battery_fn_t)(power_battery_t *out);
+
 void power_device_init(void);
+
+// NULL takes it away again
+void power_set_battery_source(power_battery_fn_t fn);
 
 // entry point of the power watchdog task, a press of the power button becomes a shutdown
 void power_button_watch(void);

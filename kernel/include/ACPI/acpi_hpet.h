@@ -1,6 +1,7 @@
 #pragma once
 #include <ACPI/acpi.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #define femtosecondsPerSecond       1000000000000000
 #define femtosecondsPerMillisecond  1000000000000
@@ -55,3 +56,9 @@ void wait_ms(uint64_t ms);
 void wait_s(uint64_t s);
 
 void acpi_init_hpet(void);
+
+// has timeout_ms passed since start, spins is the fallback when there is no HPET
+bool hpet_timed_out(uint64_t start, uint64_t spins, uint64_t timeout_ms);
+
+// spins, doesnt yield, safe before the scheduler is up
+void hpet_busy_wait_ms(uint64_t ms);

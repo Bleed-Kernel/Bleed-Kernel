@@ -285,6 +285,12 @@ void *vmm_alloc_pages(size_t pages) {
         memset(v, 0, pages * PAGE_SIZE);
         return v;
     }
+    return vmm_alloc_near_kernel(pages);
+}
+
+void *vmm_alloc_near_kernel(size_t pages) {
+    if (!pages)
+        return NULL;
 
     vmm_init();
 

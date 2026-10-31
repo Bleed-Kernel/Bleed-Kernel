@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <ctype.h>
 
 /// @brief kernel symbol table
 struct ksym {
@@ -11,8 +12,14 @@ struct ksym {
 };
 
 int main(int argc, char **argv) {
+    int globals = argc == 4 && strcmp(argv[1], "-g") == 0;
+    if (globals) {
+        argv++;
+        argc--;
+    }
+
     if (argc != 3) {
-        fprintf(stderr, "usage: %s <nm.txt> <out>\n", argv[0]);
+        fprintf(stderr, "usage: %s [-g] <nm.txt> <out>\n", argv[0]);
         return 1;
     }
 
@@ -58,7 +65,7 @@ int main(int argc, char **argv) {
         if (sscanf(line, "%" SCNx64 " %c %511s", &addr, &type, name) != 3)
             continue;
 
-        if (type != 'T' && type != 't')
+        if (globals ? (!isupper((unsigned char)type) || type == 'U') : (type != 'T' && type != 't'))
             continue;
 
         size_t name_len = strlen(name) + 1;

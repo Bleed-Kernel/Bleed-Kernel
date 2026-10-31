@@ -88,7 +88,7 @@ define build_iso
 endef
 
 .PHONY: initrd
-initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(PROC_VERSION_FILE) userprogs
+initrd: $(KERNEL_BIN) $(KERNEL_SYM) $(KERNEL_EXPORTS) $(PROC_VERSION_FILE) userprogs drivers
 	$(build_initrd_tar)
 
 $(ISO): $(LIMINE) $(KERNEL_BIN) initrd $(ISO_DATA)

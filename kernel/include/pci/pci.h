@@ -1,0 +1,102 @@
+#pragma once
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+
+#define PCI_CONFIG_ADDR  0xCF8
+#define PCI_CONFIG_DATA  0xCFC
+
+// config header offsets
+#define PCI_VENDOR_ID       0x00
+#define PCI_DEVICE_ID       0x02
+#define PCI_COMMAND         0x04
+#define PCI_STATUS          0x06
+#define PCI_REVISION        0x08
+#define PCI_PROG_IF         0x09
+#define PCI_SUBCLASS        0x0A
+#define PCI_CLASS           0x0B
+#define PCI_HEADER_TYPE     0x0E
+#define PCI_BAR0            0x10
+#define PCI_BAR1            0x14
+#define PCI_BAR2            0x18
+#define PCI_BAR3            0x1C
+#define PCI_BAR4            0x20
+#define PCI_BAR5            0x24
+#define PCI_INTERRUPT_LINE  0x3C
+
+/* PCI command register bits */
+#define PCI_CMD_IO          0x0001
+#define PCI_CMD_MEMORY      0x0002
+#define PCI_CMD_BUSMASTER   0x0004
+
+/* Class/subclass for AHCI */
+#define PCI_CLASS_STORAGE       0x01
+#define PCI_SUBCLASS_SATA       0x06
+#define PCI_PROGIF_AHCI         0x01
+
+/* Class/subclass for USB host controllers, prog_if picks the flavour */
+#define PCI_CLASS_SERIAL_BUS    0x0C
+#define PCI_SUBCLASS_USB        0x03
+#define PCI_PROGIF_UHCI         0x00
+#define PCI_PROGIF_OHCI         0x10
+#define PCI_PROGIF_EHCI         0x20
+#define PCI_PROGIF_XHCI         0x30
+
+//Intel LPSS (i2c and spi) has no subclass of its own, it sits under "other"
+#define PCI_CLASS_SIGNAL        0x11
+#define PCI_SUBCLASS_SERIAL_OTHER 0x80
+#define PCI_PROGIF_NONE         0x00
+
+// capability list, only walked to find power management
+#define PCI_STATUS_CAP_LIST     0x0010
+#define PCI_CAP_POINTER         0x34
+#define PCI_CAP_ID_PM           0x01
+#define PCI_PM_CTRL             0x04    // offset inside the capability
+#define PCI_PM_CTRL_STATE_MASK  0x0003
+
+#define PCI_VENDOR_INTEL    0x8086
+#define PCI_VENDOR_NONE     0xFFFF
+
+typedef struct {
+    uint8_t  bus;
+    uint8_t  device;
+    uint8_t  function;
+    uint16_t vendor_id;
+    uint16_t device_id;
+    uint8_t  class_code;
+    uint8_t  subclass;
+    uint8_t  prog_if;
+    uint32_t bar[6];
+} pci_device_t;
+
+uint32_t pci_read32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset);
+uint16_t pci_read16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset);
+uint8_t  pci_read8 (uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset);
+void     pci_write32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint32_t val);
+void     pci_write16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint16_t val);
+
+#define PCI_SPEC "%02x:%02x.%x"
+#define PCI_SPEC_ARGS(p) (p)->bus, (p)->device, (p)->function
+
+// scans all PCI bussus
+bool pci_find_device(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
+                     pci_device_t *out);
+
+// same scan but returns the nth match (0 based), false once you run out
+bool pci_find_device_nth(uint8_t class_code, uint8_t subclass, uint8_t prog_if,
+                         int index, pci_device_t *out);
+
+// walk every bus once and keep what was there, drivers get matched against this list
+void pci_scan(void);
+size_t pci_count(void);
+pci_device_t *pci_get(size_t index);
+
+// turn on memory decoding and bus mastering
+void pci_enable(const pci_device_t *dev);
+
+// size a bar by writing all ones at it, has to happen before decoding is turned on
+uint64_t pci_bar_size(const pci_device_t *dev, int bar);
+
+// map a memory bar into the hhdm and return its vaddr, 0 if it wont
+uint64_t pci_map_bar(const pci_device_t *dev, int bar, uint64_t size);

@@ -3,7 +3,6 @@
 #include <stddef.h>
 
 #include <fs/vfs.h>
-#include <devices/type/blk_device.h>
 
 #define VFS_MAX_MOUNTS 16
 

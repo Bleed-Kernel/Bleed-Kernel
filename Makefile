@@ -38,6 +38,8 @@ endif
 include mk/toolchain.mk
 include mk/kernel.mk
 include mk/userprogs.mk
+include mk/sdk.mk
+include mk/drivers.mk
 include mk/image.mk
 include mk/disks.mk
 include mk/qemu.mk
@@ -91,12 +93,12 @@ repack:
 .PHONY: clean
 clean:
 	rm -rf bin $(ISO) iso_root
-	rm -f $(PROC_VERSION_FILE) $(KERNEL_SYM)
+	rm -f $(PROC_VERSION_FILE) $(KERNEL_SYM) $(KERNEL_EXPORTS)
 	find kernel klibc \( -name '*.o' -o -name '*.d' \) -delete
 	find initrd \( -name '*.tar' -o -name '._*' -o -name '.DS_Store' \) -delete
 
 .PHONY: distclean
-distclean: clean
+distclean: clean drivers-clean
 	rm -rf $(DISKS) $(DATA_DIR) $(DATA_IMG) $(DATA_SUM) $(NVME_FILES) limine $(USER_BIN_DIR)
 	rm -rf initrd/lib initrd/include $(INITRD_BIN)/*
 	@$(USERPROGS_SH) distclean $(call program_entries,$(ALL_PROGRAMS))
@@ -107,6 +109,8 @@ help:
 	@echo "make run [PROFILE]      build then boot it, also run-headless run-ohci run-uefi run-mac"
 	@echo "make runlocal           boot the iso thats already there"
 	@echo "make repack             tar up initrd/ into the iso again, no compiling or internet"
+	@echo "make drivers            build the KMD-* drivers in DRIVERS into initrd/drivers"
+	@echo "make sdk                the driver sdk as bin/bleed-sdk-<version>.tar.gz, no kernel source needed"
 	@echo "make clean              remove the kernels build output"
 	@echo "make distclean          remove everything built or downloaded"
 	@echo ""

@@ -7,8 +7,11 @@ BUILD_GIT_COUNT   := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
 BUILD_GIT_DIRTY   := $(shell if git diff --quiet --ignore-submodules HEAD >/dev/null 2>&1; then echo ""; else echo "-dirty"; fi)
 BUILD_VERSION     := r$(BUILD_GIT_COUNT)-g$(BUILD_GIT_HASH)$(BUILD_GIT_DIRTY)
 
-KERNEL_OBJ := $(patsubst %.c, $(OBJDIR)/%.o, $(shell find kernel -name '*.c')) \
-              $(patsubst %.S, $(OBJDIR)/%.o, $(shell find kernel -name '*.S'))
+# the KMD-* submodules in kernel/src/drivers are drivers, they build on their own and never link in
+KERNEL_SRC_FIND = find kernel -path 'kernel/src/drivers/KMD-*' -prune -o -name '$(1)' -print
+
+KERNEL_OBJ := $(patsubst %.c, $(OBJDIR)/%.o, $(shell $(call KERNEL_SRC_FIND,*.c))) \
+              $(patsubst %.S, $(OBJDIR)/%.o, $(shell $(call KERNEL_SRC_FIND,*.S)))
 
 KLIBC_OBJ := $(patsubst %.c, $(OBJDIR)/%.o, $(shell find klibc -name '*.c')) \
              $(patsubst %.S, $(OBJDIR)/%.o, $(shell find klibc -name '*.S'))
@@ -34,6 +37,11 @@ $(PROC_VERSION_FILE): FORCE
 PANIC_REPORT_OBJ := $(OBJDIR)/kernel/src/kernel/exception/panic_report.o
 $(PANIC_REPORT_OBJ): CFLAGS += -DBLEED_VERSION='"$(BUILD_VERSION)"'
 $(PANIC_REPORT_OBJ): $(PROC_VERSION_FILE)
+
+# drivers say which kernel their sdk came from, the loader compares
+KMD_OBJ := $(OBJDIR)/kernel/src/kmd/kmd.o
+$(KMD_OBJ): CFLAGS += -DBLEED_VERSION='"$(BUILD_VERSION)"'
+$(KMD_OBJ): $(PROC_VERSION_FILE)
 
 $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -62,3 +70,10 @@ $(KERNEL_NM): $(KERNEL_BIN)
 $(KERNEL_SYM): $(KERNEL_NM) $(MK_SYMTAB)
 	@mkdir -p $(dir $@)
 	@$(MK_SYMTAB) $(KERNEL_NM) $@
+
+KERNEL_EXPORTS := initrd/etc/kernel.exports
+
+$(KERNEL_EXPORTS): $(KERNEL_NM) $(MK_SYMTAB)
+	@mkdir -p $(dir $@)
+	@echo "[SYM] $@"
+	@$(MK_SYMTAB) -g $(KERNEL_NM) $@

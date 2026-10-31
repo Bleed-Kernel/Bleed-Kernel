@@ -118,6 +118,8 @@ audio_device_t *audio_device_register(const char *name, const audio_driver_t *dr
                                       paddr_t ring_phys, size_t period_bytes, uint32_t periods,
                                       uint32_t rate, uint32_t channels);
 
+int audio_device_unregister(audio_device_t *dev);
+
 // the driver tells us which period the hardware is on now, whats behind it is zeroed for the next lap
 void audio_device_advance(audio_device_t *dev, uint32_t hw_period);
 

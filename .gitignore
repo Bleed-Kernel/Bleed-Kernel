@@ -21,6 +21,10 @@ initrd/include/hlx
 
 tools/mksymtab
 initrd/etc/kernel.sym
+initrd/etc/kernel.exports
+initrd/etc/drivers.conf
+initrd/drivers/
+kernel/src/drivers/bleed-sdk
 initrd/proc/version
 
 *.img

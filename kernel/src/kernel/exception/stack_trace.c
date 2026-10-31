@@ -8,6 +8,7 @@
 #include <cpu/control_registers.h>
 #include <fs/vfs.h>
 #include <boot/bootlogger/bootlogger.h>
+#include <kmd/kmd_loader.h>
 
 struct ksym{
     uint64_t addr;
@@ -78,6 +79,15 @@ bool stack_trace_load_symbols(const char *path){
 const char *stack_trace_symbol_lookup(uint64_t address, uint64_t *sym_addr_out){
     const char *name = NULL;
     uint64_t c = 0;
+
+    // driver code isnt in kernel.sym, its own symbols say where it is as DRIVER:function
+    const char *module = NULL;
+    const char *driver_fn = kmd_symbol_lookup(address, sym_addr_out, &module);
+    if (module) {
+        static char driver_name[128];
+        snprintf(driver_name, sizeof(driver_name), "%s:%s", module, driver_fn ? driver_fn : "??");
+        return driver_name;
+    }
 
     for (size_t i = 0; i < kernel_symbols.count; i++){
         uint64_t saddr = kernel_symbols.syms[i].addr;

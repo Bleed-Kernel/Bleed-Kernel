@@ -565,3 +565,31 @@ audio_device_t *audio_device_register(const char *name, const audio_driver_t *dr
                   name, rate, periods, (uint32_t)period_bytes, AUDIO_STREAMS);
     return dev;
 }
+
+int audio_device_unregister(audio_device_t *dev) {
+    if (!dev || dev != audio_dev)
+        return -EINVAL;
+
+    unsigned long flags;
+    audio_lock(dev, &flags);
+
+    // open somewhere or a program still has a stream, the card has to stay
+    bool busy = dev->device.shared > 1;
+    for (int i = 0; i < AUDIO_STREAMS; i++)
+        busy |= dev->streams[i].used;
+    if (busy) {
+        audio_unlock(dev, flags);
+        return -EBUSY;
+    }
+
+    card_stop(dev);
+    audio_dev = NULL;
+    audio_unlock(dev, flags);
+
+    // the list frees its copy of the name, the last ref frees dev
+    char name[32] = {0};
+    const char *registered = device_get_name(&dev->device);
+    if (registered)
+        strncpy(name, registered, sizeof(name) - 1);
+    return (int)device_unregister(name);
+}

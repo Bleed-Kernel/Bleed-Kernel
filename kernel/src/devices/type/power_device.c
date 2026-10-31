@@ -15,7 +15,6 @@
 #include <ACPI/acpi_hpet.h>
 #include <fs/vfs_mount.h>
 #include <mm/spinlock.h>
-#include <drivers/cros_ec/cros_ec.h>
 #include <stdio.h>
 
 typedef struct {
@@ -99,20 +98,16 @@ void power_button_watch(void) {
     }
 }
 
+static power_battery_fn_t battery_source = NULL;
+
+void power_set_battery_source(power_battery_fn_t fn) {
+    battery_source = fn;
+}
+
 static void power_battery_read(power_battery_t *out) {
-    cros_ec_battery_t batt;
-
     memset(out, 0, sizeof(*out));
-    if (!cros_ec_battery(&batt)) return;
-
-    out->present  = 1;
-    out->charging = batt.charging;
-    out->ac       = batt.ac;
-    out->percent  = batt.percent;
-    out->voltage  = batt.voltage;
-    out->rate     = batt.rate;
-    out->capacity = batt.capacity;
-    out->full     = batt.full;
+    if (battery_source && !battery_source(out))
+        memset(out, 0, sizeof(*out));
 }
 
 // the same thing as text, so it can be looked at with cat

@@ -36,12 +36,6 @@
 
 #include <drivers/ps2/PS2_mouse.h>
 #include <drivers/ps2/PS2_keyboard.h>
-#include <drivers/usb/usb.h>
-#include <drivers/usb/usb_storage.h>
-#include <drivers/i2c/dw_i2c.h>
-#include <drivers/i2c/i2c_trackpad.h>
-#include <drivers/i2c/i2c_touch.h>
-#include <drivers/virtio/virtio_input.h>
 #include <devices/type/null_device.h>
 #include <devices/type/hpet_device.h>
 #include <devices/type/mouse_device.h>
@@ -50,18 +44,12 @@
 #include <devices/type/fb_device.h>
 #include <devices/type/serial_tty_device.h>
 #include <devices/type/power_device.h>
-#include <drivers/cros_ec/cros_ec.h>
 #include <devices/type/serial_device.h>
 #include <devices/type/tty_device.h>
 #include <devices/type/net_device.h>
 
-#include <drivers/ide/ide.h>
-#include <drivers/ahci/ahci.h>
-#include <drivers/nvme/nvme.h>
-#include <drivers/ac97/ac97.h>
-#include <drivers/e1000/e1000.h>
 #include <net/net.h>
-#include <devices/type/blk_device.h>
+#include <kmd/kmd_loader.h>
 
 #include <sched/scheduler.h>
 
@@ -230,20 +218,6 @@ void init_devices(){
     BLOG_INFO("Checking for Touch Devices");
     touch_device_init();
 
-    BLOG_INFO("Enumerating USB Controllers");
-    usb_init();
-
-    BLOG_INFO("Looking for virtio input devices");
-    virtio_input_init();
-
-    BLOG_INFO("Enumerating I2C Controllers");
-    dw_i2c_init();
-    i2c_trackpad_init();
-    if (i2c_trackpad_present())
-        BLOG_OK("I2C trackpad Ready");
-    if (i2c_touch_present())
-        BLOG_OK("I2C touchscreen Ready");
-
     BLOG_INFO("Starting serial Device");
     serial_device_register();
     BLOG_OK("serial Device Ready");
@@ -253,15 +227,17 @@ void init_devices(){
     if (serial_tty_init() == 0)
         BLOG_OK("serial terminal Ready");
 
-    BLOG_INFO("Enumerating AC97 Controller");
-    ac97_init();
+    // usb storage mounts itself as it turns up
+    vfs_mkdir("/mnt");
 
-    BLOG_INFO("Enumerating Network Controllers");
-    e1000_init();
+    BLOG_INFO("Loading Kernel Mode Drivers");
+    size_t drivers = kmd_boot();
+    BLOG_OKF("%llu Kernel Mode Drivers loaded", (uint64_t)drivers);
+    kmd_device_init();
+
     net_device_init();
 
     BLOG_INFO("Starting power Device");
-    cros_ec_init();
     power_device_init();
     BLOG_OK("power Device Ready");
 
@@ -277,10 +253,7 @@ static bool mount_drive(const char *path, const char *disk, const char *part){
 }
 
 void init_block_devices(){
-    vfs_mkdir("/mnt");
-
     BLOG_INFO("Block Devices");
-    ide_init();
     if (mount_drive("/mnt/ide", "hda", "hda1"))
         BLOG_OK("\t - IDE Device Ready");
 
@@ -288,16 +261,12 @@ void init_block_devices(){
     if (vfs_mount("/mnt/cdrom", device_get_by_name("cd0")) == 0)
         BLOG_OK("\t - CD Drive Ready");
 
-    ahci_init();
     if (mount_drive("/mnt/sata", "sda", "sda1"))
         BLOG_OK("\t - SATA Device Ready");
 
-    nvme_init();
     if (mount_drive("/mnt/nvme", "nvme0", "nvme0p1"))
         BLOG_OK("\t - NVMe Device Ready");
 
-    // usb_init already found the drives, usb_service does the same for ones plugged in later
-    usb_storage_automount();
     data_image_scan();
 
     BLOG_OK("Block Device Probing");
@@ -411,20 +380,12 @@ bool init_userspace(){
     if (sched_create_task(read_cr3(), (uint64_t)power_button_watch, KERNEL_CS, KERNEL_SS, "power_service"))
         BLOG_OK("Power watchdog started");
 
-    if (sched_create_task(read_cr3(), (uint64_t)usb_hotplug_watch, KERNEL_CS, KERNEL_SS, "usb_service"))
-        BLOG_OK("USB hotplug service started");
+    // drivers get to start their own services now the scheduler is going
+    kmd_start_all();
 
     if (netif_default() &&
         sched_create_task(read_cr3(), (uint64_t)net_service, KERNEL_CS, KERNEL_SS, "net_service"))
         BLOG_OK("Network service started");
-
-    if (i2c_trackpad_present() &&
-        sched_create_task(read_cr3(), (uint64_t)i2c_trackpad_watch, KERNEL_CS, KERNEL_SS, "i2c_service"))
-        BLOG_OK("I2C trackpad task started");
-
-    if (i2c_touch_present() &&
-        sched_create_task(read_cr3(), (uint64_t)i2c_touch_watch, KERNEL_CS, KERNEL_SS, "touch_service"))
-        BLOG_OK("I2C touchscreen task started");
 
     return true;
 }

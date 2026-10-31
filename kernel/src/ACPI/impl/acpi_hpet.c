@@ -131,3 +131,15 @@ uint64_t hpet_get_femtoseconds(){
 uint64_t hpet_read_counter(void) {
     return hpet_read64(HPET_REG_MAIN_COUNTER);
 }
+bool hpet_timed_out(uint64_t start, uint64_t spins, uint64_t timeout_ms) {
+    uint64_t now = hpet_get_femtoseconds();
+    if (now)
+        return now - start > timeout_ms * femtosecondsPerMillisecond;
+    return spins > timeout_ms * 1000;
+}
+
+void hpet_busy_wait_ms(uint64_t ms) {
+    uint64_t start = hpet_get_femtoseconds();
+    for (uint64_t spins = 0; !hpet_timed_out(start, spins, ms); spins++)
+        asm volatile("pause");
+}

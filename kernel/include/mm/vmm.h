@@ -13,6 +13,8 @@ typedef struct vmm_region {
 } vmm_region_t;
 
 void *vmm_alloc_pages(size_t pages);
+
+void *vmm_alloc_near_kernel(size_t pages);
 void vmm_free_pages(void *addr, size_t pages);
 int vmm_map_pages(vmm_cr3_t cr3, void *virt, size_t page_count, uint64_t flags);
 int vmm_map_phys_pages(vmm_cr3_t cr3, void *virt, paddr_t phys_start,

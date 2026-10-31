@@ -1,0 +1,51 @@
+[submodule "kernel/src/drivers/KMD-HID"]
+	path = kernel/src/drivers/KMD-HID
+	url = https://github.com/Bleed-Kernel/KMD-HID
+[submodule "kernel/src/drivers/KMD-USB"]
+	path = kernel/src/drivers/KMD-USB
+	url = https://github.com/Bleed-Kernel/KMD-USB
+[submodule "kernel/src/drivers/KMD-USB-HID"]
+	path = kernel/src/drivers/KMD-USB-HID
+	url = https://github.com/Bleed-Kernel/KMD-USB-HID
+[submodule "kernel/src/drivers/KMD-USB-Storage"]
+	path = kernel/src/drivers/KMD-USB-Storage
+	url = https://github.com/Bleed-Kernel/KMD-USB-Storage
+[submodule "kernel/src/drivers/KMD-XHCI"]
+	path = kernel/src/drivers/KMD-XHCI
+	url = https://github.com/Bleed-Kernel/KMD-XHCI
+[submodule "kernel/src/drivers/KMD-EHCI"]
+	path = kernel/src/drivers/KMD-EHCI
+	url = https://github.com/Bleed-Kernel/KMD-EHCI
+[submodule "kernel/src/drivers/KMD-OHCI"]
+	path = kernel/src/drivers/KMD-OHCI
+	url = https://github.com/Bleed-Kernel/KMD-OHCI
+[submodule "kernel/src/drivers/KMD-VirtIO"]
+	path = kernel/src/drivers/KMD-VirtIO
+	url = https://github.com/Bleed-Kernel/KMD-VirtIO
+[submodule "kernel/src/drivers/KMD-VirtIO-Input"]
+	path = kernel/src/drivers/KMD-VirtIO-Input
+	url = https://github.com/Bleed-Kernel/KMD-VirtIO-Input
+[submodule "kernel/src/drivers/KMD-DW-I2C"]
+	path = kernel/src/drivers/KMD-DW-I2C
+	url = https://github.com/Bleed-Kernel/KMD-DW-I2C
+[submodule "kernel/src/drivers/KMD-I2C-HID"]
+	path = kernel/src/drivers/KMD-I2C-HID
+	url = https://github.com/Bleed-Kernel/KMD-I2C-HID
+[submodule "kernel/src/drivers/KMD-IDE"]
+	path = kernel/src/drivers/KMD-IDE
+	url = https://github.com/Bleed-Kernel/KMD-IDE
+[submodule "kernel/src/drivers/KMD-AHCI"]
+	path = kernel/src/drivers/KMD-AHCI
+	url = https://github.com/Bleed-Kernel/KMD-AHCI
+[submodule "kernel/src/drivers/KMD-NVMe"]
+	path = kernel/src/drivers/KMD-NVMe
+	url = https://github.com/Bleed-Kernel/KMD-NVMe
+[submodule "kernel/src/drivers/KMD-AC97"]
+	path = kernel/src/drivers/KMD-AC97
+	url = https://github.com/Bleed-Kernel/KMD-AC97
+[submodule "kernel/src/drivers/KMD-E1000"]
+	path = kernel/src/drivers/KMD-E1000
+	url = https://github.com/Bleed-Kernel/KMD-E1000
+[submodule "kernel/src/drivers/KMD-CrosEC"]
+	path = kernel/src/drivers/KMD-CrosEC
+	url = https://github.com/Bleed-Kernel/KMD-CrosEC
