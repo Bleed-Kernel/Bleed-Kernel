@@ -9,6 +9,7 @@
 #include <kernel/exception/panic.h>
 #include <sched/scheduler.h>
 #include <mm/spinlock.h>
+#include <cpu/irq.h>
 
 #define HPET_FREQUENCY          1000
 
@@ -18,6 +19,12 @@
 #define HPET_REG_T0_CONFIG      0x100
 #define HPET_REG_T0_COMPARATOR  0x108
 
+#define HPET_CAP_COUNTER_64     (1ULL << 13)
+#define HPET_COUNTER_WRAP       (1ULL << 32)
+
+// the tick reads it this often so a quiet machine cant sleep through a wrap
+#define HPET_KEEPUP_TICKS       60000
+
 #define RFLAGS_IF               0x200ULL
 
 struct acpi_hpet *hpet = NULL;
@@ -25,12 +32,26 @@ static volatile uint8_t *hpet_base = NULL;
 
 uint64_t femtosecondsPerTick = 0;
 
+// amd chipsets only have 32 bits of counter, gone round in 5 minutes. bits above that are ours
+static bool hpet_counter_32 = false;
+static volatile uint64_t hpet_extended = 0;
+
 static inline uint64_t hpet_read64(size_t off) {
     return *(volatile uint64_t *)(hpet_base + off);
 }
 
 static inline void hpet_write64(size_t off, uint64_t v) {
     *(volatile uint64_t *)(hpet_base + off) = v;
+}
+
+static void hpet_keepup(void *ctx) {
+    static uint64_t ticks;
+    (void)ctx;
+
+    if (++ticks >= HPET_KEEPUP_TICKS) {
+        ticks = 0;
+        hpet_read_counter();
+    }
 }
 
 void acpi_init_hpet(void){
@@ -49,13 +70,19 @@ void acpi_init_hpet(void){
                     PTE_PRESENT | PTE_WRITABLE | PTE_PCD | PTE_PWT);
     hpet_base = (volatile uint8_t *)(HPET_VIRT + hpet_off);
 
-    femtosecondsPerTick = hpet_read64(HPET_REG_CAPABILITIES) >> 32;
-    serial_printf(LOG_OK "HPET is at %u femtoseconds per tick\n", femtosecondsPerTick);
+    uint64_t caps = hpet_read64(HPET_REG_CAPABILITIES);
+    femtosecondsPerTick = caps >> 32;
+    hpet_counter_32 = !(caps & HPET_CAP_COUNTER_64);
+    serial_printf(LOG_OK "HPET is at %u femtoseconds per tick, %u bit counter\n", femtosecondsPerTick,
+                  hpet_counter_32 ? 32 : 64);
 
     hpet_write64(HPET_REG_CONFIG, hpet_read64(HPET_REG_CONFIG) & ~(uint64_t)(HPET_MAINCOUNTER_ENABLE | HPET_LEGACY_REPLACEMENT));
     hpet_write64(HPET_REG_MAIN_COUNTER, 0);
     hpet_write64(HPET_REG_T0_CONFIG, hpet_read64(HPET_REG_T0_CONFIG) & ~(uint64_t)HPET_TIMER_INTERRUPTS);
     hpet_write64(HPET_REG_CONFIG, hpet_read64(HPET_REG_CONFIG) | HPET_MAINCOUNTER_ENABLE);
+
+    if (hpet_counter_32)
+        tick_register(hpet_keepup, NULL);
 
     // not all manufacturers will actually allow you to tick off the HPET
     if (lapic_timer_start(HPET_FREQUENCY) == 0)
@@ -65,6 +92,7 @@ void acpi_init_hpet(void){
 
     hpet_write64(HPET_REG_CONFIG, hpet_read64(HPET_REG_CONFIG) & ~(uint64_t)HPET_MAINCOUNTER_ENABLE);
     hpet_write64(HPET_REG_MAIN_COUNTER, 0);
+    hpet_extended = 0;
 
     hpet_write64(HPET_REG_T0_CONFIG, hpet_read64(HPET_REG_T0_CONFIG) | HPET_TIMER_INTERRUPTS | HPET_TIMER_PERIODIC | HPET_TIMER_VAL_SET);
     hpet_write64(HPET_REG_T0_COMPARATOR, (femtosecondsPerSecond / femtosecondsPerTick) / HPET_FREQUENCY);
@@ -125,11 +153,29 @@ void wait_ns(uint64_t ns) {
 uint64_t hpet_get_femtoseconds(){
     if (!hpet_base || femtosecondsPerTick == 0)
         return 0;
-    return hpet_read64(HPET_REG_MAIN_COUNTER) * femtosecondsPerTick;
+    return hpet_read_counter() * femtosecondsPerTick;
 }
 
 uint64_t hpet_read_counter(void) {
-    return hpet_read64(HPET_REG_MAIN_COUNTER);
+    uint64_t raw = hpet_read64(HPET_REG_MAIN_COUNTER);
+    if (!hpet_counter_32)
+        return raw;
+
+    raw &= HPET_COUNTER_WRAP - 1;
+    uint64_t last = __atomic_load_n(&hpet_extended, __ATOMIC_ACQUIRE);
+    for (;;) {
+        uint64_t now = (last & ~(HPET_COUNTER_WRAP - 1)) | raw;
+
+        // a little behind means another cpu read it after we did
+        if (now < last) {
+            if (last - now < HPET_COUNTER_WRAP / 2)
+                return last;
+            now += HPET_COUNTER_WRAP;
+        }
+        if (__atomic_compare_exchange_n(&hpet_extended, &last, now, false,
+                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            return now;
+    }
 }
 bool hpet_timed_out(uint64_t start, uint64_t spins, uint64_t timeout_ms) {
     uint64_t now = hpet_get_femtoseconds();

@@ -2,6 +2,7 @@ DRIVER_MODULES := kernel/src/drivers
 DRIVER_SRC     ?= $(DRIVER_MODULES)
 KMD_OUT    := initrd/drivers
 KMD_CONF   := initrd/etc/drivers.conf
+KMD_FW     := initrd/firmware
 
 KMD_MAKE = $(MAKE) -s -C "$(DRIVER_SRC)/KMD-$$d" BLEED_SDK=$(abspath $(SDK_DIR))
 
@@ -26,6 +27,10 @@ drivers: $(KERNEL_EXPORTS) sdk-tree
 		$(KMD_MAKE) || exit 1; \
 		COPYFILE_DISABLE=1 cp "$(DRIVER_SRC)/KMD-$$d/bin/$$d.KMD" $(KMD_OUT)/; \
 		cp -p "$(DRIVER_SRC)/KMD-$$d/bin/$$d.syms" $(SDK_DIR)/symbols/; \
+		if [ -d "$(DRIVER_SRC)/KMD-$$d/firmware" ]; then \
+			mkdir -p $(KMD_FW); \
+			COPYFILE_DISABLE=1 cp "$(DRIVER_SRC)/KMD-$$d/firmware/"* $(KMD_FW)/; \
+		fi; \
 	done
 	@for f in $(KMD_OUT)/*.KMD; do \
 		[ -e "$$f" ] || continue; \
@@ -40,4 +45,4 @@ drivers-clean:
 	@for d in $(DRIVERS); do \
 		rm -rf "$(DRIVER_SRC)/KMD-$$d/bin"; \
 	done
-	rm -rf $(KMD_OUT) $(KMD_CONF)
+	rm -rf $(KMD_OUT) $(KMD_CONF) $(KMD_FW)

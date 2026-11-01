@@ -7,7 +7,7 @@ PROGRAMS_RELEASE := $(PROGRAMS_DEV) quake2 fastfetch
 USERPROG_SRC ?= ..
 
 DRIVERS := HID USB USB-HID USB-Storage XHCI EHCI OHCI VirtIO VirtIO-Input DW-I2C I2C-HID \
-           IDE AHCI NVMe AC97 E1000 CrosEC
+           IDE AHCI NVMe HDA SOF AC97 E1000 CrosEC
 
 ifeq ($(origin JOBS),undefined)
 JOBS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
@@ -16,6 +16,7 @@ endif
 QEMU_NAME ?= The Bleed Kernel
 MEMSZ     ?= 1G
 USB       ?= ohci
+AUDIO     ?= ac97
 LOG       ?=
 PACKAGE   ?=
 # QEMU_AUDIODEV ?= coreaudio,out.buffer-count=10

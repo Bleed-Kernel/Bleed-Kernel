@@ -22,6 +22,8 @@
 #define AUDIO_IOC_GET_OWNER  0x510A  // pid of a program playing, 0 for none
 #define AUDIO_IOC_WAIT       0x510B  // sleep till the hardware finishes the period its on
 #define AUDIO_IOC_GET_VOLUME 0x510C  // struct audio_volume out, what SET_VOLUME last set
+#define AUDIO_IOC_GET_OUTPUTS 0x510D // struct audio_outputs out, jacks are read when you ask
+#define AUDIO_IOC_SET_OUTPUT  0x510E // int32_t in, an index from GET_OUTPUTS or AUDIO_OUTPUT_AUTO
 
 #define AUDIO_WAIT_MS        100     // a WAIT never sleeps longer than this
 
@@ -58,6 +60,31 @@ struct audio_volume {
     uint8_t _pad;
 };
 
+#define AUDIO_MAX_OUTPUTS     8
+#define AUDIO_OUTPUT_NAME     28
+#define AUDIO_OUTPUT_AUTO     (-1)      // the card picks from what is plugged in
+
+#define AUDIO_OUT_SPEAKER     1
+#define AUDIO_OUT_HEADPHONES  2
+#define AUDIO_OUT_LINE        3
+
+#define AUDIO_OUTPUT_ACTIVE   (1u << 0) // sound is going here right now
+#define AUDIO_OUTPUT_DETECT   (1u << 1) // the card can tell if something is plugged in
+#define AUDIO_OUTPUT_PLUGGED  (1u << 2)
+
+struct audio_output {
+    char    name[AUDIO_OUTPUT_NAME];
+    uint8_t type;       // AUDIO_OUT_*
+    uint8_t flags;      // AUDIO_OUTPUT_*
+    uint8_t _pad[2];
+};
+
+struct audio_outputs {
+    uint32_t count;
+    int32_t  selected;  // an index, or AUDIO_OUTPUT_AUTO
+    struct audio_output out[AUDIO_MAX_OUTPUTS];
+};
+
 // what a sound card driver gives the audio device
 typedef struct audio_driver {
     const char *name;
@@ -66,6 +93,8 @@ typedef struct audio_driver {
     uint32_t (*hw_offset)(void *priv);
     int      (*set_rate)(void *priv, uint32_t rate);
     int      (*set_volume)(void *priv, const struct audio_volume *vol); 
+    int      (*get_outputs)(void *priv, struct audio_outputs *outputs);
+    int      (*set_output)(void *priv, int32_t index);
 } audio_driver_t;
 
 #define AUDIO_STREAMS       8

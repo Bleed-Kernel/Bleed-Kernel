@@ -3,6 +3,22 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+static inline uint8_t mmio_read8(uint64_t base, uint32_t offset) {
+    return *(volatile uint8_t *)(uintptr_t)(base + offset);
+}
+
+static inline void mmio_write8(uint64_t base, uint32_t offset, uint8_t val) {
+    *(volatile uint8_t *)(uintptr_t)(base + offset) = val;
+}
+
+static inline uint16_t mmio_read16(uint64_t base, uint32_t offset) {
+    return *(volatile uint16_t *)(uintptr_t)(base + offset);
+}
+
+static inline void mmio_write16(uint64_t base, uint32_t offset, uint16_t val) {
+    *(volatile uint16_t *)(uintptr_t)(base + offset) = val;
+}
+
 static inline uint32_t mmio_read32(uint64_t base, uint32_t offset) {
     return *(volatile uint32_t *)(uintptr_t)(base + offset);
 }

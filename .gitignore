@@ -24,6 +24,7 @@ initrd/etc/kernel.sym
 initrd/etc/kernel.exports
 initrd/etc/drivers.conf
 initrd/drivers/
+initrd/firmware/
 kernel/src/drivers/bleed-sdk
 initrd/proc/version
 

@@ -264,9 +264,6 @@ int apic_init(void) {
     lapic = (volatile uint32_t *)(LAPIC_VIRT + lapic_off);
 
     uint64_t apic_msr = rdmsr(IA32_APIC_BASE_MSR);
-    if (!(apic_msr & IA32_APIC_BASE_ENABLE))
-        ke_panic(NULL, "APIC: LAPIC disabled");
-
     apic_msr &= 0xFFFULL;
     apic_msr |= lapic_phys_page;
     apic_msr |= IA32_APIC_BASE_ENABLE;

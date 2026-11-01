@@ -11,9 +11,13 @@
 #include <boot/bootloader_interface/generic_bootloader.h>
 #include <ACPI/acpi_bgrt.h>
 #include <ACPI/acpi_ventoy.h>
+#include <kernel/bootargs.h>
+#include <boot/bootlogger/bootlogger.h>
 #include "acpi_priv.h"
 
 #define MAX_ISO 16
+#define ACPI_SCI_EN 1
+#define ACPI_ENABLE_SPINS 3000000
 
 struct acpi_rsdp *acpi_rsdp = NULL;
 struct acpi_fadt *fadt = NULL;
@@ -98,6 +102,43 @@ struct acpi_sdt *acpi_get_sdt(size_t index) {
     return index < entries ? paddr_to_vaddr(tables[index]) : NULL;
 }
 
+static bool acpi_is_apple(void) {
+    return !memcmp(acpi_rsdp->oem_id, "APPLE ", 6) || !memcmp(fadt->header.oem_id, "APPLE ", 6);
+}
+
+static void acpi_enter_mode(void) {
+    if (!fadt->smi_cmd || !fadt->acpi_enable || !fadt->pm1a_cnt_blk)
+        return;
+
+    // efi firmware has usually done it, asking again can hang in smm
+    if (inw(fadt->pm1a_cnt_blk) & ACPI_SCI_EN) {
+        BLOG_INFO("\t - ACPI mode already on");
+        serial_printf(LOG_INFO "ACPI: SCI_EN already set, leaving SMI_CMD alone\n");
+        return;
+    }
+
+    // this never comes back on macs and an outb cant time out
+    if (bootargs_has("no-acpi-enable") || acpi_is_apple()) {
+        BLOG_INFO("\t - Leaving ACPI mode off");
+        serial_printf(LOG_WARN "ACPI: SCI_EN clear, not asking SMI_CMD=0x%x\n", fadt->smi_cmd);
+        return;
+    }
+
+    BLOG_INFOF("\t - Enabling ACPI mode, SMI_CMD 0x%x", fadt->smi_cmd);
+    serial_printf(LOG_INFO "ACPI: Enabling via SMI_CMD=0x%x\n", fadt->smi_cmd);
+    outb(fadt->smi_cmd, fadt->acpi_enable);
+
+    for (int i = 0; i < ACPI_ENABLE_SPINS; i++) {
+        if (inw(fadt->pm1a_cnt_blk) & ACPI_SCI_EN)
+            return;
+        asm("pause");
+    }
+
+    // we dont take sci yet, nothing here needs it on
+    BLOG_INFO("\t x ACPI mode never came on, carrying on");
+    serial_printf(LOG_WARN "ACPI: SCI_EN never set\n");
+}
+
 void acpi_init(void) {
     acpi_rsdp = acpi_get_rsdp();
 
@@ -114,6 +155,7 @@ void acpi_init(void) {
     if (!acpi_checksum(acpi_rsdp, rsdp_len))
         ke_panic(NULL, "ACPI: bad RSDP checksum");
 
+    BLOG_INFO("\t - Reading FADT");
     fadt = (struct acpi_fadt *)acpi_find_sdt("FACP");
     if (!fadt)
         ke_panic(NULL, "ACPI: FADT not found");
@@ -121,17 +163,7 @@ void acpi_init(void) {
     if (!acpi_checksum(fadt, fadt->header.length))
         ke_panic(NULL, "ACPI: bad FADT checksum");
 
-    if (fadt->smi_cmd && fadt->acpi_enable) {
-        serial_printf(LOG_INFO "ACPI: Enabling via SMI_CMD=0x%x\n", fadt->smi_cmd);
-        outb(fadt->smi_cmd, fadt->acpi_enable);
-
-        int timeout = 1000000;
-        while (!(inw(fadt->pm1a_cnt_blk) & 1) && timeout-- > 0)
-            asm("pause");
-        if (timeout <= 0) {
-            ke_panic(NULL, "ACPI: Enable timeout");
-        }
-    }
+    acpi_enter_mode();
 
     // for anyone under 16, there was a time where firmware didnt provide
     // logos, so this can fail silently if it doenst find one but itll just get
@@ -139,6 +171,7 @@ void acpi_init(void) {
     acpi_init_bgrt();
     acpi_init_ventoy();
 
+    BLOG_INFO("\t - Reading MADT");
     madt = (struct acpi_madt *)acpi_find_sdt("APIC");
     if (!madt)
         ke_panic(NULL, "ACPI: MADT not found");
@@ -200,6 +233,7 @@ void acpi_init(void) {
     serial_printf(LOG_INFO "ACPI: LAPIC @ 0x%p\n", lapic_base);
     serial_printf(LOG_INFO "ACPI: IOAPIC @ 0x%p (GSI base %u)\n", ioapic_base, ioapic_gsi_base);
 
+    BLOG_INFO("\t - Starting APIC");
     apic_init();
 }
 

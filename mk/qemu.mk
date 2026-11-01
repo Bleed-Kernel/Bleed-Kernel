@@ -16,7 +16,13 @@ QEMU_AUDIODEV ?= $(call qemu_audio_pick,dsound sdl)
 else
 QEMU_AUDIODEV ?= $(call qemu_audio_pick,pipewire pa alsa sdl oss)
 endif
+ifeq ($(AUDIO),hda)
+QEMU_AUDIO := -audiodev $(QEMU_AUDIODEV),id=snd0 -device intel-hda -device hda-output,audiodev=snd0
+else ifeq ($(AUDIO),ac97)
 QEMU_AUDIO := -audiodev $(QEMU_AUDIODEV),id=snd0 -device AC97,audiodev=snd0
+else
+$(error AUDIO=$(AUDIO) isnt a thing, use AUDIO=ac97 or AUDIO=hda)
+endif
 
 QEMU_NET ?= -nic user,model=e1000,hostfwd=udp::27015-:27015
 

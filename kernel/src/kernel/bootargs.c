@@ -39,6 +39,7 @@ static const char* valid_keys[] = {
     "fb-pitch",
     "fb-bpp",
     "no-smp",
+    "no-acpi-enable",
     "no-kmd",
     "kmd-skip"
 };

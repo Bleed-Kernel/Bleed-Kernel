@@ -1,15 +1,18 @@
 #include <sched/bkl.h>
 #include <cpu/percpu.h>
-#include <mm/spinlock.h>
 
-static spinlock_t bkl;
+// tickets, first come first served
+static volatile uint32_t bkl_next;
+static volatile uint32_t bkl_serving;
 
 void bkl_lock(void) {
     cpu_t *cpu = this_cpu();
     if (cpu->bkl_held)
         return;
 
-    spinlock_acquire(&bkl);
+    uint32_t ticket = __atomic_fetch_add(&bkl_next, 1, __ATOMIC_RELAXED);
+    while (__atomic_load_n(&bkl_serving, __ATOMIC_ACQUIRE) != ticket)
+        asm volatile("pause");
     cpu->bkl_held = 1;
 }
 
@@ -19,7 +22,7 @@ void bkl_unlock(void) {
         return;
 
     cpu->bkl_held = 0;
-    spinlock_release(&bkl);
+    __atomic_store_n(&bkl_serving, bkl_serving + 1, __ATOMIC_RELEASE);
 }
 
 void bkl_resume(cpu_context_t *ctx) {

@@ -1,6 +1,6 @@
 COREUTILS := cat echo write ioctl grep cp mv rm mkdir rmdir touch ls stat du df wc head tail tee cmp \
              sort uniq cut tr basename dirname pwd realpath seq yes sleep true false printf find xargs \
-             hexdump dd uname whoami hostname date kill which ps
+             hexdump dd uname whoami hostname date kill which ps audioout
 
 ALL_PROGRAMS := verdict doom quake2 specseek taskv tvi tetris crime-scene uikit-demo about \
                 cabinet exhibit playback $(COREUTILS) tcc fastfetch halflife hlds

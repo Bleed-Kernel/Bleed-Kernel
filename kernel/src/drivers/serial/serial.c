@@ -189,12 +189,12 @@ void serial_interrupt(void) {
         serial_rx(buf, n);
 }
 
-/// @brief total bytes ever emitted, used as the log size
+/// @brief bytes the log holds right now, used as the log size
 size_t serial_log_size(void) {
-    return serial_log_total;
+    return serial_log_total < SERIAL_LOG_SIZE ? serial_log_total : SERIAL_LOG_SIZE;
 }
 
-/// @brief copy out of the serial log, offsets older than the ring are clamped forward
+/// @brief copy out of the serial log, offset 0 is the oldest byte still held
 /// @return bytes copied
 size_t serial_log_read(char *dst, size_t len, size_t offset) {
     if (!dst || len == 0) return 0;
@@ -205,7 +205,7 @@ size_t serial_log_read(char *dst, size_t len, size_t offset) {
 
     size_t start = serial_log_total > SERIAL_LOG_SIZE
                  ? serial_log_total - SERIAL_LOG_SIZE : 0;
-    if (offset < start) offset = start;
+    offset += start;
 
     size_t n = 0;
     if (offset < serial_log_total) {

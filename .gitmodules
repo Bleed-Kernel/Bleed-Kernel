@@ -49,3 +49,9 @@
 [submodule "kernel/src/drivers/KMD-CrosEC"]
 	path = kernel/src/drivers/KMD-CrosEC
 	url = https://github.com/Bleed-Kernel/KMD-CrosEC
+[submodule "kernel/src/drivers/KMD-HDA"]
+	path = kernel/src/drivers/KMD-HDA
+	url = https://github.com/Bleed-Kernel/KMD-HDA
+[submodule "kernel/src/drivers/KMD-SOF"]
+	path = kernel/src/drivers/KMD-SOF
+	url = https://github.com/Bleed-Kernel/KMD-SOF

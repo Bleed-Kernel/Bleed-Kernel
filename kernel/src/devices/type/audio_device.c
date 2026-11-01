@@ -408,6 +408,37 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
         return arg && copy_to_user(task, arg, &vol, sizeof(vol)) == 0 ? 0 : -EFAULT;
     }
 
+    // anyone can pick where it goes
+    if (request == AUDIO_IOC_GET_OUTPUTS) {
+        if (!dev->driver->get_outputs)
+            return -ENOTTY;
+
+        struct audio_outputs outputs;
+        memset(&outputs, 0, sizeof(outputs));
+
+        unsigned long flags;
+        audio_lock(dev, &flags);
+        int r = dev->driver->get_outputs(dev->priv, &outputs);
+        audio_unlock(dev, flags);
+        if (r < 0)
+            return r;
+        return arg && copy_to_user(task, arg, &outputs, sizeof(outputs)) == 0 ? 0 : -EFAULT;
+    }
+
+    if (request == AUDIO_IOC_SET_OUTPUT) {
+        int32_t index;
+        if (!dev->driver->set_output)
+            return -ENOTTY;
+        if (!arg || copy_from_user(task, &index, arg, sizeof(index)) != 0)
+            return -EFAULT;
+
+        unsigned long flags;
+        audio_lock(dev, &flags);
+        int r = dev->driver->set_output(dev->priv, index);
+        audio_unlock(dev, flags);
+        return r;
+    }
+
     // the rest are about the callers own stream, copied in before the lock
     uint32_t rate   = 0;
     uint64_t commit = 0;
