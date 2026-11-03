@@ -26,5 +26,8 @@ task_t *sched_lookup_locked(uint64_t pid);
 void    sched_queue_task_locked(task_t *task);
 void    sched_unlink_task_locked(task_t *task);
 
+// fill the bottom of a fresh kernel stack
+void sched_stack_guard_set(void *stack);
+
 // off every wait queue and the deadline list
 void sched_wait_cleanup(task_t *task);

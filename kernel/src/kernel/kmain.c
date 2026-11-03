@@ -1,3 +1,4 @@
+#include <random/random.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -205,6 +206,9 @@ void init_devices(){
     hpet_device_init();
     BLOG_OK("HPET Device Ready");
 
+    random_init();
+    random_device_init();
+
     BLOG_INFO("Starting keyboard Device");
     PS2_Keyboard_init();
     kbd_device_init();
@@ -383,8 +387,7 @@ bool init_userspace(){
     // drivers get to start their own services now the scheduler is going
     kmd_start_all();
 
-    if (netif_default() &&
-        sched_create_task(read_cr3(), (uint64_t)net_service, KERNEL_CS, KERNEL_SS, "net_service"))
+    if (sched_create_task(read_cr3(), (uint64_t)net_service, KERNEL_CS, KERNEL_SS, "net_service"))
         BLOG_OK("Network service started");
 
     return true;

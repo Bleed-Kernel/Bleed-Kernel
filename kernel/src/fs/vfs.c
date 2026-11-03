@@ -588,6 +588,9 @@ int vfs_open_at(int dirfd, const char *path_str, int flags){
         l = vfs_create(&path, &inode, INODE_FILE);
         if (l < 0) return l;
         // do not bump here! the file structure takes over the callers ref
+    } else if ((flags & O_CREAT) && (flags & O_EXCL)) {
+        vfs_drop(inode);
+        return -EEXIST;
     }
 
     if ((flags & O_DIRECTORY) && inode->type != INODE_DIRECTORY) {

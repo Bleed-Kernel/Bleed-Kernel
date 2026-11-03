@@ -14,6 +14,7 @@
 #include <string.h>
 
 static netif_t       netifs[NETIF_MAX];
+static netif_t       netif_lo = { .name = "lo" };
 static int           netif_count;
 static wait_queue_t  net_wait;
 static volatile bool net_kicked;
@@ -63,6 +64,10 @@ netif_t *netif_register(const uint8_t mac[ETH_ALEN], const netif_ops_t *ops, voi
     nif->driver = driver;
     netif_count++;
     return nif;
+}
+
+netif_t *netif_loopback(void) {
+    return &netif_lo;
 }
 
 netif_t *netif_get(int index) {
@@ -178,6 +183,8 @@ void net_service(void) {
         dhcp_tick();
         tcp_tick();
         ipv4_frag_tick();
+        if (ipv4_loopback_service())
+            net_kicked = true;
 
         uint64_t      deadline = sched_deadline_ms(NET_SERVICE_MS);
         unsigned long flags    = irq_push();

@@ -103,6 +103,51 @@ MEM_VEC static void fill_vec(uint8_t *dest, uint8_t c, uint64_t n) {
         *dest++ = c;
 }
 
+// the fxsave image is 512 bytes
+__attribute__((noinline)) static void copy_simd(uint8_t *dest, const uint8_t *src, uint64_t n) {
+    simd_guard_t guard;
+
+    while (n > 0) {
+        uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
+
+        simd_begin(&guard);
+        copy_fwd_vec(dest, src, chunk);
+        simd_end(&guard);
+
+        dest += chunk;
+        src  += chunk;
+        n    -= chunk;
+    }
+}
+
+__attribute__((noinline)) static void move_back_simd(uint8_t *dest, const uint8_t *src, uint64_t n) {
+    simd_guard_t guard;
+
+    while (n > 0) {
+        uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
+
+        n -= chunk;
+        simd_begin(&guard);
+        copy_back_vec(dest + n, src + n, chunk);
+        simd_end(&guard);
+    }
+}
+
+__attribute__((noinline)) static void fill_simd(uint8_t *dest, uint8_t c, uint64_t n) {
+    simd_guard_t guard;
+
+    while (n > 0) {
+        uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
+
+        simd_begin(&guard);
+        fill_vec(dest, c, chunk);
+        simd_end(&guard);
+
+        dest += chunk;
+        n    -= chunk;
+    }
+}
+
 /// @brief move memory from destination to source
 /// @param dest destination
 /// @param src source
@@ -118,17 +163,7 @@ void *memmove(void *dest, const void *src, uint64_t n) {
 
     // overlapping with dest above src, so the chunks come off the end first
     // in a fabulous circular motion
-    simd_guard_t guard;
-
-    while (n > 0) {
-        uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
-
-        n -= chunk;
-        simd_begin(&guard);
-        copy_back_vec(pdest + n, psrc + n, chunk);
-        simd_end(&guard);
-    }
-
+    move_back_simd(pdest, psrc, n);
     return dest;
 }
 
@@ -153,52 +188,29 @@ int memcmp(const void *s1, const void *s2, uint64_t n) {
 void *memcpy(void *dest, const void *src, uint64_t n) {
     uint8_t       *pdest = (uint8_t *)dest;
     const uint8_t *psrc  = (const uint8_t *)src;
-    simd_guard_t   guard;
 
-    if (n < SIMD_MIN) {
-        uint64_t q = n >> 3, b = n & 7;
-        asm volatile("rep movsq" : "+D"(pdest), "+S"(psrc), "+c"(q) :: "memory");
-        asm volatile("rep movsb" : "+D"(pdest), "+S"(psrc), "+c"(b) :: "memory");
+    if (n >= SIMD_MIN) {
+        copy_simd(pdest, psrc, n);
         return dest;
     }
 
-    while (n > 0) {
-        uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
-
-        simd_begin(&guard);
-        copy_fwd_vec(pdest, psrc, chunk);
-        simd_end(&guard);
-
-        pdest += chunk;
-        psrc  += chunk;
-        n     -= chunk;
-    }
-
+    uint64_t q = n >> 3, b = n & 7;
+    asm volatile("rep movsq" : "+D"(pdest), "+S"(psrc), "+c"(q) :: "memory");
+    asm volatile("rep movsb" : "+D"(pdest), "+S"(psrc), "+c"(b) :: "memory");
     return dest;
 }
 
 void *memset(void *s, int c, uint64_t n) {
-    uint8_t     *pdest = (uint8_t *)s;
-    simd_guard_t guard;
+    uint8_t *pdest = (uint8_t *)s;
 
-    if (n < SIMD_MIN) {
-        uint64_t q = n >> 3, b = n & 7, fill = (uint8_t)c * 0x0101010101010101ULL;
-        asm volatile("rep stosq" : "+D"(pdest), "+c"(q) : "a"(fill) : "memory");
-        asm volatile("rep stosb" : "+D"(pdest), "+c"(b) : "a"(fill) : "memory");
+    if (n >= SIMD_MIN) {
+        fill_simd(pdest, (uint8_t)c, n);
         return s;
     }
 
-    while (n > 0) {
-        uint64_t chunk = n < SIMD_CHUNK ? n : SIMD_CHUNK;
-
-        simd_begin(&guard);
-        fill_vec(pdest, (uint8_t)c, chunk);
-        simd_end(&guard);
-
-        pdest += chunk;
-        n     -= chunk;
-    }
-
+    uint64_t q = n >> 3, b = n & 7, fill = (uint8_t)c * 0x0101010101010101ULL;
+    asm volatile("rep stosq" : "+D"(pdest), "+c"(q) : "a"(fill) : "memory");
+    asm volatile("rep stosb" : "+D"(pdest), "+c"(b) : "a"(fill) : "memory");
     return s;
 }
 

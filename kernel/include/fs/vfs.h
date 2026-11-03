@@ -15,6 +15,7 @@
 #define O_TRUNC  0x8
 #define O_APPEND 0x10
 #define O_DIRECTORY 0x80
+#define O_EXCL      0x400   // with O_CREAT, fail if its already there
 
 #define AT_FDCWD (-100)
 

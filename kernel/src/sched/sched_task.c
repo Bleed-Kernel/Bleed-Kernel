@@ -282,6 +282,7 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     task->kernel_stack = kmalloc(KERNEL_STACK_SIZE);
     if (!task->kernel_stack)
         ke_panic(NULL, "Failed to allocate kernel stack");
+    sched_stack_guard_set(task->kernel_stack);
     uint64_t kernel_stack_top = (uint64_t)task->kernel_stack + KERNEL_STACK_SIZE;
     kernel_stack_top &= ~0xFULL; // this should ensure we are 16 byte aligned
 
@@ -412,6 +413,7 @@ task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
     child->kernel_stack = kmalloc(KERNEL_STACK_SIZE);
     if (!child->kernel_stack)
         goto fail;
+    sched_stack_guard_set(child->kernel_stack);
 
     uint64_t kernel_stack_top = (uint64_t)child->kernel_stack + KERNEL_STACK_SIZE;
     kernel_stack_top &= ~0xFULL; // has to match what sched_switch_task puts in rsp0

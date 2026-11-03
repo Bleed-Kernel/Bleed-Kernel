@@ -95,6 +95,10 @@ void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
     uint64_t stack[4] = {0};
     copy_from_user(task, stack, (const void *)sf->rsp, sizeof(stack));
     serial_printf(" rsp %p: %p %p %p %p\n", sf->rsp, stack[0], stack[1], stack[2], stack[3]);
+    serial_printf(" rax %p rbx %p rcx %p rdx %p\n rsi %p rdi %p rbp %p r8  %p\n"
+                  " r9  %p r10 %p r11 %p r12 %p\n r13 %p r14 %p r15 %p rflags %p\n",
+                  sf->rax, sf->rbx, sf->rcx, sf->rdx, sf->rsi, sf->rdi, sf->rbp, sf->r8,
+                  sf->r9, sf->r10, sf->r11, sf->r12, sf->r13, sf->r14, sf->r15, sf->rflags);
 
     kprintf("%s[ERROR]%s %s (%llu) has crashed and the task was killed [%s]\n", 
         RED_FG, 

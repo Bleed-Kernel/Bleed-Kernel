@@ -1,3 +1,4 @@
+#include <random/random.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <cpu/irq.h>
@@ -129,6 +130,7 @@ cpu_context_t *timer_handle(cpu_context_t *ctx) {
 // the ioapic only sends these to the bsp
 void irq_handler(uint8_t irq) {
     bkl_lock();
+    random_add_timing(irq);
 
     // the built in ones
     switch (irq) {

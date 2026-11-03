@@ -9,6 +9,7 @@
 #include <sched/wait_queue.h>
 
 #define KERNEL_STACK_SIZE   8192
+#define KSTACK_GUARD_BYTES  128     // bottom of every kernel stack
 
 #define USER_STACK_TOP      0x00007ffffffff000ULL
 #define USER_STACK_SIZE     (8 * 1024 * 1024)

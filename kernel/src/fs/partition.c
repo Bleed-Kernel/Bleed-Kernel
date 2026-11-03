@@ -4,12 +4,31 @@
 #include <drivers/serial/serial.h>
 #include <ansii.h>
 
+// readers fill whole device sectors, a 4K native drive would run straight off a 512 byte buffer
+#define PART_MAX_SECTOR 4096
+
+static void partition_scan(void *drive_obj, int drive_idx, sector_reader_t reader, part_register_cb_t reg_cb,
+                           uint8_t *sector);
+
 void partition_probe(void *drive_obj, int drive_idx, sector_reader_t reader, part_register_cb_t reg_cb) {
-    uint8_t sector[512];
+    uint8_t *sector = kmalloc(PART_MAX_SECTOR);
+    if (!sector) return;
+    partition_scan(drive_obj, drive_idx, reader, reg_cb, sector);
+    kfree(sector);
+}
+
+static void partition_scan(void *drive_obj, int drive_idx, sector_reader_t reader, part_register_cb_t reg_cb,
+                           uint8_t *sector) {
     if (reader(drive_obj, 0, 1, sector) < 0) return;
 
     part_mbr_t *mbr = (part_mbr_t *)sector;
     if (mbr->signature != PART_MBR_SIGNATURE) return;
+
+    // a fat or exfat boot sector ends in 55 AA too, a real table only has 0 or 0x80 in each status
+    for (int i = 0; i < 4; i++) {
+        if (mbr->partitions[i].status != 0x00 && mbr->partitions[i].status != 0x80)
+            return;
+    }
 
     bool is_gpt = false;
     for (int i = 0; i < 4; i++) {
@@ -38,7 +57,7 @@ void partition_probe(void *drive_obj, int drive_idx, sector_reader_t reader, par
         uint32_t sectors_to_read = (gpt_hdr.entry_count * entry_size + 511) / 512;
         if (sectors_to_read == 0) return;
 
-        uint8_t *table = kmalloc(sectors_to_read * 512);
+        uint8_t *table = kmalloc((size_t)sectors_to_read * PART_MAX_SECTOR);
         if (!table) return;
 
         // Read the Partition Entry Array
@@ -67,6 +86,7 @@ void partition_probe(void *drive_obj, int drive_idx, sector_reader_t reader, par
         serial_printf(LOG_INFO "Current Drive identified as MBR\n");
         for (int i = 0; i < 4; i++) {
             if (mbr->partitions[i].type == 0 || mbr->partitions[i].sector_count == 0) continue;
+            if (mbr->partitions[i].lba_start == 0) continue;
             
             reg_cb(drive_obj, drive_idx, i, 
                    mbr->partitions[i].lba_start, 

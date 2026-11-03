@@ -61,7 +61,7 @@ static int ext2_write_bgd(ext2_fs_t *fs, uint32_t group, const ext2_bgd_t *bgd) 
 
 // inode operation helpers
 static int ext2_read_disk_inode(ext2_fs_t *fs, uint32_t ino, ext2_disk_inode_t *out) {
-    if (ino < 1) return -EIO;
+    if (ino < 1 || ino > fs->total_inodes) return -EIO;
     uint32_t group = (ino - 1) / fs->inodes_per_group;
     uint32_t local = (ino - 1) % fs->inodes_per_group;
 
@@ -76,7 +76,7 @@ static int ext2_read_disk_inode(ext2_fs_t *fs, uint32_t ino, ext2_disk_inode_t *
 }
 
 static int ext2_write_disk_inode(ext2_fs_t *fs, uint32_t ino, const ext2_disk_inode_t *in) {
-    if (ino < 1) return -EIO;
+    if (ino < 1 || ino > fs->total_inodes) return -EIO;
     uint32_t group = (ino - 1) / fs->inodes_per_group;
     uint32_t local = (ino - 1) % fs->inodes_per_group;
 
@@ -602,6 +602,12 @@ typedef struct {
 } ext2_dirent_pos_t;
 
 //Iterate over directory entries
+// a dirent off the disk that fits its block and holds its name, anything else is corruption
+static bool ext2_dirent_ok(const ext2_fs_t *fs, const ext2_dirent_t *de, uint32_t boff) {
+    return de->rec_len >= sizeof(ext2_dirent_t) && !(de->rec_len & 3) && boff + de->rec_len <= fs->block_size &&
+           sizeof(ext2_dirent_t) + de->name_len <= de->rec_len;
+}
+
 typedef bool (*ext2_dirent_cb)(const ext2_dirent_t *de, const char *name,
                                 ext2_dirent_pos_t pos, void *ctx);
 
@@ -623,7 +629,7 @@ static void ext2_dir_iterate(ext2_fs_t *fs, ext2_disk_inode_t *di,
         while (boff + sizeof(ext2_dirent_t) <= fs->block_size
                && processed + boff < file_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + boff);
-            if (de->rec_len == 0) break;
+            if (!ext2_dirent_ok(fs, de, boff)) break;
 
             if (de->inode != 0) {
                 char *name = (char *)(de + 1);
@@ -801,6 +807,9 @@ static int ext2_dir_add_entry(ext2_fs_t *fs, ext2_disk_inode_t *parent_di,
                 break;
             }
 
+            if (!ext2_dirent_ok(fs, de, boff))
+                break;
+
             // Actual size of this entry (based on name_len, rounded to 4) 
             uint16_t actual = (uint16_t)((sizeof(ext2_dirent_t) + de->name_len + 3) & ~3u);
             uint16_t slack  = de->rec_len - actual;
@@ -945,9 +954,9 @@ static int ext2_unlink(INode_t *dir, const char *name, size_t namelen) {
     // Walk the block to find the entry before ours so we can coalesce 
     uint32_t boff = 0;
     uint32_t prev = UINT32_MAX;
-    while (boff < fs->block_size) {
+    while (boff + sizeof(ext2_dirent_t) <= fs->block_size) {
         ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + boff);
-        if (de->rec_len == 0) break;
+        if (!ext2_dirent_ok(fs, de, boff)) break;
         if (boff == uc.entry_off) {
             if (prev != UINT32_MAX) {
                 ext2_dirent_t *pde = (ext2_dirent_t *)(block_buf + prev);
@@ -1081,6 +1090,15 @@ int ext2_mount(INode_t *dev_inode, INode_t **root) {
     if (sb.s_magic != EXT2_SUPER_MAGIC) {
         serial_printf(LOG_ERROR "ext2: bad magic 0x%04x (expected 0x%04x)\n",
                       sb.s_magic, EXT2_SUPER_MAGIC);
+        return -EIO;
+    }
+
+    // everything below divides or shifts by these, a bad stick shouldnt take the kernel down so this should stop it
+    if (sb.s_log_block_size > 6 || !sb.s_blocks_per_group || !sb.s_inodes_per_group ||
+        !sb.s_blocks_count || !sb.s_inodes_count ||
+        (sb.s_rev_level >= 1 && (sb.s_inode_size < 128 || (sb.s_inode_size & (sb.s_inode_size - 1)) ||
+                                 sb.s_inode_size > (1024u << sb.s_log_block_size)))) {
+        serial_printf(LOG_ERROR "ext2: superblock doesnt make sense, not mounting\n");
         return -EIO;
     }
 

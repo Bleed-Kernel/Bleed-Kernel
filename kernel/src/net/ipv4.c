@@ -5,11 +5,21 @@
 #include <net/tcp.h>
 #include <drivers/serial/serial.h>
 #include <mm/kalloc.h>
+#include <mm/spinlock.h>
 #include <user/errno.h>
 #include <ansii.h>
 #include <string.h>
 
 static uint16_t ip_next_id = 1;
+
+typedef struct {
+    netbuf_t *nb;
+    netif_t  *nif;
+} lo_packet_t;
+
+static lo_packet_t lo_queue[IP_LO_QUEUE];
+static uint32_t    lo_head, lo_count;
+static spinlock_t  lo_lock;
 
 typedef struct __attribute__((packed)) {
     uint32_t src;
@@ -89,8 +99,9 @@ void ipv4_input(netif_t *nif, const void *data, size_t len) {
 }
 
 netif_t *ipv4_route(uint32_t dst) {
-    (void)dst;  // one interface for now
-    return netif_default();
+    if (IP_LOOPBACK(dst))
+        return netif_loopback();
+    return netif_default();     // one interface for now
 }
 
 uint32_t ipv4_source(netif_t *nif, uint32_t dst) {
@@ -100,6 +111,51 @@ uint32_t ipv4_source(netif_t *nif, uint32_t dst) {
 // headed for us, it never touches the card
 static bool ipv4_stays_here(netif_t *nif, uint32_t dst) {
     return IP_LOOPBACK(dst) || (nif->ip && dst == nif->ip);
+}
+
+static int ipv4_loopback_queue(netif_t *nif, netbuf_t *nb) {
+    bool queued = false;
+
+    unsigned long flags = irq_push();
+    spinlock_acquire(&lo_lock);
+    if (lo_count < IP_LO_QUEUE) {
+        lo_packet_t *p = &lo_queue[(lo_head + lo_count) % IP_LO_QUEUE];
+        p->nb  = nb;
+        p->nif = nif;
+        lo_count++;
+        queued = true;
+    }
+    spinlock_release(&lo_lock);
+    irq_restore(flags);
+
+    if (!queued) {
+        netbuf_free(nb);
+        return -ENOBUFS;
+    }
+    net_kick();
+    return 0;
+}
+
+bool ipv4_loopback_service(void) {
+    for (int i = 0; i < IP_LO_BATCH; i++) {
+        lo_packet_t p = { 0 };
+
+        unsigned long flags = irq_push();
+        spinlock_acquire(&lo_lock);
+        if (lo_count) {
+            p = lo_queue[lo_head];
+            lo_head = (lo_head + 1) % IP_LO_QUEUE;
+            lo_count--;
+        }
+        spinlock_release(&lo_lock);
+        irq_restore(flags);
+
+        if (!p.nb)
+            return false;
+        ipv4_input(p.nif, p.nb->data, p.nb->len);
+        netbuf_free(p.nb);
+    }
+    return lo_count != 0;
 }
 
 // direct on our subnet, gateway otherwise. 0 when theres no route
@@ -129,11 +185,8 @@ static int ipv4_send(netif_t *nif, netbuf_t *nb, uint32_t src, uint32_t dst, uin
     ip->dst       = dst;
     ip->checksum  = net_checksum(ip, IP_HLEN, 0);
 
-    if (ipv4_stays_here(nif, dst)) {
-        ipv4_input(nif, nb->data, nb->len);
-        netbuf_free(nb);
-        return 0;
-    }
+    if (ipv4_stays_here(nif, dst))
+        return ipv4_loopback_queue(nif, nb);
 
     // a server on this machine wants to hear lan broadcasts too
     if (dst == IP_BROADCAST && nif->configured)

@@ -22,10 +22,16 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
     if (!user_buf)
         return (uint64_t)-EFAULT;
 
-    char kbuf[2048];
+    // a page off the heap when it can, the stack one is the fallback
+    char     small[256];
+    int      direct = f->inode && f->inode->type == INODE_FILE;
+    char    *kbuf   = direct ? NULL : kmalloc(len < PAGE_SIZE ? len : PAGE_SIZE);
+    size_t   kcap   = kbuf ? (len < PAGE_SIZE ? len : PAGE_SIZE) : sizeof(small);
     uint64_t copied = 0;
+    uint64_t ret;
 
-    int direct = f->inode && f->inode->type == INODE_FILE;
+    if (!kbuf)
+        kbuf = small;
 
     while (copied < len) {
         uintptr_t at = user_buf + copied;
@@ -38,25 +44,30 @@ uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len) {
                 batch_size = to_page_end;
             dst = user_page_ptr(caller, at, 1);
         }
-        if (!dst && batch_size > sizeof(kbuf))
-            batch_size = sizeof(kbuf);
+        if (!dst && batch_size > kcap)
+            batch_size = kcap;
 
         long r = vfs_read((int)fd, dst ? dst : kbuf, batch_size);
         if (r < 0) {
-            if (copied)
-                return copied;
-            return (uint64_t)r;
+            ret = copied ? copied : (uint64_t)r;
+            goto out;
         }
         if (r == 0)
             break;
 
-        if (!dst && copy_to_user(caller, (void *)at, kbuf, (size_t)r) != 0)
-            return copied ? copied : (uint64_t)-EFAULT;
+        if (!dst && copy_to_user(caller, (void *)at, kbuf, (size_t)r) != 0) {
+            ret = copied ? copied : (uint64_t)-EFAULT;
+            goto out;
+        }
         copied += (uint64_t)r;
 
         if ((size_t)r < batch_size)
             break;
     }
+    ret = copied;
 
-    return copied;
+out:
+    if (kbuf != small)
+        kfree(kbuf);
+    return ret;
 }

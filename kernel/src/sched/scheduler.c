@@ -200,10 +200,32 @@ void sched_set_running(task_t *task) {
     rq_unlock_irq(flags);
 }
 
+#define KSTACK_GUARD_WORD 0x5354414B4F564552ULL
+
+void sched_stack_guard_set(void *stack) {
+    uint64_t *w = stack;
+    for (size_t i = 0; i < KSTACK_GUARD_BYTES / sizeof(uint64_t); i++)
+        w[i] = KSTACK_GUARD_WORD;
+}
+
+static void sched_stack_guard_check(task_t *task) {
+    const uint64_t *w = (const uint64_t *)task->kernel_stack;
+    if (!w)
+        return;
+    for (size_t i = 0; i < KSTACK_GUARD_BYTES / sizeof(uint64_t); i++) {
+        if (w[i] != KSTACK_GUARD_WORD) {
+            static char msg[96];
+            snprintf(msg, sizeof(msg), "kernel stack overflow in %s (pid %llu)", task->name, (unsigned long long)task->id);
+            ke_panic(NULL, msg);
+        }
+    }
+}
+
 void* sched_switch_task(task_t *next_task, void* old_context) {
     cpu_t  *cpu  = this_cpu();
     task_t *prev = cpu->current;
     prev->context = (cpu_context_t*)old_context;
+    sched_stack_guard_check(prev);
 
     uint64_t now = rdtsc();
     uint64_t ran = now - prev->run_tsc;
@@ -408,6 +430,7 @@ task_t *sched_create_idle_task(cpu_t *cpu) {
         kfree(task);
         return NULL;
     }
+    sched_stack_guard_set(task->kernel_stack);
 
     snprintf(task->name, sizeof(task->name), "idle_%u", cpu->id);
     task->state             = TASK_RUNNING;

@@ -152,6 +152,8 @@ long ipc_send_pages(task_t *sender, uint64_t target_pid, uint64_t src_addr, uint
         return -ESRCH;
     if (!target_pid || !src_addr || !pages)
         return -EINVAL;
+    if (pages > USER_STACK_TOP / PAGE_SIZE)
+        return -EINVAL;
 
     task_t *target = sched_get_task(target_pid);
     if (!target ||

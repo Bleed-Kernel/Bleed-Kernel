@@ -86,6 +86,9 @@ netif_t *netif_register(const uint8_t mac[ETH_ALEN], const netif_ops_t *ops, voi
 // the first interface
 netif_t *netif_default(void);
 
+// 127.x, always there even with no card
+netif_t *netif_loopback(void);
+
 // null past end
 netif_t *netif_get(int index);
 

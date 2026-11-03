@@ -20,6 +20,7 @@ typedef struct pipe_state {
     int readers;
     int writers;
     uint8_t nonblock;
+    uint8_t write_nonblock;     // each end gets its own, curl sets both
     wait_queue_t wait;
     char buffer[PIPE_BUFFER_SIZE];
 } pipe_state_t;
@@ -143,6 +144,8 @@ static long pipe_write_inode(INode_t *inode, const void *in_buffer, size_t size,
             return (long)copied;
         if (!full)
             continue;
+        if (state->write_nonblock)
+            return copied ? (long)copied : -EAGAIN;
 
         task_t  *current = get_current_task();
         sigset_t seen    = current->sig_pending;
@@ -158,32 +161,41 @@ static long pipe_write_inode(INode_t *inode, const void *in_buffer, size_t size,
 
 // the same flag ioctls a tty and the keyboard answer, so a program that reads key events
 // off stdin sets itself up the same way when stdin is a pipe from a terminal window
-static int pipe_read_ioctl(INode_t *inode, unsigned long request, void *arg) {
+static int pipe_flags_ioctl(INode_t *inode, unsigned long request, void *arg, bool write_end) {
     pipe_state_t *state = (pipe_state_t *)inode->internal_data;
     task_t *task = get_current_task();
     if (!state) return -EIO;
     if (!arg)   return -EINVAL;
 
+    uint8_t *nonblock = write_end ? &state->write_nonblock : &state->nonblock;
     switch (request) {
         case TTY_IOCTL_FIONBIO: {
-            int nonblock;
-            if (copy_from_user(task, &nonblock, arg, sizeof(nonblock)) != 0) return -EFAULT;
-            state->nonblock = nonblock ? 1 : 0;
+            int on;
+            if (copy_from_user(task, &on, arg, sizeof(on)) != 0) return -EFAULT;
+            *nonblock = on ? 1 : 0;
             return 0;
         }
         case TTY_IOCTL_SET_FLAGS: {
             uint32_t flags;
             if (copy_from_user(task, &flags, arg, sizeof(flags)) != 0) return -EFAULT;
-            state->nonblock = (flags & TTY_NONBLOCK) ? 1 : 0;
+            *nonblock = (flags & TTY_NONBLOCK) ? 1 : 0;
             return 0;
         }
         case TTY_IOCTL_GET_FLAGS: {
-            uint32_t flags = state->nonblock ? TTY_NONBLOCK : 0;
+            uint32_t flags = *nonblock ? TTY_NONBLOCK : 0;
             return copy_to_user(task, arg, &flags, sizeof(flags)) == 0 ? 0 : -EFAULT;
         }
         default:
             return -ENOTTY;
     }
+}
+
+static int pipe_read_ioctl(INode_t *inode, unsigned long request, void *arg) {
+    return pipe_flags_ioctl(inode, request, arg, false);
+}
+
+static int pipe_write_ioctl(INode_t *inode, unsigned long request, void *arg) {
+    return pipe_flags_ioctl(inode, request, arg, true);
 }
 
 static int pipe_read_poll(INode_t *inode) {
@@ -228,7 +240,7 @@ static const INodeOps_t pipe_write_ops = {
     .read = NULL,
     .write = pipe_write_inode,
     .lookup = NULL,
-    .ioctl = NULL,
+    .ioctl = pipe_write_ioctl,
     .drop = NULL,
     .readdir = NULL,
     .size = NULL,

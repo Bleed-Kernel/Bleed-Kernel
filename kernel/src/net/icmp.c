@@ -1,5 +1,6 @@
 #include <net/icmp.h>
 #include <net/ipv4.h>
+#include <net/tcp.h>
 #include <drivers/serial/serial.h>
 #include <user/errno.h>
 #include <ansii.h>
@@ -36,6 +37,25 @@ static int icmp_send(netif_t *nif, uint32_t dst, uint8_t type, uint16_t id, uint
     return ipv4_output(nif, nb, 0, dst, IP_PROTO_ICMP);
 }
 
+// the quoted header says which of our segments this is about
+static void icmp_unreachable(uint8_t code, const void *data, size_t len) {
+    if (len < IP_HLEN)
+        return;
+
+    const ipv4_hdr_t *ip   = data;
+    size_t            hlen = (size_t)(ip->ver_ihl & 0x0F) * 4;
+    if (hlen < IP_HLEN || len < hlen + 8 || ip->proto != IP_PROTO_TCP)
+        return;
+
+    const uint8_t *tcp = (const uint8_t *)data + hlen;
+    uint16_t src_port, dst_port;
+    uint32_t seq;
+    memcpy(&src_port, tcp, 2);
+    memcpy(&dst_port, tcp + 2, 2);
+    memcpy(&seq, tcp + 4, 4);
+    tcp_unreachable(code, ip->src, ntohs(src_port), ip->dst, ntohs(dst_port), ntohl(seq));
+}
+
 void icmp_input(netif_t *nif, uint32_t src, const void *data, size_t len) {
     if (len < sizeof(icmp_hdr_t) || net_checksum(data, len, 0) != 0)
         return;
@@ -56,6 +76,7 @@ void icmp_input(netif_t *nif, uint32_t src, const void *data, size_t len) {
             break;
         case ICMP_UNREACHABLE:
             serial_printf(LOG_INFO "icmp: " IP_FMT " says unreachable, code %u\n", IP_ARGS(src), icmp->code);
+            icmp_unreachable(icmp->code, icmp + 1, len - sizeof(icmp_hdr_t));
             break;
         default:
             break;

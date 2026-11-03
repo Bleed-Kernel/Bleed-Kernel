@@ -29,37 +29,53 @@ int snprintf(char *buf, size_t size, const char *fmt, ...) {
     return ret;
 }
 
+#define KPRINTF_CHUNK 256
+
+typedef struct {
+    char             buf[KPRINTF_CHUNK];
+    size_t           len;
+    tty_fb_backend_t *backend;
+} kprintf_ctx_t;
+
+static void kprintf_flush(kprintf_ctx_t *k) {
+    if (!k->len)
+        return;
+    k->buf[k->len] = '\0';
+    if (k->backend)
+        framebuffer_write_string(&k->backend->fb, &k->backend->ansi, k->buf, &k->backend->fb_lock);
+    serial_printf("%s", k->buf);
+    k->len = 0;
+}
+
+static void kprintf_putc(int c, void *ctx) {
+    kprintf_ctx_t *k = ctx;
+    k->buf[k->len++] = (char)c;
+    if (k->len == KPRINTF_CHUNK - 1)
+        kprintf_flush(k);
+}
+
 /// @brief formatted print to tty
 /// @param s string
 void kprintf(const char *fmt, ...) {
-    char buf[2048];
-    va_list args;
-    va_start(args, fmt);
-    int written = npf_vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    if (written < 0)
-        return;
-    buf[sizeof(buf) - 1] = '\0';
+    kprintf_ctx_t k = { .len = 0, .backend = NULL };
 
     // Output to tty framebuffer if available
     INode_t *dev = device_get_by_name("tty0");
     if (dev) {
         tty_t *tty = dev->internal_data;
-        if (tty && tty->backend) {
-            tty_fb_backend_t *backend = (tty_fb_backend_t *)tty->backend;
-            fb_console_t *fb = &backend->fb;
-            ansii_state_t *ansi = &backend->ansi;
-            spinlock_t *framebuffer_lock = &backend->fb_lock;
-            framebuffer_write_string(fb, ansi, buf, framebuffer_lock);
-        }
+        if (tty && tty->backend)
+            k.backend = (tty_fb_backend_t *)tty->backend;
     }
 
-    // Also write to serial
-    serial_printf("%s", buf);
+    va_list args;
+    va_start(args, fmt);
+    npf_vpprintf(kprintf_putc, &k, fmt, args);
+    va_end(args);
+    kprintf_flush(&k);
 }
 
 void kprintf_pos(uint64_t x, uint64_t y, const char *fmt, ...) {
-    char buf[1024];
+    char buf[256];
     va_list args;
     va_start(args, fmt);
     int written = npf_vsnprintf(buf, sizeof(buf), fmt, args);

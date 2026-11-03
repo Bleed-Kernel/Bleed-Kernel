@@ -1,4 +1,5 @@
 #include <net/dhcp.h>
+#include <random/random.h>
 #include <net/udp.h>
 #include <net/ipv4.h>
 #include <drivers/serial/serial.h>
@@ -73,7 +74,7 @@ static void dhcp_send(uint8_t type) {
 static void dhcp_discover(void) {
     dhcp.state = DHCP_SELECTING;
     dhcp.tries = 0;
-    dhcp.xid   = htonl((uint32_t)hpet_read_counter() ^ ((uint32_t)dhcp.nif->mac[4] << 24 | (uint32_t)dhcp.nif->mac[5] << 16));
+    dhcp.xid   = random_u32();
     serial_printf(LOG_INFO "dhcp: %s discover, xid 0x%08x\n", dhcp.nif->name, ntohl(dhcp.xid));
     dhcp_send(DHCP_DISCOVER);
 }

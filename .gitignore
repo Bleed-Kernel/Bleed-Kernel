@@ -34,3 +34,4 @@ initrd/proc/version
 .data_img.sum
 .nvme_files/
 config.local.mk
+initrd/etc/ssl/

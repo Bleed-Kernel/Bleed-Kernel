@@ -22,9 +22,11 @@ void acpi_poweroff_fallback(){
     // inform the user they can do it manually.
     // its also a cute nod to history from the windows 9x era
     tty_t tty = console_get_active_tty();
-    kprintf("\x1b[2J");
-
     tty_fb_backend_t *b = tty.backend;
+    if (!b || !b->fb.font)
+        return;
+
+    kprintf("\x1b[2J");
     fb_console_t *fb = &b->fb;
 
     uint64_t cols = fb->width  / fb->font->width;

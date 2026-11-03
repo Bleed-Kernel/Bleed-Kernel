@@ -17,6 +17,9 @@
 #define IP_FRAG_SLOTS       4       // packets being put back together at once
 #define IP_FRAG_TIMEOUT_MS  5000
 
+#define IP_LO_QUEUE         256
+#define IP_LO_BATCH         64      // per go, the rest of the system wants the cpu too
+
 typedef struct __attribute__((packed)) {
     uint8_t  ver_ihl;
     uint8_t  tos;
@@ -45,6 +48,8 @@ void ipv4_frag_tick(void);
 // pseudo header sum for udp and tcp checksums
 uint32_t ipv4_pseudo_sum(uint32_t src, uint32_t dst, uint8_t proto, size_t len);
 int ipv4_output(netif_t *nif, netbuf_t *nb, uint32_t src, uint32_t dst, uint8_t proto);
+
+bool ipv4_loopback_service(void);
 
 // returns null when not configured
 netif_t *ipv4_route(uint32_t dst);

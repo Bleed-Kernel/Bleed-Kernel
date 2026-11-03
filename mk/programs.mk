@@ -3,7 +3,7 @@ COREUTILS := cat echo write ioctl grep cp mv rm mkdir rmdir touch ls stat du df 
              hexdump dd uname whoami hostname date kill which ps audioout
 
 ALL_PROGRAMS := verdict doom quake2 specseek taskv tvi tetris crime-scene uikit-demo about \
-                cabinet exhibit playback $(COREUTILS) tcc fastfetch halflife hlds
+                cabinet exhibit playback $(COREUTILS) tcc fastfetch curl halflife hlds
 
 GH := https://github.com/Bleed-Kernel
 
@@ -23,6 +23,7 @@ REPO_playback    := $(GH)/Bleed-Playback
 $(foreach p,$(COREUTILS),$(eval REPO_$(p) := $(GH)/Bleed-Coreutils))
 REPO_tcc         := $(GH)/Bleed-TCC
 REPO_fastfetch   := $(GH)/Bleed-Fastfetch
+REPO_curl        := $(GH)/Bleed-Curl
 
 REPO_halflife    := $(GH)/Bleed-HalfLife
 REPO_hlds        := $(GH)/Bleed-HalfLife
@@ -32,6 +33,7 @@ ASSETS_doom     := doom1.wad
 ASSETS_quake2   := baseq2
 ASSETS_playback := player soundfonts etc/1038.mp3
 ASSETS_tcc      := lib include
+ASSETS_curl     := etc/ssl
 
 # these go on the isos data partition (/mnt/data) instead of the initrd
 DATA_PROGRAMS := doom quake2 halflife hlds

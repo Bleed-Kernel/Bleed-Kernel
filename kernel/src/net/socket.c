@@ -1,4 +1,5 @@
 #include <net/socket.h>
+#include <random/random.h>
 #include <net/udp.h>
 #include <net/ipv4.h>
 #include <net/tcp.h>
@@ -16,7 +17,6 @@
 #include <string.h>
 
 #define FIONREAD    0x541B
-#define TCP_NODELAY 1
 #define SOCK_CHUNK  16384   // stream bounce buffer
 
 // a queued udp datagram
@@ -40,7 +40,9 @@ struct socket {
     bool           nonblock;
     bool           broadcast;
     bool           reuse;
+    bool           abort_close;
     uint64_t       rcvtimeo_ms;
+    uint64_t       sndtimeo_ms;
     sock_dgram_t  *rx_head;
     sock_dgram_t  *rx_tail;
     int            rx_count;
@@ -50,7 +52,6 @@ struct socket {
 
 static socket_t  *bound;
 static spinlock_t sock_lock;
-static uint16_t   next_port = SOCK_PORT_FIRST;
 
 static bool is_loopback(uint32_t ip) {
     return (ip & 0xFF) == 127;
@@ -88,21 +89,13 @@ static int sock_block(socket_t *s, int want, uint64_t deadline) {
     return 0;
 }
 
-static bool port_taken_locked(uint16_t port) {
+// tcp and udp ports are separate things
+static bool port_taken_locked(int type, uint16_t port) {
     for (socket_t *s = bound; s; s = s->next) {
-        if (s->local_port == port)
+        if (s->type == type && s->local_port == port)
             return true;
     }
-    return udp_port_listening(port);
-}
-
-bool socket_port_used(uint16_t port) {
-    unsigned long flags = irq_push();
-    spinlock_acquire(&sock_lock);
-    bool used = port_taken_locked(port);
-    spinlock_release(&sock_lock);
-    irq_restore(flags);
-    return used;
+    return type == SOCK_DGRAM && udp_port_listening(port);
 }
 
 static int bind_locked(socket_t *s, uint32_t ip, uint16_t port) {
@@ -110,16 +103,17 @@ static int bind_locked(socket_t *s, uint32_t ip, uint16_t port) {
         return -EINVAL;
 
     if (!port) {
+        // rfc 6056, a random place to start so the next port isnt something to guess
         int range = SOCK_PORT_LAST - SOCK_PORT_FIRST + 1;
+        int start = (int)(random_u32() % (uint32_t)range);
         for (int i = 0; i < range && !port; i++) {
-            uint16_t p = next_port;
-            next_port  = next_port == SOCK_PORT_LAST ? SOCK_PORT_FIRST : next_port + 1;
-            if (!port_taken_locked(p))
+            uint16_t p = (uint16_t)(SOCK_PORT_FIRST + (start + i) % range);
+            if (!port_taken_locked(s->type, p))
                 port = p;
         }
         if (!port)
             return -EADDRINUSE;
-    } else if (port_taken_locked(port)) {
+    } else if (port_taken_locked(s->type, port)) {
         return -EADDRINUSE;
     }
 
@@ -206,8 +200,26 @@ int socket_disconnect(socket_t *s) {
     return 0;
 }
 
+int socket_listen(socket_t *s, int backlog) {
+    if (s->type != SOCK_STREAM)
+        return -EOPNOTSUPP;
+    int err = autobind(s);
+    if (err)
+        return err;
+    return tcp_listen(s->tcb, s->local_ip, s->local_port, backlog);
+}
+
+int socket_shutdown(socket_t *s, int how) {
+    if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR)
+        return -EINVAL;
+    if (s->type != SOCK_STREAM)
+        return 0;
+    return tcp_shutdown(s->tcb, how != SHUT_WR, how != SHUT_RD);
+}
+
 static long stream_send(socket_t *s, const void *buf, size_t len, int flags, bool user) {
-    uint8_t *bounce = user ? kmalloc(len < SOCK_CHUNK ? len : SOCK_CHUNK) : NULL;
+    uint64_t deadline = s->sndtimeo_ms ? sched_deadline_ms(s->sndtimeo_ms) : 0;
+    uint8_t *bounce   = user ? kmalloc(len < SOCK_CHUNK ? len : SOCK_CHUNK) : NULL;
     if (user && !bounce && len)
         return -ENOMEM;
 
@@ -234,7 +246,7 @@ static long stream_send(socket_t *s, const void *buf, size_t len, int flags, boo
             err = r;
             break;
         }
-        err = sock_block(s, POLLOUT, 0);
+        err = sock_block(s, POLLOUT, deadline);
         if (err)
             break;
     }
@@ -245,17 +257,31 @@ static long stream_send(socket_t *s, const void *buf, size_t len, int flags, boo
 
 static long stream_recv(socket_t *s, void *buf, size_t len, int flags, bool user) {
     uint64_t deadline = s->rcvtimeo_ms ? sched_deadline_ms(s->rcvtimeo_ms) : 0;
-    if (len > SOCK_CHUNK && user)
-        len = SOCK_CHUNK;
+    bool     peek     = (flags & MSG_PEEK) != 0;
+    bool     noblock  = s->nonblock || (flags & MSG_DONTWAIT);
+    bool     all      = (flags & MSG_WAITALL) && !peek && !noblock;
+    size_t   chunk    = user && len > SOCK_CHUNK ? SOCK_CHUNK : len;
 
-    uint8_t *bounce = user ? kmalloc(len ? len : 1) : NULL;
+    uint8_t *bounce = user ? kmalloc(chunk ? chunk : 1) : NULL;
     if (user && !bounce)
         return -ENOMEM;
 
-    long r;
+    size_t done = 0;
+    long   r    = 0;
     for (;;) {
-        r = tcp_recv(s->tcb, user ? bounce : buf, len, (flags & MSG_PEEK) != 0);
-        if (r != -EAGAIN || s->nonblock || (flags & MSG_DONTWAIT))
+        size_t want = len - done < chunk ? len - done : chunk;
+        r = tcp_recv(s->tcb, user ? bounce : (uint8_t *)buf + done, want, peek);
+        if (r > 0) {
+            if (user && sock_copy_out((uint8_t *)buf + done, bounce, (size_t)r, true) != 0) {
+                r = -EFAULT;
+                break;
+            }
+            done += (size_t)r;
+            if (!all || done == len)
+                break;
+            continue;
+        }
+        if (r != -EAGAIN || noblock)
             break;
         int err = sock_block(s, POLLIN, deadline);
         if (err) {
@@ -264,15 +290,13 @@ static long stream_recv(socket_t *s, void *buf, size_t len, int flags, bool user
         }
     }
 
-    if (r > 0 && user && sock_copy_out(buf, bounce, (size_t)r, true) != 0)
-        r = -EFAULT;
     kfree(bounce);
-    return r;
+    return done ? (long)done : r;
 }
 
-static long sock_send(socket_t *s, const void *buf, size_t len, bool to_given, uint32_t ip, uint16_t port, bool user) {
+static long sock_send(socket_t *s, const void *buf, size_t len, int flags, bool to_given, uint32_t ip, uint16_t port, bool user) {
     if (s->type == SOCK_STREAM)
-        return to_given ? -EISCONN : stream_send(s, buf, len, 0, user);
+        return to_given ? -EISCONN : stream_send(s, buf, len, flags, user);
 
     if (len > UDP_MAX_PAYLOAD)
         return -EMSGSIZE;
@@ -381,8 +405,7 @@ static long sock_recv(socket_t *s, void *buf, size_t len, int flags, uint32_t *i
 }
 
 long socket_sendto(socket_t *s, const void *user_buf, size_t len, int flags, bool to_given, uint32_t ip, uint16_t port) {
-    (void)flags;
-    return sock_send(s, user_buf, len, to_given, ip, port, true);
+    return sock_send(s, user_buf, len, flags, to_given, ip, port, true);
 }
 
 long socket_recvfrom(socket_t *s, void *user_buf, size_t len, int flags, uint32_t *ip, uint16_t *port) {
@@ -390,8 +413,19 @@ long socket_recvfrom(socket_t *s, void *user_buf, size_t len, int flags, uint32_
 }
 
 void socket_name(socket_t *s, bool peer, uint32_t *ip, uint16_t *port) {
-    *ip   = peer ? s->remote_ip : s->local_ip;
-    *port = peer ? s->remote_port : s->local_port;
+    uint32_t local_ip = s->local_ip, remote_ip = s->remote_ip;
+    uint16_t local_port = s->local_port, remote_port = s->remote_port;
+
+    if (s->tcb) {
+        tcp_endpoints(s->tcb, &local_ip, &local_port, &remote_ip, &remote_port);
+    } else if (!local_ip && s->connected) {
+        // bound to any, the route picks what actually goes out
+        netif_t *nif = ipv4_route(remote_ip);
+        local_ip = nif ? ipv4_source(nif, remote_ip) : 0;
+    }
+
+    *ip   = peer ? remote_ip : local_ip;
+    *port = peer ? remote_port : local_port;
 }
 
 int socket_setopt(socket_t *s, int level, int name, const void *val, size_t len) {
@@ -413,36 +447,76 @@ int socket_setopt(socket_t *s, int level, int name, const void *val, size_t len)
                 s->rcvtimeo_ms = (uint64_t)tv.sec * 1000 + (uint64_t)tv.usec / 1000;
                 return 0;
             }
-            // nothing here to size or time out, taken so callers dont give up
-            case SO_SNDTIMEO:
+            case SO_SNDTIMEO: {
+                sock_timeval_t tv;
+                if (len < sizeof(tv))
+                    return -EINVAL;
+                memcpy(&tv, val, sizeof(tv));
+                if (tv.sec < 0 || tv.usec < 0)
+                    return -EINVAL;
+                s->sndtimeo_ms = (uint64_t)tv.sec * 1000 + (uint64_t)tv.usec / 1000;
+                return 0;
+            }
+            case SO_KEEPALIVE:
+                if (s->tcb)
+                    tcp_set_keepalive(s->tcb, on != 0);
+                return 0;
+            case SO_LINGER: {
+                sock_linger_t l;
+                if (len < sizeof(l))
+                    return -EINVAL;
+                memcpy(&l, val, sizeof(l));
+                s->abort_close = l.on && !l.secs;
+                return 0;
+            }
+            // the buffers are one fixed size, taken so callers dont give up
+            case SO_REUSEPORT:
             case SO_SNDBUF:
             case SO_RCVBUF:
-            case SO_KEEPALIVE:
                 return 0;
             default:
                 return -ENOPROTOOPT;
         }
     }
-    if (level == IPPROTO_IP && (name == IP_TOS || name == IP_MULTICAST_LOOP))
+    if (level == IPPROTO_IP && (name == IP_TOS || name == IP_TTL_OPT || name == IP_MULTICAST_LOOP))
         return 0;
-    // segments go out as soon as theres data anyway
-    if (level == IPPROTO_TCP && name == TCP_NODELAY)
-        return 0;
+    if (level == IPPROTO_TCP && s->tcb)
+        return tcp_setopt(s->tcb, name, on);
     return -ENOPROTOOPT;
 }
 
 int socket_getopt(socket_t *s, int level, int name, void *val, size_t *len) {
+    int out;
+    if (level == IPPROTO_TCP && s->tcb) {
+        int err = tcp_getopt(s->tcb, name, &out);
+        if (err)
+            return err;
+        if (*len < sizeof(int))
+            return -EINVAL;
+        memcpy(val, &out, sizeof(int));
+        *len = sizeof(int);
+        return 0;
+    }
     if (level != SOL_SOCKET)
         return -ENOPROTOOPT;
 
-    int out;
     switch (name) {
+        case SO_LINGER: {
+            sock_linger_t l = { .on = s->abort_close, .secs = 0 };
+            if (*len < sizeof(l))
+                return -EINVAL;
+            memcpy(val, &l, sizeof(l));
+            *len = sizeof(l);
+            return 0;
+        }
         case SO_TYPE:      out = s->type; break;
         case SO_ERROR:     out = s->type == SOCK_STREAM && s->tcb ? -tcp_take_error(s->tcb) : 0; break;
         case SO_REUSEADDR: out = s->reuse; break;
         case SO_BROADCAST: out = s->broadcast; break;
-        case SO_RCVBUF:    out = SOCK_RX_MAX * SOCK_DGRAM_MAX; break;
-        case SO_SNDBUF:    out = SOCK_DGRAM_MAX; break;
+        case SO_KEEPALIVE: out = s->tcb ? tcp_get_keepalive(s->tcb) : 0; break;
+        case SO_ACCEPTCONN: out = s->tcb ? tcp_is_listening(s->tcb) : 0; break;
+        case SO_RCVBUF:    out = s->tcb ? TCP_RX_BUF : SOCK_RX_MAX * SOCK_DGRAM_MAX; break;
+        case SO_SNDBUF:    out = s->tcb ? TCP_TX_BUF : SOCK_DGRAM_MAX; break;
         default:           return -ENOPROTOOPT;
     }
     if (*len < sizeof(int))
@@ -512,7 +586,7 @@ static long sock_read_inode(INode_t *inode, void *out, size_t size, size_t offse
 
 static long sock_write_inode(INode_t *inode, const void *in, size_t size, size_t offset) {
     (void)offset;
-    return sock_send(inode->internal_data, in, size, false, 0, 0, false);
+    return sock_send(inode->internal_data, in, size, 0, false, 0, 0, false);
 }
 
 static int sock_ioctl(INode_t *inode, unsigned long request, void *arg) {
@@ -599,15 +673,8 @@ int sockaddr_to_user(void *user_addr, uint32_t *user_len, uint32_t ip, uint16_t 
     return 0;
 }
 
-int socket_create(int domain, int type, int protocol) {
-    int kind = type & SOCK_TYPE_MASK;
-    if (domain != AF_INET)
-        return -EAFNOSUPPORT;
-    if (kind != SOCK_DGRAM && kind != SOCK_STREAM)
-        return -EPROTONOSUPPORT;
-    if (protocol != 0 && protocol != (kind == SOCK_STREAM ? IPPROTO_TCP : IPPROTO_UDP))
-        return -EPROTONOSUPPORT;
-
+// the socket and the file around it, no tcb and no fd yet
+static socket_t *sock_alloc(int kind, bool nonblock, file_t **file) {
     socket_t *s     = kmalloc(sizeof(socket_t));
     INode_t  *inode = kmalloc(sizeof(INode_t));
     file_t   *f     = kmalloc(sizeof(file_t));
@@ -615,20 +682,14 @@ int socket_create(int domain, int type, int protocol) {
         kfree(s);
         kfree(inode);
         kfree(f);
-        return -ENOMEM;
+        return NULL;
     }
 
     memset(s, 0, sizeof(*s));
     memset(inode, 0, sizeof(*inode));
     memset(f, 0, sizeof(*f));
-    s->nonblock = (type & SOCK_NONBLOCK) != 0;
+    s->nonblock = nonblock;
     s->type     = kind;
-    if (kind == SOCK_STREAM && !(s->tcb = tcp_create(&s->wait))) {
-        kfree(s);
-        kfree(inode);
-        kfree(f);
-        return -ENOMEM;
-    }
 
     inode->type          = INODE_DEVICE;
     inode->ops           = &sock_ops;
@@ -640,14 +701,76 @@ int socket_create(int domain, int type, int protocol) {
     f->flags  = O_RDWR;
     f->shared = 1;
 
-    int fd = vfs_install(f);
-    if (fd < 0) {
-        if (s->tcb)
-            tcp_detach(s->tcb);
-        kfree(s);
-        kfree(inode);
-        kfree(f);
+    *file = f;
+    return s;
+}
+
+static void sock_free(socket_t *s, file_t *f) {
+    if (s->tcb)
+        tcp_detach(s->tcb, true);
+    kfree(f->inode);
+    kfree(f);
+    kfree(s);
+}
+
+int socket_create(int domain, int type, int protocol) {
+    int kind = type & SOCK_TYPE_MASK;
+    if (domain != AF_INET)
+        return -EAFNOSUPPORT;
+    if (kind != SOCK_DGRAM && kind != SOCK_STREAM)
+        return -EPROTONOSUPPORT;
+    if (protocol != 0 && protocol != (kind == SOCK_STREAM ? IPPROTO_TCP : IPPROTO_UDP))
+        return -EPROTONOSUPPORT;
+
+    file_t   *f;
+    socket_t *s = sock_alloc(kind, (type & SOCK_NONBLOCK) != 0, &f);
+    if (!s)
+        return -ENOMEM;
+
+    if (kind == SOCK_STREAM && !(s->tcb = tcp_create(&s->wait))) {
+        sock_free(s, f);
+        return -ENOMEM;
     }
+
+    int fd = vfs_install(f);
+    if (fd < 0)
+        sock_free(s, f);
+    return fd;
+}
+
+int socket_accept(socket_t *s, int flags, uint32_t *ip, uint16_t *port) {
+    if (s->type != SOCK_STREAM)
+        return -EOPNOTSUPP;
+    if (!tcp_is_listening(s->tcb))
+        return -EINVAL;
+
+    uint64_t  deadline = s->rcvtimeo_ms ? sched_deadline_ms(s->rcvtimeo_ms) : 0;
+    file_t   *f;
+    socket_t *n = sock_alloc(SOCK_STREAM, (flags & SOCK_NONBLOCK) != 0, &f);
+    if (!n)
+        return -ENOMEM;
+
+    for (;;) {
+        int err = tcp_accept(s->tcb, &n->wait, &n->tcb);
+        if (!err)
+            break;
+        if (err == -EAGAIN && !s->nonblock)
+            err = sock_block(s, POLLIN, deadline);
+        if (err) {
+            sock_free(n, f);
+            return err;
+        }
+    }
+
+    tcp_endpoints(n->tcb, &n->local_ip, &n->local_port, &n->remote_ip, &n->remote_port);
+    n->connected = true;
+
+    *ip   = n->remote_ip;
+    *port = n->remote_port;
+
+    int fd = vfs_install(f);
+    if (fd < 0)
+        sock_free(n, f);
     return fd;
 }
 
@@ -692,7 +815,7 @@ void socket_file_release(file_t *f) {
         rx = next;
     }
     if (s->tcb)
-        tcp_detach(s->tcb);
+        tcp_detach(s->tcb, s->abort_close);
 
     sched_wait_queue_destroy(&s->wait);
     kfree(f->inode);

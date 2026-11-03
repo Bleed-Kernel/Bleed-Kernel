@@ -100,7 +100,7 @@ clean:
 .PHONY: distclean
 distclean: clean drivers-clean
 	rm -rf $(DISKS) $(DATA_DIR) $(DATA_IMG) $(DATA_SUM) $(NVME_FILES) limine $(USER_BIN_DIR)
-	rm -rf initrd/lib initrd/include $(INITRD_BIN)/*
+	rm -rf initrd/lib initrd/include initrd/etc/ssl $(INITRD_BIN)/*
 	@$(USERPROGS_SH) distclean $(call program_entries,$(ALL_PROGRAMS))
 
 .PHONY: help

@@ -1,3 +1,4 @@
+#include <random/random.h>
 #include <net/ether.h>
 #include <net/arp.h>
 #include <net/ipv4.h>
@@ -9,6 +10,7 @@
 const uint8_t eth_broadcast[ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 void ether_input(netif_t *nif, const void *frame, size_t len) {
+    random_add_timing((uint32_t)len);
     if (len < ETH_HLEN)
         return;
 

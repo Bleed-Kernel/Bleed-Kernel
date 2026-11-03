@@ -1,3 +1,4 @@
+#include <fs/chain_guard.h>
 #include <ACPI/acpi_time.h>
 #include <fs/exfat/exfat.h>
 #include <fs/vfs.h>
@@ -33,6 +34,11 @@ static int exfat_read_bytes(exfat_fs_t *fs, uint32_t lba, size_t off, void *buf,
 static int exfat_write_bytes(exfat_fs_t *fs, uint32_t lba, size_t off, const void *buf, size_t count) {
     uint64_t abs_off = (uint64_t)lba * fs->bytes_per_sector + off;
     return exfat_abs_write(fs, abs_off, buf, count);
+}
+
+// a cluster number off the disk that actually lands in the heap
+static bool exfat_cluster_ok(exfat_fs_t *fs, uint32_t cluster) {
+    return cluster >= EXFAT_FIRST_DATA_CLUSTER && cluster - EXFAT_FIRST_DATA_CLUSTER < fs->cluster_count;
 }
 
 static uint32_t exfat_cluster_to_lba(exfat_fs_t *fs, uint32_t cluster) {
@@ -124,7 +130,7 @@ static uint32_t exfat_file_cluster_at(exfat_inode_t *fi, uint64_t byte_offset) {
     exfat_fs_t *fs  = fi->fs;
     uint32_t    idx = (uint32_t)(byte_offset / fs->bytes_per_cluster);
     if (fi->no_fat_chain)
-        return fi->first_cluster + idx;
+        return exfat_cluster_ok(fs, fi->first_cluster + idx) ? fi->first_cluster + idx : 0;
 
     uint32_t i = 0;
     uint32_t c = fi->first_cluster;
@@ -132,9 +138,11 @@ static uint32_t exfat_file_cluster_at(exfat_inode_t *fi, uint64_t byte_offset) {
         i = fi->hint_index;
         c = fi->hint_cluster;
     }
+    if (idx >= fs->cluster_count)
+        return 0;
     for (; i < idx; i++) {
         c = exfat_read_fat(fs, c);
-        if (c < EXFAT_FIRST_DATA_CLUSTER || c >= EXFAT_CLUSTER_BAD) return 0;
+        if (!exfat_cluster_ok(fs, c)) return 0;
     }
 
     fi->hint_index   = idx;
@@ -210,6 +218,7 @@ typedef struct {
     uint32_t    cluster;
     uint32_t    cluster_index;  // for not fat chain
     uint32_t    offset;
+    chain_guard_t guard;
 } exfat_dir_iter_t;
 
 static void exfat_iter_init(exfat_dir_iter_t *it, exfat_fs_t *fs, uint32_t first_cluster, bool no_fat_chain) {
@@ -219,22 +228,23 @@ static void exfat_iter_init(exfat_dir_iter_t *it, exfat_fs_t *fs, uint32_t first
     it->cluster       = first_cluster;
     it->cluster_index  = 0;
     it->offset        = 0;
+    chain_guard_init(&it->guard, first_cluster);
 }
 
 static bool exfat_iter_next_raw(exfat_dir_iter_t *it, exfat_raw_dentry_t *raw,
                                  uint32_t *out_cluster, uint32_t *out_off) {
     exfat_fs_t *fs = it->fs;
-    if (it->cluster < EXFAT_FIRST_DATA_CLUSTER) return false;
+    if (!exfat_cluster_ok(fs, it->cluster)) return false;
 
     if (it->offset >= fs->bytes_per_cluster) {
+        if (++it->cluster_index >= fs->cluster_count) return false;
         if (it->no_fat_chain) {
-            it->cluster_index++;
             it->cluster = it->first_cluster + it->cluster_index;
         } else {
-            uint32_t next = exfat_read_fat(fs, it->cluster);
-            if (next < EXFAT_FIRST_DATA_CLUSTER || next >= EXFAT_CLUSTER_BAD) return false;
-            it->cluster = next;
+            it->cluster = exfat_read_fat(fs, it->cluster);
+            if (!chain_guard_step(&it->guard, it->cluster)) return false;
         }
+        if (!exfat_cluster_ok(fs, it->cluster)) return false;
         it->offset = 0;
     }
 
@@ -410,7 +420,7 @@ static long exfat_read(INode_t *inode, void *buf, size_t count, size_t offset) {
     size_t read_total  = 0;
     size_t cluster_off = offset % fs->bytes_per_cluster;
 
-    while (read_total < count && cluster >= EXFAT_FIRST_DATA_CLUSTER && cluster < EXFAT_CLUSTER_BAD) {
+    while (read_total < count && exfat_cluster_ok(fs, cluster)) {
         uint32_t lba   = exfat_cluster_to_lba(fs, cluster);
         size_t   avail = fs->bytes_per_cluster - cluster_off;
         size_t   chunk = count - read_total;
@@ -503,7 +513,7 @@ static long exfat_write(INode_t *inode, const void *buf, size_t count, size_t of
     size_t written_total = 0;
     size_t cluster_off    = offset % fs->bytes_per_cluster;
 
-    while (written_total < count && cluster >= EXFAT_FIRST_DATA_CLUSTER && cluster < EXFAT_CLUSTER_BAD) {
+    while (written_total < count && exfat_cluster_ok(fs, cluster)) {
         uint32_t lba   = exfat_cluster_to_lba(fs, cluster);
         size_t   avail = fs->bytes_per_cluster - cluster_off;
         size_t   chunk = count - written_total;
@@ -678,8 +688,10 @@ static int exfat_find_free_run(exfat_inode_t *dirfi, int need, uint32_t *out_clu
 
     uint32_t cluster = dirfi->first_cluster;
     uint32_t prev     = 0;
+    chain_guard_t guard;
+    chain_guard_init(&guard, cluster);
 
-    while (cluster >= EXFAT_FIRST_DATA_CLUSTER && cluster < EXFAT_CLUSTER_BAD) {
+    while (exfat_cluster_ok(fs, cluster)) {
         uint32_t lba = exfat_cluster_to_lba(fs, cluster);
         int run = 0;
 
@@ -701,6 +713,8 @@ static int exfat_find_free_run(exfat_inode_t *dirfi, int need, uint32_t *out_clu
 
         prev    = cluster;
         cluster = exfat_read_fat(fs, cluster);
+        if (!chain_guard_step(&guard, cluster))
+            return -EIO;
     }
 
     uint32_t nc = exfat_alloc_cluster(fs, prev);
@@ -974,6 +988,12 @@ int exfat_mount(INode_t *dev_inode, INode_t **root) {
     }
     if (bs.bytes_per_sector_shift < 9 || bs.bytes_per_sector_shift > 12) {
         serial_printf(LOG_ERROR "exfat: invalid bytes_per_sector_shift %u\n", bs.bytes_per_sector_shift);
+        return -EIO;
+    }
+    if (bs.bytes_per_sector_shift + bs.sectors_per_cluster_shift > 25 || !bs.cluster_count ||
+        bs.first_cluster_of_root_dir < EXFAT_FIRST_DATA_CLUSTER ||
+        bs.first_cluster_of_root_dir - EXFAT_FIRST_DATA_CLUSTER >= bs.cluster_count) {
+        serial_printf(LOG_ERROR "exfat: boot sector geometry doesnt make sense, not mounting\n");
         return -EIO;
     }
     if (bs.number_of_fats == 0 || bs.number_of_fats > 2) {

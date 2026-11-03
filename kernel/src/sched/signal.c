@@ -161,6 +161,8 @@ int signal_set_mask(task_t *task, int how, const sigset_t *set, sigset_t *old) {
     return 0;
 }
 
+#define SIGNAL_RED_ZONE 128
+
 static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) {
     uintptr_t handler = task->sig_handlers[sig];
     uintptr_t restorer = task->sig_restorers[sig];
@@ -172,7 +174,7 @@ static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) 
 
     // whatever stack the task is on, it doesnt have to be the main one. copy_to_user
     // still says no if its not mapped
-    uintptr_t frame_addr = (ctx->rsp - sizeof(sigframe_t)) & ~0xFULL;
+    uintptr_t frame_addr = (ctx->rsp - SIGNAL_RED_ZONE - sizeof(sigframe_t)) & ~0xFULL;
     if (!user_ptr_valid(frame_addr) || !user_ptr_valid(ctx->rsp))
         return -EFAULT;
 

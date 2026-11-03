@@ -52,13 +52,18 @@ enum {
     SYS_EPOLL_PWAIT     = 281,
     SYS_SOCKET          = 41,
     SYS_CONNECT         = 42,
+    SYS_ACCEPT          = 43,
     SYS_SENDTO          = 44,
     SYS_RECVFROM        = 45,
+    SYS_SOCK_SHUTDOWN   = 48,
     SYS_BIND            = 49,
+    SYS_LISTEN          = 50,
     SYS_GETSOCKNAME     = 51,
     SYS_GETPEERNAME     = 52,
     SYS_SETSOCKOPT      = 54,
     SYS_GETSOCKOPT      = 55,
+    SYS_ACCEPT4         = 288,
+    SYS_GETRANDOM       = 318,
 
     // bleed kernel specific system calls
     SYS_YIELD           = 512,
@@ -157,6 +162,11 @@ long sys_poll(uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms);
 long sys_socket(uint64_t domain, uint64_t type, uint64_t protocol);
 long sys_bind(uint64_t fd, uint64_t user_addr, uint64_t len);
 long sys_connect(uint64_t fd, uint64_t user_addr, uint64_t len);
+long sys_listen(uint64_t fd, uint64_t backlog);
+long sys_accept(uint64_t fd, uint64_t user_addr, uint64_t user_len);
+long sys_accept4(uint64_t fd, uint64_t user_addr, uint64_t user_len, uint64_t flags);
+long sys_sock_shutdown(uint64_t fd, uint64_t how);
+long sys_getrandom(uint64_t user_buf, uint64_t len, uint64_t flags);
 long sys_sendto(uint64_t fd, uint64_t user_buf, uint64_t len, uint64_t flags, uint64_t user_addr, uint64_t addr_len);
 long sys_recvfrom(uint64_t fd, uint64_t user_buf, uint64_t len, uint64_t flags, uint64_t user_addr, uint64_t user_addr_len);
 long sys_getsockname(uint64_t fd, uint64_t user_addr, uint64_t user_len);

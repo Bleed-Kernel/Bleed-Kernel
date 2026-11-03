@@ -1,3 +1,4 @@
+#include <fs/chain_guard.h>
 #include <ACPI/acpi_time.h>
 #include <fs/fat32/fat32.h>
 #include <fs/vfs.h>
@@ -28,6 +29,11 @@ static int fat32_write_bytes(fat32_fs_t *fs, uint32_t lba, size_t off,
     size_t abs_off = (size_t)lba * fs->bytes_per_sector + off;
     long r = inode_write(fs->dev, buf, count, abs_off);
     return (r < 0) ? -1 : 0;
+}
+
+// a cluster number off the disk that actually lands in the data area
+static bool fat32_cluster_ok(fat32_fs_t *fs, uint32_t cluster) {
+    return cluster >= 2 && cluster - 2 < fs->total_clusters;
 }
 
 static uint32_t fat32_cluster_to_lba(fat32_fs_t *fs, uint32_t cluster) {
@@ -157,6 +163,7 @@ typedef struct {
     uint32_t    cluster;
     uint32_t    offset;
     uint32_t    abs_index;
+    chain_guard_t guard;
 } fat32_dir_iter_t;
 
 static void fat32_iter_init(fat32_dir_iter_t *it, fat32_fs_t *fs, uint32_t first_cluster) {
@@ -164,16 +171,17 @@ static void fat32_iter_init(fat32_dir_iter_t *it, fat32_fs_t *fs, uint32_t first
     it->cluster   = first_cluster;
     it->offset    = 0;
     it->abs_index = 0;
+    chain_guard_init(&it->guard, first_cluster);
 }
 
 static bool fat32_iter_next_raw(fat32_dir_iter_t *it, fat32_dirent_t *de,
                                  uint32_t *out_cluster, uint32_t *out_off) {
     fat32_fs_t *fs = it->fs;
 
-    while (it->cluster >= 2 && it->cluster < FAT32_CLUSTER_EOC) {
+    while (fat32_cluster_ok(fs, it->cluster)) {
         if (it->offset >= fs->bytes_per_cluster) {
             uint32_t next = fat32_read_fat(fs, it->cluster);
-            if (next >= FAT32_CLUSTER_EOC || next < 2) return false;
+            if (!fat32_cluster_ok(fs, next) || !chain_guard_step(&it->guard, next)) return false;
             it->cluster = next;
             it->offset  = 0;
         }
@@ -298,7 +306,7 @@ static long fat32_read(INode_t *inode, void *buf, size_t count, size_t offset) {
     size_t   read_total  = 0;
     size_t   cluster_off = offset % fs->bytes_per_cluster;
 
-    while (read_total < count && cluster >= 2 && cluster < FAT32_CLUSTER_EOC) {
+    while (read_total < count && fat32_cluster_ok(fs, cluster)) {
         uint32_t lba      = fat32_cluster_to_lba(fs, cluster);
         size_t   avail    = fs->bytes_per_cluster - cluster_off;
         size_t   to_read  = count - read_total;
@@ -382,7 +390,7 @@ static long fat32_write(INode_t *inode, const void *buf, size_t count, size_t of
     size_t written_total = 0;
     size_t cluster_off   = offset % fs->bytes_per_cluster;
 
-    while (written_total < count && cluster >= 2 && cluster < FAT32_CLUSTER_EOC) {
+    while (written_total < count && fat32_cluster_ok(fs, cluster)) {
         uint32_t lba    = fat32_cluster_to_lba(fs, cluster);
         size_t   avail  = fs->bytes_per_cluster - cluster_off;
         size_t   to_write = count - written_total;
@@ -534,7 +542,9 @@ static int fat32_create(INode_t *parent, const char *name, size_t namelen,
     uint32_t cluster = pfi->first_cluster;
     bool     found   = false;
 
-    while (cluster >= 2 && cluster < FAT32_CLUSTER_EOC && !found) {
+    chain_guard_t guard;
+    chain_guard_init(&guard, cluster);
+    while (fat32_cluster_ok(fs, cluster) && !found) {
         uint32_t lba = fat32_cluster_to_lba(fs, cluster);
         for (uint32_t off = 0; off < fs->bytes_per_cluster; off += sizeof(fat32_dirent_t)) {
             fat32_dirent_t de;
@@ -549,6 +559,8 @@ static int fat32_create(INode_t *parent, const char *name, size_t namelen,
         }
         prev_cluster = cluster;
         cluster      = fat32_read_fat(fs, cluster);
+        if (!chain_guard_step(&guard, cluster))
+            return -EIO;
     }
 
     if (!found) {
@@ -817,7 +829,9 @@ int fat32_mount(INode_t *dev_inode, INode_t **root) {
         return -EIO;
     }
 
-    if (bpb.bytes_per_sector == 0 || bpb.sectors_per_cluster == 0 ||
+    if (bpb.bytes_per_sector < 512 || bpb.bytes_per_sector > 4096 ||
+        (bpb.bytes_per_sector & (bpb.bytes_per_sector - 1)) ||
+        bpb.sectors_per_cluster == 0 || (bpb.sectors_per_cluster & (bpb.sectors_per_cluster - 1)) ||
         bpb.num_fats == 0 || bpb.fat_size_32 == 0) {
         serial_printf(LOG_ERROR "fat32: invalid BPB fields\n");
         return -EIO;
@@ -852,6 +866,11 @@ int fat32_mount(INode_t *dev_inode, INode_t **root) {
     }
     uint32_t data_sectors = total_sectors - fs->data_start_lba;
     fs->total_clusters    = data_sectors / bpb.sectors_per_cluster;
+    if (!fat32_cluster_ok(fs, fs->root_cluster)) {
+        serial_printf(LOG_ERROR "fat32: root cluster %u is outside the volume\n", fs->root_cluster);
+        kfree(fs);
+        return -EIO;
+    }
     fat32_read_label(fs, &bpb);
 
     serial_printf(LOG_OK "fat32: mounted - %u clusters, %u B/cluster, root@cluster %u\n",
