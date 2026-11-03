@@ -29,7 +29,8 @@ static fd_table_t *vfs_fd_table_alloc(void) {
     if (!table)
         return NULL;
     memset(table, 0, sizeof(fd_table_t));
-    
+    table->refs = 1;
+
     return table;
 }
 
@@ -91,8 +92,16 @@ static int vfs_fd_install(fd_table_t *table, file_t *f) {
     return -1;
 }
 
+fd_table_t *vfs_fd_table_share(fd_table_t *table) {
+    if (table)
+        table->refs++;
+    return table;
+}
+
 void vfs_fd_table_drop(fd_table_t *table) {
     if (!table)
+        return;
+    if (--table->refs > 0)
         return;
 
     for (int fd = 0; fd < MAX_FDS; fd++) {

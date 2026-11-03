@@ -103,7 +103,7 @@ static void serial_tty_interrupt(void) {
     task_t *picked = NULL;
     itterate_each_task(serial_tty_pick_newest, &picked);
     if (picked)
-        signal_send(picked, SIGINT);
+        signal_send_group(picked, SIGINT);
 }
 
 static uint16_t serial_tty_scancode(char c, uint8_t *keymod) {

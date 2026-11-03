@@ -5,6 +5,7 @@
 #include <drivers/framebuffer/framebuffer.h>
 #include <mm/pmm.h>
 #include <mm/paging.h>
+#include <mm/tlb.h>
 #include <cpu/io.h>
 #include <ansii.h>
 #include <vendor/limine_bootloader/limine.h>
@@ -153,8 +154,11 @@ void paging_map_page_invl(paddr_t cr3, uint64_t paddr, uint64_t vaddr, uint64_t 
             | flags
             | PTE_PRESENT;
 
-    if (invalidate_tlb && (old_entry & PTE_PRESENT))
+    if (invalidate_tlb && (old_entry & PTE_PRESENT)) {
         asm volatile("invlpg (%0)" :: "r"(vaddr) : "memory");
+        if (vaddr < 0x0000800000000000ULL)
+            tlb_shootdown(cr3);
+    }
 }
 
 /// @brief map count physically contiguous pages, walking the tables once per page table
@@ -521,6 +525,8 @@ int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3) {
     int r = paging_clone_walk(parent_cr3, child_cr3, current, &flush);
     if (flush && current)
         paging_switch_address_space(read_cr3());
+    if (flush)
+        tlb_shootdown(parent_cr3);
     return r;
 }
 
@@ -556,6 +562,23 @@ int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_
     (void)cow_unref_page(old_phys);
 
     asm volatile("invlpg (%0)" :: "r"(page) : "memory");
+    tlb_shootdown(task->page_map);
+    return 1;
+}
+
+int paging_fault_resolved(struct task *task, uint64_t fault_addr, uint64_t pf_error) {
+    if (!task)
+        return 0;
+
+    uint64_t *pte = paging_get_page(task->page_map, PAGE_ALIGN_DOWN(fault_addr), 0);
+    if (!pte || !(*pte & PTE_PRESENT) || !(*pte & PTE_USER))
+        return 0;
+    if ((pf_error & 0x2) && !(*pte & PTE_WRITABLE))
+        return 0;
+    if ((pf_error & 0x10) && (*pte & PTE_NX))
+        return 0;
+
+    asm volatile("invlpg (%0)" :: "r"(fault_addr) : "memory");
     return 1;
 }
 

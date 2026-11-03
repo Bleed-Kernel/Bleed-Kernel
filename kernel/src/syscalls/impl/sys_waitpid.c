@@ -21,7 +21,7 @@ static long wait_child(uint64_t pid, int *status) {
         current->wait_target_pid = 0;
         return -ESRCH;
     }
-    if (child->ppid != current->id) {
+    if (child->ppid != current->tgid) {
         current->wait_target_pid = 0;
         return -ECHILD;
     }
@@ -32,13 +32,14 @@ static long wait_child(uint64_t pid, int *status) {
         unsigned long flags = irq_push();
 
         child = sched_get_task(pid);
-        if (!child || child->ppid != current->id) {
+        if (!child || child->ppid != current->tgid) {
             current->wait_target_pid = 0;
             irq_restore(flags);
             return -ECHILD;
         }
 
-        if (child->state == TASK_ZOMBIE) {
+        // a leader thats gone but still has threads running isnt done yet
+        if (child->state == TASK_ZOMBIE && !task_group_alive(child)) {
             uint64_t child_pid = child->id;
             *status = child->exit_signal ? (child->exit_signal & 0x7F) : (child->exit_code & 0xFF) << 8;
             current->wait_target_pid = 0;

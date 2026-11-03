@@ -3,6 +3,7 @@
 #include <mm/kalloc.h>
 #include <mm/paging.h>
 #include <mm/pmm.h>
+#include <mm/tlb.h>
 #include <mm/spinlock.h>
 #include <mm/userspace/mmap.h>
 #include <sched/scheduler.h>
@@ -28,7 +29,7 @@ static int ipc_range_in_alloc_list(task_t *task, uintptr_t addr, size_t pages) {
     if (range_end < addr)
         return 0;
 
-    for (user_alloc_t *alloc = task->alloc_list; alloc; alloc = alloc->next) {
+    for (user_alloc_t *alloc = task->group->alloc_list; alloc; alloc = alloc->next) {
         uintptr_t alloc_start = (uintptr_t)alloc->vaddr;
         uintptr_t alloc_end = alloc_start + alloc->pages * PAGE_SIZE;
         if (addr >= alloc_start && range_end <= alloc_end)
@@ -47,7 +48,7 @@ static int ipc_detach_alloc_range(task_t *task, uintptr_t addr, size_t pages) {
         return -EINVAL;
 
     user_alloc_t *prev = NULL;
-    user_alloc_t *cur = task->alloc_list;
+    user_alloc_t *cur = task->group->alloc_list;
     while (cur) {
         uintptr_t alloc_start = (uintptr_t)cur->vaddr;
         uintptr_t alloc_end = alloc_start + cur->pages * PAGE_SIZE;
@@ -62,7 +63,7 @@ static int ipc_detach_alloc_range(task_t *task, uintptr_t addr, size_t pages) {
             if (prev)
                 prev->next = cur->next;
             else
-                task->alloc_list = cur->next;
+                task->group->alloc_list = cur->next;
             kfree(cur);
             return 0;
         }
@@ -156,10 +157,9 @@ long ipc_send_pages(task_t *sender, uint64_t target_pid, uint64_t src_addr, uint
         return -EINVAL;
 
     task_t *target = sched_get_task(target_pid);
-    if (!target ||
-        target->state == TASK_FREE ||
-        target->state == TASK_DEAD ||
-        target->state == TASK_ZOMBIE)
+    if (target)
+        target = task_ipc_owner(target);
+    if (!target || target->state == TASK_FREE || target->state == TASK_DEAD || !task_group_alive(target))
         return -ESRCH;
     if (target->task_privilege != P_USER || sender->task_privilege != P_USER)
         return -EPERM;
@@ -200,8 +200,9 @@ long ipc_send_pages(task_t *sender, uint64_t target_pid, uint64_t src_addr, uint
         uintptr_t src_page = (uintptr_t)src_addr + i * PAGE_SIZE;
         paging_unmap_page(sender->page_map, src_page);
     }
+    tlb_shootdown(sender->page_map);
 
-    msg->sender_pid = sender->id;
+    msg->sender_pid = sender->tgid;
     msg->pages = pages;
     msg->flags = 0;
     msg->phys_pages = phys_pages;
@@ -227,7 +228,7 @@ long ipc_recv(task_t *receiver, uint64_t user_msg_ptr) {
     ipc_init_lock();
     unsigned long irq_flags = irq_push();
     spinlock_acquire(&ipc_lock);
-    ipc_message_t *msg = ipc_queue_pop(receiver);
+    ipc_message_t *msg = ipc_queue_pop(task_ipc_owner(receiver));
     spinlock_release(&ipc_lock);
     irq_restore(irq_flags);
 

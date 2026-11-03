@@ -70,8 +70,25 @@ typedef enum {
     PRIVILEGE_USER
 } task_privil_t;
 
+struct task;
+
+// what every thread of a process shares
+typedef struct task_group {
+    uint64_t        tgid;
+    uint32_t        refs;           // tasks still pointing here, alive or not
+    uint32_t        live;           // threads that havent exited yet
+    struct task     *leader;        // NULL once its been reaped
+    struct task     *threads;       // through group_next
+    paddr_t         page_map;
+    user_alloc_t    *alloc_list;
+    uint8_t         exiting;        // exit_group or a fatal signal, everyone is on their way out
+    int             exit_code;
+    int             exit_signal;
+} task_group_t;
+
 typedef struct task {
-    uint64_t        id;
+    uint64_t        id;             // the thread, unique
+    uint64_t        tgid;           // the process, what getpid gives back
     uint64_t        ppid;
     uint64_t        pgid;
     uint64_t        sid;
@@ -86,7 +103,9 @@ typedef struct task {
     uint64_t        run_tsc;        // when it was last given the cpu
 
     paddr_t         page_map;
-    user_alloc_t    *alloc_list;
+    task_group_t    *group;
+    struct task     *group_next;
+    uint64_t        clear_child_tid;    // zeroed and futex woken when the thread exits
     user_heap_t     *heap;
     fd_table_t      *fd_table;
 
@@ -197,5 +216,18 @@ void* sched_switch_task(task_t *next_task, void* old_context);
 void* sched_next_context(void* old_context);
 
 void exit(void);
+// just the calling thread, the process goes with the last one
+void thread_exit(void);
+
+// a thread sharing everything with the caller, starting at ctx with rax 0
+task_t *sched_clone_thread(cpu_context_t *ctx, uint64_t stack, uint64_t tls);
+int task_group_alive(task_t *task);
+
+// ipc messages go to the process, they queue on the leader for every thread to read
+static inline task_t *task_ipc_owner(task_t *task) {
+    return task->group && task->group->leader ? task->group->leader : task;
+}
+// drop a tasks hold on its group
+void task_group_put(task_t *task);
 
 extern task_t *task_list_head;

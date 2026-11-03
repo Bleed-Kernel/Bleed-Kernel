@@ -81,6 +81,8 @@ void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
         return sf;
     if (sf->vector == 14 && !(sf->error_code & 0x1) && paging_handle_stack_fault(task, cr2))
         return sf;
+    if (sf->vector == 14 && paging_fault_resolved(task, cr2, sf->error_code))
+        return sf;
 
     // a task with a handler gets to deal with it
     int sig = exception_signal(sf->vector);

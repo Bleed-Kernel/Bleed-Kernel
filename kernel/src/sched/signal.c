@@ -96,11 +96,52 @@ int signal_send(task_t *task, int sig) {
     return 0;
 }
 
+int signal_send_group(task_t *task, int sig) {
+    if (!task)
+        return -ESRCH;
+    if (!valid_signal(sig))
+        return -EINVAL;
+
+    task_group_t *g = task->group;
+    if (!g || !g->threads)
+        return signal_send(task, sig);
+
+    // stopping, continuing and killing a process is done to all of it
+    if (sig == SIGKILL || sig == SIGCONT ||
+        (signal_default_stop(sig) && task->sig_handlers[sig] == SIG_DFL)) {
+        for (task_t *t = g->threads; t; t = t->group_next)
+            signal_send(t, sig);
+        return 0;
+    }
+
+    // otherwise its one thread that isnt blocking it, the leader if it can
+    task_t *pick = NULL;
+    for (task_t *t = g->threads; t; t = t->group_next) {
+        if (t->state == TASK_ZOMBIE || t->state == TASK_DEAD || t->state == TASK_FREE)
+            continue;
+        if (!(t->sig_blocked & sig_bit(sig))) {
+            pick = t;
+            break;
+        }
+        if (!pick)
+            pick = t;
+    }
+
+    return pick ? signal_send(pick, sig) : 0;
+}
+
 int signal_send_pid(uint64_t pid, int sig) {
     task_t *task = sched_get_task(pid);
     if (!task)
         return -ESRCH;
-    return signal_send(task, sig);
+    return signal_send_group(task, sig);
+}
+
+static void signal_copy_action(task_t *task, int sig, const sigaction_t *act) {
+    task->sig_handlers[sig]  = act->handler;
+    task->sig_masks[sig]     = act->mask;
+    task->sig_flags[sig]     = act->flags;
+    task->sig_restorers[sig] = act->restorer;
 }
 
 int signal_set_action(task_t *task, int sig, const sigaction_t *act, sigaction_t *old) {
@@ -122,10 +163,14 @@ int signal_set_action(task_t *task, int sig, const sigaction_t *act, sigaction_t
     if (sig == SIGKILL || sig == SIGSTOP)
         return -EINVAL;
 
-    task->sig_handlers[sig] = act->handler;
-    task->sig_masks[sig] = act->mask;
-    task->sig_flags[sig] = act->flags;
-    task->sig_restorers[sig] = act->restorer;
+    // handlers belong to the process, every thread keeps a copy
+    if (!task->group || !task->group->threads) {
+        signal_copy_action(task, sig, act);
+        return 0;
+    }
+
+    for (task_t *t = task->group->threads; t; t = t->group_next)
+        signal_copy_action(t, sig, act);
     return 0;
 }
 

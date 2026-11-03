@@ -6,7 +6,7 @@ long sys_getpid(void) {
     task_t *task = get_current_task();
     if (!task)
         return -ESRCH;
-    return (long)task->id;
+    return (long)task->tgid;
 }
 
 long sys_getppid(void) {

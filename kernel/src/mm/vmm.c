@@ -4,6 +4,7 @@
 #include <string.h>
 #include <mm/pmm.h>
 #include <mm/paging.h>
+#include <mm/tlb.h>
 #include <mm/vmm.h>
 #include <mm/spinlock.h>
 #include <mm/cow.h>
@@ -179,6 +180,8 @@ void vmm_unmap_pages(vmm_cr3_t cr3, void *virt, size_t page_count) {
     uintptr_t va = PAGE_ALIGN_DOWN((uintptr_t)virt);
     for (size_t i = 0; i < page_count; i++)
         paging_unmap_page(cr3, va + i * PAGE_SIZE);
+    if (va < 0x0000800000000000ULL)
+        tlb_shootdown(cr3);
 }
 
 static void vmm_free_run(paddr_t start, size_t pages) {
@@ -243,6 +246,8 @@ int vmm_unmap_free_pages(vmm_cr3_t cr3, void *virt, size_t page_count) {
     vmm_free_run(run_start, run_pages);
     if (flush_all)
         paging_switch_address_space(read_cr3());
+    if (user)
+        tlb_shootdown(cr3);
     return 0;
 }
 
@@ -262,6 +267,7 @@ int vmm_protect_pages(vmm_cr3_t cr3, void *virt, size_t page_count, uint64_t fla
         *pte = (*pte & keep_mask) | set_flags;
         asm volatile("invlpg (%0)" :: "r"(va + i * PAGE_SIZE) : "memory");
     }
+    tlb_shootdown(cr3);
     return 0;
 }
 

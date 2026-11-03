@@ -39,26 +39,24 @@ static int task_is_live_user(task_t *task) {
         return 0;
     if (task->task_privilege == PRIVILEGE_KERNEL)
         return 0;
-    if (task->state == TASK_FREE || task->state == TASK_DEAD || task->state == TASK_ZOMBIE)
-        return 0;
-    return 1;
+    return task_group_alive(task);
 }
 
 static void kill_children_iter(task_t *task, void *userdata) {
     kill_children_ctx_t *ctx = (kill_children_ctx_t *)userdata;
     if (!ctx || !ctx->root || !task || task == ctx->root)
         return;
-    if (!task_is_live_user(task))
+    if (!task_is_live_user(task) || task->id != task->tgid)
         return;
-    if (task->ppid != ctx->root->id)
+    if (task->ppid != ctx->root->tgid)
         return;
 
-    if (signal_send(task, (int)ctx->signal) == 0)
+    if (signal_send_group(task, (int)ctx->signal) == 0)
         ctx->sent = 1;
 }
 
 static int signal_send_with_dependents(task_t *target, long signal) {
-    int rc = signal_send(target, (int)signal);
+    int rc = signal_send_group(target, (int)signal);
     if (rc < 0)
         return rc;
 
@@ -68,7 +66,7 @@ static int signal_send_with_dependents(task_t *target, long signal) {
     if (target->state == TASK_BLOCKED && target->wait_target_pid > 0) {
         task_t *dep = sched_get_task(target->wait_target_pid);
         if (task_is_live_user(dep))
-            (void)signal_send(dep, (int)signal);
+            (void)signal_send_group(dep, (int)signal);
     }
 
     kill_children_ctx_t cctx = {
@@ -86,13 +84,14 @@ static void kill_iter(task_t *task, void *userdata) {
     if (!task || !ctx || !ctx->sender)
         return;
 
-    if (task->state == TASK_FREE || task->state == TASK_DEAD || task->state == TASK_ZOMBIE)
+    // once per process, through its leader
+    if (task->id != task->tgid || !task_group_alive(task))
         return;
 
     if (task->task_privilege == PRIVILEGE_KERNEL)
         return;
 
-    if (ctx->mode == KILL_MODE_ALL && task == ctx->sender)
+    if (ctx->mode == KILL_MODE_ALL && task->tgid == ctx->sender->tgid)
         return;
 
     if (ctx->mode == KILL_MODE_PGRP && (long)task->pgid != ctx->target_pgid)
@@ -102,7 +101,7 @@ static void kill_iter(task_t *task, void *userdata) {
     if (ctx->signal == 0)
         return;
 
-    if (signal_send(task, (int)ctx->signal) == 0) {
+    if (signal_send_group(task, (int)ctx->signal) == 0) {
         ctx->sent = 1;
     } else {
         ctx->denied = 1;
@@ -119,9 +118,7 @@ long sys_kill(long pid, signal_number_t signal) {
 
     if (pid > 0) {
         task_t *target = sched_get_task((uint64_t)pid);
-        if (!target)
-            return -ESRCH;
-        if (target->state == TASK_FREE || target->state == TASK_DEAD || target->state == TASK_ZOMBIE)
+        if (!target || !task_group_alive(target))
             return -ESRCH;
         if (target->task_privilege == PRIVILEGE_KERNEL)
             return -EPERM;

@@ -87,4 +87,7 @@ int paging_clone_user_space(paddr_t parent_cr3, paddr_t child_cr3);
 int paging_handle_cow_fault(struct task *task, uint64_t fault_addr, uint64_t pf_error);
 int paging_handle_stack_fault(struct task *task, uint64_t fault_addr);
 
+// another thread already fixed the page while this one waited for the bkl, so just go again
+int paging_fault_resolved(struct task *task, uint64_t fault_addr, uint64_t pf_error);
+
 void pat_enable_wc(void);

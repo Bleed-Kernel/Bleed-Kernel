@@ -206,7 +206,7 @@ static void tty_input_listener(const keyboard_event_t *ev) {
         tty_sig_pick_ctx_t ctx = {0};
         itterate_each_task(tty_pick_sigint_target, &ctx);
         if (ctx.picked)
-            signal_send(ctx.picked, SIGINT);
+            signal_send_group(ctx.picked, SIGINT);
 
         if (tty->flags & TTY_ECHO) {
             tty->ops->putchar(tty, '^');
@@ -436,7 +436,7 @@ void tty_task_exit(task_t *task) {
     if (!task) return;
 
     for (tty_t *tty = g_offscreen; tty; tty = tty->next) {
-        if (tty->owner_pid == task->id)
+        if (tty->owner_pid == task->tgid)
             tty_offscreen_destroy(tty);
     }
 }
@@ -499,7 +499,7 @@ static int tty_offscreen_create(uint32_t width, uint32_t height, uint32_t *index
         tty->device.shared        = 1;
         *end                      = tty;
     }
-    tty->owner_pid = task->id;
+    tty->owner_pid = task->tgid;
 
     spinlock_release(&g_offscreen_lock);
     irq_restore(irq);
@@ -704,7 +704,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
         // arg is just yes or no, not a pointer. the window that owns the tty says when it has the focus
         case TTY_IOCTL_SET_ACTIVE: {
             task_t *task = get_current_task();
-            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+            if (!tty->offscreen || !task || tty->owner_pid != task->tgid) return -EPERM;
 
             if (arg)
                 g_active_offscreen = tty;
@@ -715,7 +715,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
 
         case TTY_IOCTL_RESIZE: {
             task_t *task = get_current_task();
-            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+            if (!tty->offscreen || !task || tty->owner_pid != task->tgid) return -EPERM;
 
             tty_create_t size;
             if ((r = tty_arg_in(arg, &size, sizeof(size))) < 0) return r;
@@ -742,14 +742,14 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
 
         case TTY_IOCTL_DESTROY: {
             task_t *task = get_current_task();
-            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+            if (!tty->offscreen || !task || tty->owner_pid != task->tgid) return -EPERM;
             tty_offscreen_destroy(tty);
             return 0;
         }
 
         case TTY_IOCTL_GRAB: {
             task_t *task = get_current_task();
-            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+            if (!tty->offscreen || !task || tty->owner_pid != task->tgid) return -EPERM;
 
             tty_grab_t grab;
             if ((r = tty_arg_in(arg, &grab, sizeof(grab))) < 0) return r;
@@ -796,7 +796,7 @@ int tty_ioctl(INode_t *dev, unsigned long req, void *arg) {
 
         case TTY_IOCTL_GRAB_TEXT: {
             task_t *task = get_current_task();
-            if (!tty->offscreen || !task || tty->owner_pid != task->id) return -EPERM;
+            if (!tty->offscreen || !task || tty->owner_pid != task->tgid) return -EPERM;
 
             tty_text_grab_t grab;
             if ((r = tty_arg_in(arg, &grab, sizeof(grab))) < 0) return r;

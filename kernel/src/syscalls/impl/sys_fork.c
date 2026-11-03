@@ -13,5 +13,6 @@ long sys_fork(void) {
         return -ENOMEM;
     }
 
+    sched_wake_task(child);
     return (long)child->id;
 }

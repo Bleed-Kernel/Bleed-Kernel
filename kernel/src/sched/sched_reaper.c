@@ -104,10 +104,10 @@ void scheduler_reap(void) {
 
             // a task killed before it reached exit() still owns these, exit() NULLs them when it got there first
             vfs_fd_table_drop(task->fd_table);
-            sched_free_alloc_list(task->alloc_list);
 
+            // the address space goes with the last thread of the process
             ipc_task_cleanup(task);
-            paging_destroy_address_space(task->page_map);
+            task_group_put(task);
             kfree(task);
 
             reaped++;

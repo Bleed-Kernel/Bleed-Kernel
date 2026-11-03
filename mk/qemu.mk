@@ -32,8 +32,14 @@ QEMU_HOST_MAC := -accel tcg,thread=multi,tb-size=1024 -cpu max -display $(QEMU_M
 
 ifeq ($(UNAME_S)$(UNAME_M),Darwinarm64)
 QEMU_HOST := $(QEMU_HOST_MAC)
+else ifeq ($(UNAME_S),Darwin)
+QEMU_HOST := -accel hvf -accel tcg,thread=multi -cpu host -display $(QEMU_MAC_DISPLAY)
+else ifneq ($(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)),)
+QEMU_HOST := -accel whpx -accel tcg,thread=multi -cpu max -display sdl
+else ifeq ($(shell [ -w /dev/kvm ] && echo y),y)
+QEMU_HOST := -accel kvm -cpu host -display sdl
 else
-QEMU_HOST := --enable-kvm -display sdl
+QEMU_HOST := -accel tcg,thread=multi -cpu max -display sdl
 endif
 
 ifeq ($(USB),xhci)

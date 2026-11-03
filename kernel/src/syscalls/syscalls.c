@@ -84,7 +84,14 @@ SyscallHandler syscall_handlers[] = {
     SYSCALL(SYS_GETSOCKNAME, sys_getsockname),
     SYSCALL(SYS_GETPEERNAME, sys_getpeername),
     SYSCALL(SYS_SETSOCKOPT, sys_setsockopt),
-    SYSCALL(SYS_GETSOCKOPT, sys_getsockopt)
+    SYSCALL(SYS_GETSOCKOPT, sys_getsockopt),
+    SYSCALL(SYS_CLONE, sys_clone),
+    SYSCALL(SYS_GETTID, sys_gettid),
+    SYSCALL(SYS_TKILL, sys_tkill),
+    SYSCALL(SYS_FUTEX, sys_futex),
+    SYSCALL(SYS_SET_TID_ADDRESS, sys_set_tid_address),
+    SYSCALL(SYS_EXIT_GROUP, sys_exit_group),
+    SYSCALL(SYS_TGKILL, sys_tgkill)
 };
 #pragma GCC diagnostic pop
 

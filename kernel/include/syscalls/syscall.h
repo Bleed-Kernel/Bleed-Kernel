@@ -64,6 +64,13 @@ enum {
     SYS_GETSOCKOPT      = 55,
     SYS_ACCEPT4         = 288,
     SYS_GETRANDOM       = 318,
+    SYS_CLONE           = 56,
+    SYS_GETTID          = 186,
+    SYS_TKILL           = 200,
+    SYS_FUTEX           = 202,
+    SYS_SET_TID_ADDRESS = 218,
+    SYS_EXIT_GROUP      = 231,
+    SYS_TGKILL          = 234,
 
     // bleed kernel specific system calls
     SYS_YIELD           = 512,
@@ -101,6 +108,13 @@ int sys_mkdir(const char *user_path, int mode);
 
 int sys_close(int fd);
 void sys_exit(int code);
+void sys_exit_group(int code);
+long sys_clone(uint64_t flags, uint64_t stack, uint64_t parent_tid, uint64_t child_tid, uint64_t tls);
+long sys_futex(uint64_t uaddr, uint64_t op, uint64_t val, uint64_t timeout, uint64_t uaddr2, uint64_t val3);
+long sys_gettid(void);
+long sys_set_tid_address(uint64_t tidptr);
+long sys_tkill(long tid, long sig);
+long sys_tgkill(long tgid, long tid, long sig);
 void sys_yield(void);
 uint64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg);
 

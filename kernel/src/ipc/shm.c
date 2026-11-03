@@ -90,7 +90,7 @@ long shm_create(task_t *task, uint64_t pages) {
 
     uint64_t id    = shm_next_id++;
     obj->id        = id;
-    obj->owner_pid = task->id;
+    obj->owner_pid = task->tgid;
     obj->pages     = (size_t)pages;
     obj->frames    = frames;
     obj->next      = shm_objects;
@@ -186,7 +186,7 @@ long shm_destroy(task_t *task, uint64_t id) {
     spinlock_acquire(&shm_lock);
 
     shm_object_t *obj = shm_find(id);
-    if (!obj || obj->owner_pid != task->id) {
+    if (!obj || obj->owner_pid != task->tgid) {
         spinlock_release(&shm_lock);
         irq_restore(flags);
         return obj ? -EPERM : -ENOENT;
@@ -212,7 +212,7 @@ void shm_task_cleanup(task_t *task) {
         spinlock_acquire(&shm_lock);
 
         shm_object_t *obj = shm_objects;
-        while (obj && obj->owner_pid != task->id)
+        while (obj && obj->owner_pid != task->tgid)
             obj = obj->next;
         if (obj)
             shm_unlink(obj);

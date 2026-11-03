@@ -10,7 +10,7 @@
 
 static short poll_one(task_t *task, const pollfd_t *p) {
     if (p->fd == POLL_FD_IPC)
-        return (task->ipc_head && (p->events & POLLIN)) ? POLLIN : 0;
+        return (task_ipc_owner(task)->ipc_head && (p->events & POLLIN)) ? POLLIN : 0;
 
     // any other negative fd is skipped, thats how a caller mutes an entry
     if (p->fd < 0)
@@ -32,7 +32,7 @@ static short poll_one(task_t *task, const pollfd_t *p) {
 // what to sleep on till this one might be ready, NULL if nothing ever changes it
 static wait_queue_t *poll_queue(task_t *task, const pollfd_t *p) {
     if (p->fd == POLL_FD_IPC)
-        return &task->ipc_wait;
+        return &task_ipc_owner(task)->ipc_wait;
     if (p->fd < 0 || p->fd >= MAX_FDS || !task->fd_table)
         return NULL;
 

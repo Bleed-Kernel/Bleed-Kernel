@@ -48,7 +48,7 @@ static audio_stream_t *stream_new(audio_device_t *dev, task_t *task) {
 
         memset(s, 0, sizeof(*s));
         s->used      = true;
-        s->pid       = task->id;
+        s->pid       = task->tgid;
         s->ring_phys = ring;
         s->ring      = paddr_to_vaddr(ring);
 
@@ -264,7 +264,7 @@ static long audio_write(INode_t *inode, const void *buf, size_t len, size_t offs
 
         unsigned long flags;
         audio_lock(dev, &flags);
-        audio_stream_t *s = stream_of(dev, task->id);
+        audio_stream_t *s = stream_of(dev, task->tgid);
         if (!s)
             s = stream_new(dev, task);
         if (!s) {
@@ -315,7 +315,7 @@ static int audio_poll(INode_t *inode) {
     if (!dev || !task)
         return POLLERR;
 
-    audio_stream_t *s = stream_of(dev, task->id);
+    audio_stream_t *s = stream_of(dev, task->tgid);
     if (!s)
         return POLLOUT;
     return stream_writable(dev, s) >= dev->period_bytes ? POLLOUT : 0;
@@ -449,7 +449,7 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
 
     unsigned long flags;
     audio_lock(dev, &flags);
-    audio_stream_t *s = stream_of(dev, task->id);
+    audio_stream_t *s = stream_of(dev, task->tgid);
 
     if (request == AUDIO_IOC_ACQUIRE) {
         if (!arg) {
@@ -516,7 +516,7 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
                 break;
             }
             for (int i = 0; i < AUDIO_STREAMS; i++) {
-                if (dev->streams[i].used && dev->streams[i].pid != task->id) {
+                if (dev->streams[i].used && dev->streams[i].pid != task->tgid) {
                     r = -EBUSY;
                     break;
                 }
@@ -553,7 +553,7 @@ void audio_device_task_exit(task_t *task) {
     // the mapping goes with the address space
     unsigned long flags;
     audio_lock(audio_dev, &flags);
-    audio_stream_t *s = stream_of(audio_dev, task->id);
+    audio_stream_t *s = stream_of(audio_dev, task->tgid);
     if (s)
         stream_free(audio_dev, s);
     audio_unlock(audio_dev, flags);

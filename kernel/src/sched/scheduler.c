@@ -14,6 +14,8 @@
 #include <ACPI/acpi_apic.h>
 #include <cpu/percpu.h>
 #include <sched/bkl.h>
+#include <mm/tlb.h>
+#include <sched/signal.h>
 
 #include "priv_scheduler.h"
 
@@ -249,7 +251,9 @@ void* sched_switch_task(task_t *next_task, void* old_context) {
     uint64_t rsp0   = ((uint64_t)next_task->kernel_stack + KERNEL_STACK_SIZE) & ~0xFULL;
     cpu->tss.rsp0   = rsp0;
     cpu->kernel_rsp = rsp0;
+    __atomic_store_n(&cpu->active_cr3, next_task->page_map, __ATOMIC_RELEASE);
     paging_switch_address_space(next_task->page_map);
+    __atomic_store_n(&cpu->tlb_flush, 0, __ATOMIC_RELEASE);
 
     fpu_switch(prev, next_task);
     wrmsr(MSR_FS_BASE, next_task->fs_base);
@@ -315,6 +319,14 @@ void sched_return(cpu_context_t *context) {
         spinlock_release(&rq_lock);
     }
 
+    // a thread that never makes a syscall still has to hear about a kill
+    task_t *cur = cpu->current;
+    if ((context->cs & 3) && cur && !cur->sig_active_frame &&
+        (cur->sig_pending & ~cur->sig_blocked)) {
+        bkl_lock();
+        signal_deliver_pending(cur, context);
+    }
+
     bkl_resume(context);
 }
 
@@ -346,6 +358,8 @@ cpu_context_t *sched_tick(cpu_context_t *context) {
 
 // entry for the reschedule ipi, someone queued work and this cpu looked like it had none
 cpu_context_t *sched_resched_handle(cpu_context_t *context) {
+    tlb_flush_check();
+
     task_t *task = cpu_current();
     if (!task)
         return context;

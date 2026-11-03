@@ -38,6 +38,8 @@ typedef struct cpu {
     uint64_t        switch_tsc;
     uint64_t        busy_tsc;
     uint64_t        idle_tsc;
+    volatile uint64_t active_cr3;   // address space of the task its running, for tlb shootdowns
+    volatile uint8_t  tlb_flush;    // someone changed active_cr3 under us, reload before going on
 
     gdt_t           gdt __attribute__((aligned(16)));
     tss_t           tss __attribute__((aligned(16)));

@@ -26,6 +26,19 @@ long sys_chdir(const char *user_path) {
 
     int r = vfs_chdir(kbuf);
     kfree(kbuf);
+    if (r != 0 || !caller->group)
+        return r;
+
+    // the working directory is the processes, not the threads
+    for (task_t *t = caller->group->threads; t; t = t->group_next) {
+        if (t == caller || !t->current_directory || !caller->current_directory)
+            continue;
+
+        INode_t *old = t->current_directory;
+        t->current_directory = caller->current_directory;
+        t->current_directory->shared++;
+        vfs_drop(old);
+    }
 
     return r;
 }

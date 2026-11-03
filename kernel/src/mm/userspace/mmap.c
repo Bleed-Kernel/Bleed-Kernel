@@ -9,12 +9,12 @@
 static user_alloc_t *alloc_list_unlink(task_t *task, void *addr) {
     user_alloc_t *prev = NULL;
 
-    for (user_alloc_t *a = task->alloc_list; a; prev = a, a = a->next) {
+    for (user_alloc_t *a = task->group->alloc_list; a; prev = a, a = a->next) {
         if (a->vaddr != addr)
             continue;
 
         if (prev) prev->next = a->next;
-        else task->alloc_list = a->next;
+        else task->group->alloc_list = a->next;
         return a;
     }
     return NULL;
@@ -27,10 +27,10 @@ void* task_mmap_reserve(task_t* task, size_t pages) {
 
     uintptr_t base = USER_MMAP_BASE;
     user_alloc_t* prev = NULL;
-    user_alloc_t* next = task->alloc_list;
+    user_alloc_t* next = task->group->alloc_list;
 
     // the list is kept sorted so the first gap that fits is the lowest one
-    for (user_alloc_t* a = task->alloc_list; a; prev = a, a = a->next) {
+    for (user_alloc_t* a = task->group->alloc_list; a; prev = a, a = a->next) {
         size_t gap_pages = ((uintptr_t)a->vaddr - base) / PAGE_SIZE;
 
         if (gap_pages >= pages) {
@@ -58,7 +58,7 @@ void* task_mmap_reserve(task_t* task, size_t pages) {
     if (prev)
         prev->next = alloc;
     else
-        task->alloc_list = alloc;
+        task->group->alloc_list = alloc;
 
     return (void*)base;
 }
@@ -75,7 +75,7 @@ void* task_mmap_reserve_at(task_t* task, uintptr_t addr, size_t pages) {
 
     uintptr_t end = addr + pages * PAGE_SIZE;
     user_alloc_t* prev = NULL;
-    user_alloc_t* next = task->alloc_list;
+    user_alloc_t* next = task->group->alloc_list;
 
     for (; next; prev = next, next = next->next) {
         uintptr_t a_start = (uintptr_t)next->vaddr;
@@ -98,7 +98,7 @@ void* task_mmap_reserve_at(task_t* task, uintptr_t addr, size_t pages) {
     if (prev)
         prev->next = alloc;
     else
-        task->alloc_list = alloc;
+        task->group->alloc_list = alloc;
 
     return (void*)addr;
 }

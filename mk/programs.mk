@@ -3,7 +3,7 @@ COREUTILS := cat echo write ioctl grep cp mv rm mkdir rmdir touch ls stat du df 
              hexdump dd uname whoami hostname date kill which ps audioout
 
 ALL_PROGRAMS := verdict doom quake2 specseek taskv tvi tetris crime-scene uikit-demo about \
-                cabinet exhibit playback $(COREUTILS) tcc fastfetch curl halflife hlds
+                cabinet exhibit playback $(COREUTILS) tcc fastfetch curl halflife hlds threadtest
 
 GH := https://github.com/Bleed-Kernel
 
@@ -24,6 +24,7 @@ $(foreach p,$(COREUTILS),$(eval REPO_$(p) := $(GH)/Bleed-Coreutils))
 REPO_tcc         := $(GH)/Bleed-TCC
 REPO_fastfetch   := $(GH)/Bleed-Fastfetch
 REPO_curl        := $(GH)/Bleed-Curl
+REPO_threadtest  := $(GH)/Bleed-Firefox
 
 REPO_halflife    := $(GH)/Bleed-HalfLife
 REPO_hlds        := $(GH)/Bleed-HalfLife

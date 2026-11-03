@@ -64,16 +64,16 @@ static int fb_ioctl(INode_t *inode, unsigned long request, void *arg) {
 
     // one owner at a time, it always gets cleared on exit so a set pid is a live task
     if (request == FB_IOC_ACQUIRE) {
-        if (fb_owner_pid && fb_owner_pid != task->id)
+        if (fb_owner_pid && fb_owner_pid != task->tgid)
             return -EBUSY;
-        fb_owner_pid = task->id;
-        if (fb_hold_pid == task->id) fb_hold_pid = 0;
+        fb_owner_pid = task->tgid;
+        if (fb_hold_pid == task->tgid) fb_hold_pid = 0;
         tty_set_graphics(1);
         return 0;
     }
 
     if (request == FB_IOC_RELEASE) {
-        if (fb_owner_pid != task->id)
+        if (fb_owner_pid != task->tgid)
             return -EPERM;
         fb_owner_pid = 0;
         if (!fb_hold_pid) tty_set_graphics(0);
@@ -114,12 +114,12 @@ static struct INodeOps fb_inode_ops = {
 
 void fb_device_task_exit(task_t *task) {
     if (!task) return;
-    bool was_holding = (fb_owner_pid && fb_owner_pid == task->id) ||
-                       (fb_hold_pid && fb_hold_pid == task->id);
+    bool was_holding = (fb_owner_pid && fb_owner_pid == task->tgid) ||
+                       (fb_hold_pid && fb_hold_pid == task->tgid);
     if (!was_holding) return;
 
-    if (fb_owner_pid == task->id) fb_owner_pid = 0;
-    if (fb_hold_pid == task->id)  fb_hold_pid  = 0;
+    if (fb_owner_pid == task->tgid) fb_owner_pid = 0;
+    if (fb_hold_pid == task->tgid)  fb_hold_pid  = 0;
     if (!fb_owner_pid && !fb_hold_pid) tty_set_graphics(0);
     kbd_device_wake();
 }
@@ -135,7 +135,7 @@ void fb_device_hold_until(task_t *task) {
         if (!fb_owner_pid) tty_set_graphics(0);
         return;
     }
-    fb_hold_pid = task->id;
+    fb_hold_pid = task->tgid;
 }
 
 void fb_device_init(void) {

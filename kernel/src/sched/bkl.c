@@ -1,5 +1,6 @@
 #include <sched/bkl.h>
 #include <cpu/percpu.h>
+#include <mm/tlb.h>
 
 // tickets, first come first served
 static volatile uint32_t bkl_next;
@@ -11,8 +12,11 @@ void bkl_lock(void) {
         return;
 
     uint32_t ticket = __atomic_fetch_add(&bkl_next, 1, __ATOMIC_RELAXED);
-    while (__atomic_load_n(&bkl_serving, __ATOMIC_ACQUIRE) != ticket)
+    while (__atomic_load_n(&bkl_serving, __ATOMIC_ACQUIRE) != ticket) {
+        // the holder might be waiting on us to flush, and our irqs are off
+        tlb_flush_check();
         asm volatile("pause");
+    }
     cpu->bkl_held = 1;
 }
 

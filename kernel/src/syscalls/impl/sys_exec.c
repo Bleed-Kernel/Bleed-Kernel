@@ -5,6 +5,7 @@
 #include <mm/paging.h>
 #include <mm/pmm.h>
 #include <mm/kalloc.h>
+#include <mm/spinlock.h>
 #include <mm/userspace/mmap.h>
 #include <user/errno.h>
 #include <drivers/serial/serial.h>
@@ -12,6 +13,8 @@
 #include <string.h>
 #include <cpu/features/fpu.h>
 #include <cpu/msrs.h>
+#include <cpu/percpu.h>
+#include <sched/signal.h>
 
 static const char *exec_display_name(const char *path, const char *inode_name) {
     if (inode_name && inode_name[0] != '\0')
@@ -27,6 +30,43 @@ static const char *exec_display_name(const char *path, const char *inode_name) {
     }
 
     return (*base) ? base : "Unknown Program";
+}
+
+// the process stays but its other threads dont
+static long exec_drop_threads(task_t *task) {
+    task_group_t *g = task->group;
+    if (!g || g->live <= 1)
+        return 0;
+    if (g->exiting)
+        return -EINTR;
+    if (task != g->leader)
+        return -EBUSY;
+
+    // with exiting set the kills are plain thread exits, not the whole process going
+    g->exiting = 1;
+    for (task_t *t = g->threads; t; t = t->group_next) {
+        if (t != task)
+            signal_send(t, SIGKILL);
+    }
+
+    // and off every cpu, the old address space is about to be freed under them
+    for (;;) {
+        int busy = g->live > 1;
+        for (task_t *t = g->threads; t && !busy; t = t->group_next) {
+            if (t != task && t->on_cpu)
+                busy = 1;
+        }
+        if (!busy)
+            break;
+
+        // a real sleep, a yield with nothing else to run comes straight back still holding the bkl
+        unsigned long flags = irq_push();
+        sched_sleep_until(sched_deadline_ms(1));
+        irq_restore(flags);
+    }
+
+    g->exiting = 0;
+    return 0;
 }
 
 // has_env 0 is the old 3 argument exec, which gets the default environment
@@ -64,7 +104,7 @@ static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t use
     long ret = -EIO;
     paddr_t new_cr3 = 0;
     paddr_t old_cr3 = task->page_map;
-    user_alloc_t *old_alloc_list = task->alloc_list;
+    user_alloc_t *old_alloc_list = task->group->alloc_list;
     user_heap_t *old_heap = task->heap;
     user_heap_t *new_heap = NULL;
     INode_t *file = elf_get_from_path(kpath);
@@ -73,6 +113,14 @@ static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t use
         ret = -ENOENT;
         goto done;
     }
+
+    // sleeping in there points task->context at a kernel frame, the one to change is the syscalls
+    cpu_context_t *syscall_ctx = task->context;
+    ret = exec_drop_threads(task);
+    task->context = syscall_ctx;
+    if (ret < 0)
+        goto done;
+    ret = -EIO;
 
     new_cr3 = paging_create_address_space();
     if (!new_cr3) {
@@ -96,7 +144,8 @@ static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t use
     new_heap->end = new_heap->current;
 
     task->page_map = new_cr3;
-    task->alloc_list = NULL;
+    task->group->page_map = new_cr3;
+    task->group->alloc_list = NULL;
     task->heap = new_heap;
 
     // everything the rollback cant put back is saved first, a failed exec has to
@@ -130,8 +179,10 @@ static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t use
     memset(task->sig_restorers, 0, sizeof(task->sig_restorers));
     fpu_task_reset(task);
     task->fs_base = 0;
+    task->clear_child_tid = 0;
     wrmsr(MSR_FS_BASE, 0);
 
+    __atomic_store_n(&this_cpu()->active_cr3, new_cr3, __ATOMIC_RELEASE);
     paging_switch_address_space(new_cr3);
 
     const char *new_name = exec_display_name(kpath, file->name);
@@ -150,7 +201,8 @@ static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t use
 
 rollback_task:
     task->page_map = old_cr3;
-    task->alloc_list = old_alloc_list;
+    task->group->page_map = old_cr3;
+    task->group->alloc_list = old_alloc_list;
     task->heap = old_heap;
     if (new_heap) {
         kfree(new_heap);

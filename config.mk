@@ -1,7 +1,7 @@
 DEFAULT_PROFILE ?= DEV
 
 PROGRAMS_MINIMAL := verdict crime-scene about cabinet taskv tvi coreutils
-PROGRAMS_DEV     := $(PROGRAMS_MINIMAL) doom quake2 tetris specseek uikit-demo exhibit playback tcc curl halflife hlds
+PROGRAMS_DEV     := $(PROGRAMS_MINIMAL) doom quake2 tetris specseek uikit-demo exhibit playback tcc curl halflife hlds threadtest
 PROGRAMS_RELEASE := $(PROGRAMS_DEV) fastfetch
 
 USERPROG_SRC ?= ..

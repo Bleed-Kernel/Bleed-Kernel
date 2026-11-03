@@ -61,7 +61,7 @@ static long kbd_read(INode_t *inode, void *buf, size_t len, size_t offset) {
     if (current && current->task_privilege == PRIVILEGE_USER) {
         // whoever has the screen has the keys
         uint64_t screen = fb_device_screen_pid();
-        if (screen && screen != current->id) {
+        if (screen && screen != current->tgid) {
             spinlock_release(&kbd->lock);
             sched_wait_queue(&kbd->wait, sched_deadline_ms(KBD_BACKGROUND_SLEEP_MS));
             irq_restore(irq);
@@ -183,7 +183,7 @@ static int kbd_poll(INode_t *inode) {
 
     task_t  *current = get_current_task();
     uint64_t screen  = fb_device_screen_pid();
-    if (current && current->task_privilege == PRIVILEGE_USER && screen && screen != current->id)
+    if (current && current->task_privilege == PRIVILEGE_USER && screen && screen != current->tgid)
         return 0;
     return kbd->head != kbd->tail ? POLLIN : 0;
 }
