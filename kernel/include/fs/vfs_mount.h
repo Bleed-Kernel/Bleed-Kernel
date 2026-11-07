@@ -4,7 +4,7 @@
 
 #include <fs/vfs.h>
 
-#define VFS_MAX_MOUNTS 16
+#define VFS_MAX_MOUNTS 32
 
 typedef enum {
     FS_TYPE_UNKNOWN = -1,
@@ -17,6 +17,8 @@ typedef enum {
 
 // mount block device at path, creates it if it doesnt exist. 0 or a negative errno
 int vfs_mount(const char *path, INode_t *dev_inode);
+
+int vfs_mount_disk(const char *path, const char *disk, const char *sep);
 
 // mount the filesystem image in the file at file_path, like a loop device.
 int vfs_mount_file(const char *path, const char *file_path);

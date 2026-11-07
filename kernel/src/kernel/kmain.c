@@ -249,30 +249,22 @@ void init_devices(){
     tty_device_init();
 }
 
-// the first partition, or the whole disk if its got the iso written straight to it
-static bool mount_drive(const char *path, const char *disk, const char *part){
-    INode_t *whole = device_get_by_name(disk);
-    if (whole && iso9660_probe(whole))
-        return vfs_mount(path, whole) == 0;
-    return vfs_mount(path, device_get_by_name(part)) == 0;
-}
-
 void init_block_devices(){
     BLOG_INFO("Block Devices");
-    if (mount_drive("/mnt/ide", "hda", "hda1"))
+    if (vfs_mount_disk("/mnt/ide", "hda", ""))
         BLOG_OK("\t - IDE Device Ready");
 
     // the disc we booted off, a PACKAGE iso has data.img on it
     if (vfs_mount("/mnt/cdrom", device_get_by_name("cd0")) == 0)
         BLOG_OK("\t - CD Drive Ready");
 
-    if (mount_drive("/mnt/sata", "sda", "sda1"))
+    if (vfs_mount_disk("/mnt/sata", "sda", ""))
         BLOG_OK("\t - SATA Device Ready");
 
-    if (mount_drive("/mnt/nvme", "nvme0", "nvme0p1"))
+    if (vfs_mount_disk("/mnt/nvme", "nvme0", "p"))
         BLOG_OK("\t - NVMe Device Ready");
 
-    if (mount_drive("/mnt/emmc", "mmc0", "mmc0p1"))
+    if (vfs_mount_disk("/mnt/emmc", "mmc0", "p"))
         BLOG_OK("\t - eMMC Device Ready");
 
     data_image_scan();

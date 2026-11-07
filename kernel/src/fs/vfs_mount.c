@@ -6,6 +6,7 @@
 #include <fs/ext4/ext4.h>
 #include <fs/exfat/exfat.h>
 #include <fs/iso9660/iso9660.h>
+#include <fs/partition.h>
 #include <mm/kalloc.h>
 #include <mm/spinlock.h>
 #include <string.h>
@@ -529,4 +530,38 @@ int vfs_mount_label(int index, char *out, size_t size) {
     while (n && out[n - 1] == ' ')
         out[--n] = '\0';
     return n ? 0 : -ENOENT;
+}
+
+int vfs_mount_disk(const char *path, const char *disk, const char *sep) {
+    INode_t *whole = device_get_by_name(disk);
+    if (!whole) return 0;
+
+    if (iso9660_probe(whole))
+        return vfs_mount(path, whole) == 0;
+
+    int  mounted = 0;
+    bool parts   = false;
+    for (int n = 1; n <= PART_GPT_MAX_ENTRIES; n++) {
+        char name[32];
+        snprintf(name, sizeof(name), "%s%s%d", disk, sep, n);
+        INode_t *dev = device_get_by_name(name);
+        if (!dev) continue;
+        parts = true;
+
+        // the first one we can read gets the drives own name, the rest are told apart by number
+        char at[MOUNT_PATH_MAX];
+        if (mounted == 0)
+            snprintf(at, sizeof(at), "%s", path);
+        else
+            snprintf(at, sizeof(at), "%sp%d", path, n);
+
+        if (vfs_mount(at, dev) == 0) {
+            serial_printf(LOG_OK "vfs_mount: /dev/%s at %s\n", name, at);
+            mounted++;
+        }
+    }
+
+    if (!parts && vfs_mount(path, whole) == 0)
+        mounted++;
+    return mounted;
 }
