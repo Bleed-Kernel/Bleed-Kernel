@@ -1,7 +1,9 @@
 #include <fs/vfs_mount.h>
+#include <fs/packages.h>
 #include <fs/vfs.h>
 #include <fs/fat32/fat32.h>
 #include <fs/ext2/ext2.h>
+#include <fs/ext4/ext4.h>
 #include <fs/exfat/exfat.h>
 #include <fs/iso9660/iso9660.h>
 #include <mm/kalloc.h>
@@ -56,6 +58,10 @@ static fs_type_t vfs_detect_fs(INode_t *dev_inode) {
     uint16_t ext2_magic = 0;
     if (inode_read(dev_inode, &ext2_magic, sizeof(ext2_magic),
                    PROBE_EXT2_MAGIC_OFF) == (long)sizeof(ext2_magic)) {
+        if (ext2_magic == PROBE_EXT2_MAGIC && ext4_probe(dev_inode)) {
+            serial_printf(LOG_INFO "vfs_mount: detected ext4\n");
+            return FS_TYPE_EXT4;
+        }
         if (ext2_magic == PROBE_EXT2_MAGIC) {
             serial_printf(LOG_INFO "vfs_mount: detected ext2\n");
             return FS_TYPE_EXT2;
@@ -90,6 +96,7 @@ static const char *fs_type_name(fs_type_t type) {
         case FS_TYPE_FAT32:   return "fat32";
         case FS_TYPE_EXFAT:   return "exfat";
         case FS_TYPE_ISO9660: return "iso9660";
+        case FS_TYPE_EXT4:    return "ext4";
         default:              return "unknown";
     }
 }
@@ -168,6 +175,7 @@ int vfs_mount(const char *path, INode_t *dev_inode) {
         case FS_TYPE_EXT2:    r = ext2_mount   (dev_inode, &fs_root); break;
         case FS_TYPE_EXFAT:   r = exfat_mount  (dev_inode, &fs_root); break;
         case FS_TYPE_ISO9660: r = iso9660_mount(dev_inode, &fs_root); break;
+        case FS_TYPE_EXT4:    r = ext4_mount   (dev_inode, &fs_root); break;
         default: break;
     }
 
@@ -313,6 +321,7 @@ int vfs_umount(const char *path) {
         if (owned)
             vfs_drop(owned);
         serial_printf(LOG_OK "vfs_umount: unmounted %s\n", path);
+        packages_scan();
         return 0;
     }
     spinlock_release(&mount_lock);
@@ -367,6 +376,9 @@ int vfs_umount_device(INode_t *dev_inode) {
         }
         if (slot < 0) {
             spinlock_release(&mount_lock);
+            // programs that were on it arent anymore
+            if (count)
+                packages_scan();
             return count;
         }
 

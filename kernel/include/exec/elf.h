@@ -13,9 +13,11 @@ typedef int64_t  ELF64_SLONG;
 #define PT_NULL     0
 #define PT_LOAD     1
 #define PT_INTERP   3
+#define PT_PHDR     6
 
 #define ET_REL      1
 #define ET_EXEC     2
+#define ET_DYN      3
 
 #define EM_X86_64   62
 

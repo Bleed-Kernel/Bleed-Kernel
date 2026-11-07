@@ -55,3 +55,6 @@
 [submodule "kernel/src/drivers/KMD-SOF"]
 	path = kernel/src/drivers/KMD-SOF
 	url = https://github.com/Bleed-Kernel/KMD-SOF
+[submodule "kernel/src/drivers/KMD-EMMC"]
+	path = kernel/src/drivers/KMD-EMMC
+	url = https://github.com/Bleed-Kernel/KMD-EMMC

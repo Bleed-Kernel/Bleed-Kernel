@@ -64,13 +64,14 @@ static int ipc_detach_alloc_range(task_t *task, uintptr_t addr, size_t pages) {
                 prev->next = cur->next;
             else
                 task->group->alloc_list = cur->next;
-            kfree(cur);
+            user_alloc_free(cur);
             return 0;
         }
 
         if (addr == alloc_start) {
-            cur->vaddr = (void *)range_end;
-            cur->pages -= pages;
+            cur->vaddr   = (void *)range_end;
+            cur->pages  -= pages;
+            cur->offset += pages * PAGE_SIZE;
             return 0;
         }
 
@@ -86,9 +87,11 @@ static int ipc_detach_alloc_range(task_t *task, uintptr_t addr, size_t pages) {
         if (!tail)
             return -ENOMEM;
 
-        tail->vaddr = (void *)range_end;
-        tail->pages = suffix_pages;
-        tail->next = cur->next;
+        user_alloc_copy(tail, cur);
+        tail->vaddr  = (void *)range_end;
+        tail->pages  = suffix_pages;
+        tail->offset = cur->offset + (range_end - alloc_start);
+        tail->next   = cur->next;
 
         cur->pages = prefix_pages;
         cur->next = tail;
@@ -133,6 +136,8 @@ static int ipc_validate_send_range(task_t *sender, uintptr_t src_addr, size_t pa
     for (size_t i = 0; i < pages; i++) {
         uintptr_t page = src_addr + i * PAGE_SIZE;
         uint64_t *pte = paging_get_page(sender->page_map, page, 0);
+        if ((!pte || !(*pte & PTE_PRESENT)) && task_fault_in(sender, page, 1, 0))
+            pte = paging_get_page(sender->page_map, page, 0);
         if (!pte || !(*pte & PTE_PRESENT) || !(*pte & PTE_USER))
             return -EFAULT;
 

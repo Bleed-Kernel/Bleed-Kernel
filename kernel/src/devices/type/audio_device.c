@@ -25,18 +25,38 @@ static void audio_unlock(audio_device_t *dev, unsigned long flags) {
 
 // streams
 
-// lock held
-static audio_stream_t *stream_of(audio_device_t *dev, uint64_t pid) {
+// lock held. a ring stream belongs to the open file it was acquired through
+static audio_stream_t *stream_of(audio_device_t *dev, uint64_t pid, void *file) {
     for (int i = 0; i < AUDIO_STREAMS; i++) {
         audio_stream_t *s = &dev->streams[i];
-        if (s->used && s->pid == pid)
+        if (!s->used)
+            continue;
+        if (file ? s->file == file : (!s->file && s->pid == pid))
             return s;
     }
     return NULL;
 }
 
+// lock held. the raised priority stays while any of a programs streams is left
+static bool pid_has_stream(audio_device_t *dev, uint64_t pid) {
+    for (int i = 0; i < AUDIO_STREAMS; i++) {
+        if (dev->streams[i].used && dev->streams[i].pid == pid)
+            return true;
+    }
+    return false;
+}
+
 // lock held
-static audio_stream_t *stream_new(audio_device_t *dev, task_t *task) {
+static audio_stream_t *stream_new(audio_device_t *dev, task_t *task, void *file) {
+    // a second stream keeps what the first saw, prio_base is already raised by then
+    uint8_t prio = task->prio_base;
+    for (int i = 0; i < AUDIO_STREAMS; i++) {
+        if (dev->streams[i].used && dev->streams[i].pid == task->tgid) {
+            prio = dev->streams[i].prio;
+            break;
+        }
+    }
+
     for (int i = 0; i < AUDIO_STREAMS; i++) {
         audio_stream_t *s = &dev->streams[i];
         if (s->used)
@@ -49,11 +69,12 @@ static audio_stream_t *stream_new(audio_device_t *dev, task_t *task) {
         memset(s, 0, sizeof(*s));
         s->used      = true;
         s->pid       = task->tgid;
+        s->file      = file;
         s->ring_phys = ring;
         s->ring      = paddr_to_vaddr(ring);
 
         // whoever is making noise gets in ahead of whatever isnt
-        s->prio = task->prio_base;
+        s->prio = prio;
         if (task->prio_base > PRIO_AUDIO)
             task->prio_base = PRIO_AUDIO;
         return s;
@@ -264,9 +285,9 @@ static long audio_write(INode_t *inode, const void *buf, size_t len, size_t offs
 
         unsigned long flags;
         audio_lock(dev, &flags);
-        audio_stream_t *s = stream_of(dev, task->tgid);
+        audio_stream_t *s = stream_of(dev, task->tgid, NULL);
         if (!s)
-            s = stream_new(dev, task);
+            s = stream_new(dev, task, NULL);
         if (!s) {
             audio_unlock(dev, flags);
             return copied ? (long)copied : -EBUSY;
@@ -315,7 +336,7 @@ static int audio_poll(INode_t *inode) {
     if (!dev || !task)
         return POLLERR;
 
-    audio_stream_t *s = stream_of(dev, task->tgid);
+    audio_stream_t *s = stream_of(dev, task->tgid, NULL);
     if (!s)
         return POLLOUT;
     return stream_writable(dev, s) >= dev->period_bytes ? POLLOUT : 0;
@@ -362,7 +383,7 @@ static uint64_t first_pid(audio_device_t *dev) {
     return 0;
 }
 
-static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
+static int audio_ioctl_on(INode_t *inode, void *file, unsigned long request, void *arg) {
     audio_device_t *dev  = inode->internal_data;
     task_t         *task = get_current_task();
     if (!dev)
@@ -449,7 +470,7 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
 
     unsigned long flags;
     audio_lock(dev, &flags);
-    audio_stream_t *s = stream_of(dev, task->tgid);
+    audio_stream_t *s = stream_of(dev, task->tgid, file);
 
     if (request == AUDIO_IOC_ACQUIRE) {
         if (!arg) {
@@ -457,7 +478,7 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
             return -EFAULT;
         }
         if (!s)
-            s = stream_new(dev, task);
+            s = stream_new(dev, task, file);
         if (!s) {
             audio_unlock(dev, flags);
             return -EBUSY;
@@ -479,9 +500,11 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
     int r = 0;
     switch (request) {
         case AUDIO_IOC_RELEASE: {
-            uintptr_t map   = s->map;
-            task->prio_base = s->prio;
+            uintptr_t map  = s->map;
+            uint8_t   prio = s->prio;
             stream_free(dev, s);
+            if (!pid_has_stream(dev, task->tgid))
+                task->prio_base = prio;
             audio_unlock(dev, flags);
             if (map)
                 task_munmap(task, (void *)map);
@@ -539,9 +562,49 @@ static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
     return r;
 }
 
+static int audio_ioctl(INode_t *inode, unsigned long request, void *arg) {
+    return audio_ioctl_on(inode, NULL, request, arg);
+}
+
+static int audio_file_ioctl(file_t *file, unsigned long request, void *arg) {
+    return audio_ioctl_on(file->inode, file, request, arg);
+}
+
+// closing the file is the same as RELEASE. at exit the streams already went with the process
+static void audio_file_release(file_t *file) {
+    audio_device_t *dev  = file->inode ? file->inode->internal_data : NULL;
+    task_t         *task = get_current_task();
+    if (!dev)
+        return;
+
+    unsigned long flags;
+    audio_lock(dev, &flags);
+    audio_stream_t *s = stream_of(dev, 0, file);
+    if (!s) {
+        audio_unlock(dev, flags);
+        return;
+    }
+    uintptr_t map  = s->map;
+    uint64_t  pid  = s->pid;
+    uint8_t   prio = s->prio;
+    stream_free(dev, s);
+    bool      more = pid_has_stream(dev, pid);
+    audio_unlock(dev, flags);
+
+    // the ring is mapped into whoever acquired it, only they can have it taken back
+    if (task && task->tgid == pid) {
+        if (!more)
+            task->prio_base = prio;
+        if (map)
+            task_munmap(task, (void *)map);
+    }
+}
+
 static struct INodeOps audio_inode_ops = {
-    .write      = audio_write,
-    .ioctl      = audio_ioctl,
+    .write        = audio_write,
+    .ioctl        = audio_ioctl,
+    .file_ioctl   = audio_file_ioctl,
+    .file_release = audio_file_release,
     .poll       = audio_poll,
     .wait_queue = audio_wait_queue,
 };
@@ -553,9 +616,11 @@ void audio_device_task_exit(task_t *task) {
     // the mapping goes with the address space
     unsigned long flags;
     audio_lock(audio_dev, &flags);
-    audio_stream_t *s = stream_of(audio_dev, task->tgid);
-    if (s)
-        stream_free(audio_dev, s);
+    for (int i = 0; i < AUDIO_STREAMS; i++) {
+        audio_stream_t *s = &audio_dev->streams[i];
+        if (s->used && s->pid == task->tgid)
+            stream_free(audio_dev, s);
+    }
     audio_unlock(audio_dev, flags);
 }
 

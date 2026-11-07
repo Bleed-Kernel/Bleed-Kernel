@@ -12,6 +12,7 @@ int signal_set_mask(task_t *task, int how, const sigset_t *set, sigset_t *old);
 
 int signal_handle_sigreturn(task_t *task, cpu_context_t *ctx);
 
-int signal_deliver_fault(task_t *task, cpu_context_t *ctx, int sig);
+int signal_deliver_fault(task_t *task, cpu_context_t *ctx, int sig, int code, uint64_t addr);
+int signal_set_altstack(task_t *task, const user_stack_t *ss, user_stack_t *old, uintptr_t sp);
 void signal_deliver_pending(task_t *task, cpu_context_t *ctx);
 int signal_should_interrupt(task_t *task);

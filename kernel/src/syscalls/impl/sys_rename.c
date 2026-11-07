@@ -4,7 +4,7 @@
 #include <user/errno.h>
 #include <user/user_copy.h>
 
-int sys_rename(const char *user_oldpath, const char *user_newpath) {
+long sys_rename(const char *user_oldpath, const char *user_newpath) {
     if (!user_oldpath || !user_newpath)
         return -EFAULT;
 

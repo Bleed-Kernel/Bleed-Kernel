@@ -6,7 +6,7 @@
 #include <user/errno.h>
 #include <user/user_copy.h>
 
-int sys_umount2(const char *user_target, int flags) {
+long sys_umount2(const char *user_target, int flags) {
     (void)flags;
 
     if (!user_target)

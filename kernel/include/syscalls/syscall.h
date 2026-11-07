@@ -21,10 +21,27 @@ enum {
     SYS_MMAP            = 9,
     SYS_MPROTECT        = 10,
     SYS_MUNMAP          = 11,
+    SYS_MADVISE         = 28,
     SYS_IOCTL           = 16,
     SYS_DUP             = 32,
     SYS_DUP2            = 33,
+    SYS_FCNTL           = 72,
+    SYS_FTRUNCATE       = 77,
+    SYS_CLOCK_GETTIME   = 228,
+    SYS_CLOCK_GETRES    = 229,
+    SYS_TIMERFD_CREATE  = 283,
+    SYS_EVENTFD         = 284,
+    SYS_TIMERFD_SETTIME = 286,
+    SYS_TIMERFD_GETTIME = 287,
+    SYS_EVENTFD2        = 290,
+    SYS_MEMFD_CREATE    = 319,
+    SYS_UNLINKAT        = 263,
+    SYS_SYMLINKAT       = 266,
+    SYS_READLINKAT      = 267,
+    SYS_EPOLL_CREATE    = 213,
+    SYS_DUP3            = 292,
     SYS_FORK            = 57,
+    SYS_VFORK           = 58,
     SYS_EXEC            = 59,
     SYS_EXIT            = 60,
     SYS_WAITPID         = 61,
@@ -55,11 +72,14 @@ enum {
     SYS_ACCEPT          = 43,
     SYS_SENDTO          = 44,
     SYS_RECVFROM        = 45,
+    SYS_SENDMSG         = 46,
+    SYS_RECVMSG         = 47,
     SYS_SOCK_SHUTDOWN   = 48,
     SYS_BIND            = 49,
     SYS_LISTEN          = 50,
     SYS_GETSOCKNAME     = 51,
     SYS_GETPEERNAME     = 52,
+    SYS_SOCKETPAIR      = 53,
     SYS_SETSOCKOPT      = 54,
     SYS_GETSOCKOPT      = 55,
     SYS_ACCEPT4         = 288,
@@ -71,6 +91,10 @@ enum {
     SYS_SET_TID_ADDRESS = 218,
     SYS_EXIT_GROUP      = 231,
     SYS_TGKILL          = 234,
+    SYS_SIGALTSTACK     = 131,
+    SYS_SCHED_GETAFFINITY = 204,
+    SYS_PREAD64         = 17,
+    SYS_PWRITE64        = 18,
 
     // bleed kernel specific system calls
     SYS_YIELD           = 512,
@@ -92,21 +116,55 @@ enum {
     SYS_MOUNTINFO       = 530,
     SYS_MOUNTLABEL      = 531,
     SYS_CPUINFO         = 532,
+    SYS_WAITOPTS        = 533,
+    SYS_CLOCKPARAMS     = 534,
 };
 
-int sys_open(char *path_str, int flags);
-int sys_openat(int dirfd, char *path_str, int flags);
+// what a process needs to read the clock itself off the tsc, the same sums the kernel does.
+// counts then counts_per_sec and fs_per_tick
+typedef struct user_clock_params {
+    uint64_t tsc_base;
+    uint64_t counts_base;
+    uint64_t mult;
+    uint64_t counts_per_sec;
+    uint64_t fs_per_tick;
+    uint64_t realtime_base_ns;
+} user_clock_params_t;
+
+long sys_clockparams(uint64_t user_params);
+
+long sys_waitopts(uint64_t pid, int *user_status, uint64_t options);
+long sys_open(char *path_str, int flags);
+long sys_openat(int dirfd, char *path_str, int flags);
 uint64_t sys_read(uint64_t fd, uint64_t user_buf, uint64_t len);
 uint64_t sys_write(uint64_t fd, uint64_t buf, uint64_t len);
-long sys_pipe(uint64_t user_fds_ptr);
+long sys_pipe(uint64_t user_fds_ptr, uint64_t flags);
+long sys_fcntl(uint64_t fd, uint64_t cmd, uint64_t arg);
+long sys_dup3(uint64_t oldfd, uint64_t newfd, uint64_t flags);
+long sys_memfd_create(uint64_t user_name, uint64_t flags);
+long sys_vfork(void);
+long sys_unlinkat(int dirfd, const char *user_path, int flags);
+long sys_clock_gettime(uint64_t clock, uint64_t user_ts);
+long sys_clock_getres(uint64_t clock, uint64_t user_ts);
+long sys_eventfd(uint64_t initval);
+long sys_eventfd2(uint64_t initval, uint64_t flags);
+long sys_timerfd_create(uint64_t clock, uint64_t flags);
+long sys_timerfd_settime(uint64_t fd, uint64_t flags, uint64_t user_new, uint64_t user_old);
+long sys_timerfd_gettime(uint64_t fd, uint64_t user_cur);
+long sys_ftruncate(uint64_t fd, uint64_t length);
+long sys_epoll_create(uint64_t size);
+long sys_epoll_create1(uint64_t flags);
+long sys_epoll_ctl(uint64_t epfd, uint64_t op, uint64_t fd, uint64_t user_event);
+long sys_epoll_wait(uint64_t epfd, uint64_t user_events, uint64_t max, uint64_t timeout);
+long sys_epoll_pwait(uint64_t epfd, uint64_t user_events, uint64_t max, uint64_t timeout, uint64_t user_mask, uint64_t mask_size);
 long sys_dup2(uint64_t oldfd, uint64_t newfd);
 long sys_dup(uint64_t oldfd);
 long sys_readdir(int fd, size_t index, dirent_t *user_ent);
-int sys_unlink(const char *user_path);
-int sys_rename(const char *user_oldpath, const char *user_newpath);
-int sys_mkdir(const char *user_path, int mode);
+long sys_unlink(const char *user_path);
+long sys_rename(const char *user_oldpath, const char *user_newpath);
+long sys_mkdir(const char *user_path, int mode);
 
-int sys_close(int fd);
+long sys_close(int fd);
 void sys_exit(int code);
 void sys_exit_group(int code);
 long sys_clone(uint64_t flags, uint64_t stack, uint64_t parent_tid, uint64_t child_tid, uint64_t tls);
@@ -134,13 +192,17 @@ void sys_reboot(void);
 
 long sys_kill(long pid, signal_number_t signal);
 long sys_sigaction(int sig, const sigaction_t *user_act, sigaction_t *user_old);
+long sys_sigaltstack(const user_stack_t *user_ss, user_stack_t *user_old);
+long sys_sched_getaffinity(uint64_t pid, uint64_t len, uint8_t *user_mask);
+long sys_pread64(uint64_t fd, uint64_t user_buf, uint64_t len, uint64_t offset);
+long sys_pwrite64(uint64_t fd, uint64_t user_buf, uint64_t len, uint64_t offset);
 long sys_sigprocmask(int how, const sigset_t *user_set, sigset_t *user_old);
 long sys_sigreturn(void);
 long sys_getpid(void);
 long sys_getppid(void);
 
-int sys_meminfo(system_memory_info_t *user_buf);
-int sys_time(struct rtc_time* user_buf);
+long sys_meminfo(system_memory_info_t *user_buf);
+long sys_time(struct rtc_time* user_buf);
 
 long sys_chdir(const char *user_path);
 long sys_getcwd(char *buf, long size);
@@ -153,10 +215,14 @@ long sys_cpuinfo(uint64_t index, uint64_t user_info_ptr);
 
 long sys_stat(const char *user_path, user_stat_t *user_buf);
 long sys_fstatat(int dirfd, const char *user_path, user_stat_t *user_buf, int flags);
+long sys_lstat(const char *user_path, user_stat_t *user_buf);
+long sys_symlinkat(const char *user_target, int dirfd, const char *user_path);
+long sys_readlinkat(int dirfd, const char *user_path, char *user_buf, uint64_t size);
 long sys_fstat(int fd, user_stat_t *user_buf);
 
-void *sys_mmap(size_t pages);
-void sys_munmap(void *addr);
+long sys_mmap(uint64_t addr, uint64_t len, uint64_t prot, uint64_t flags, uint64_t fd, uint64_t off);
+long sys_munmap(uint64_t addr, uint64_t len);
+long sys_madvise(uint64_t addr, uint64_t len, uint64_t advice);
 
 void* sys_mapfb(size_t *out_pages);
 
@@ -174,6 +240,9 @@ long sys_shm_destroy(uint64_t id);
 long sys_poll(uint64_t user_fds_ptr, uint64_t nfds, long timeout_ms);
 
 long sys_socket(uint64_t domain, uint64_t type, uint64_t protocol);
+long sys_socketpair(uint64_t domain, uint64_t type, uint64_t protocol, uint64_t user_fds);
+long sys_sendmsg(uint64_t fd, uint64_t user_msg, uint64_t flags);
+long sys_recvmsg(uint64_t fd, uint64_t user_msg, uint64_t flags);
 long sys_bind(uint64_t fd, uint64_t user_addr, uint64_t len);
 long sys_connect(uint64_t fd, uint64_t user_addr, uint64_t len);
 long sys_listen(uint64_t fd, uint64_t backlog);

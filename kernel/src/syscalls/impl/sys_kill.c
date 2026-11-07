@@ -63,7 +63,7 @@ static int signal_send_with_dependents(task_t *target, long signal) {
     if (!signal_is_terminating(signal))
         return 0;
 
-    if (target->state == TASK_BLOCKED && target->wait_target_pid > 0) {
+    if (target->state == TASK_BLOCKED && target->wait_target_pid > 0 && target->wait_target_pid != WAIT_ANY_CHILD) {
         task_t *dep = sched_get_task(target->wait_target_pid);
         if (task_is_live_user(dep))
             (void)signal_send_group(dep, (int)signal);

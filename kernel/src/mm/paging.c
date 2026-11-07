@@ -454,7 +454,7 @@ static int paging_clone_walk(paddr_t parent_cr3, paddr_t child_cr3, int current,
                         pt_used = 1;
                     if (!(pte & PTE_PRESENT))
                         continue;
-                    if (!(pte & PTE_USER))
+                    if (!(pte & (PTE_USER | PTE_PROTNONE)))
                         continue;
 
                     if (!child_pt) {

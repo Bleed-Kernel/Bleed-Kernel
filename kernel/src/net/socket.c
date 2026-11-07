@@ -408,6 +408,14 @@ long socket_sendto(socket_t *s, const void *user_buf, size_t len, int flags, boo
     return sock_send(s, user_buf, len, flags, to_given, ip, port, true);
 }
 
+long socket_send_kernel(socket_t *s, const void *buf, size_t len, int flags, bool to_given, uint32_t ip, uint16_t port) {
+    return sock_send(s, buf, len, flags, to_given, ip, port, false);
+}
+
+long socket_recv_kernel(socket_t *s, void *buf, size_t len, int flags, uint32_t *ip, uint16_t *port) {
+    return sock_recv(s, buf, len, flags, ip, port, false);
+}
+
 long socket_recvfrom(socket_t *s, void *user_buf, size_t len, int flags, uint32_t *ip, uint16_t *port) {
     return sock_recv(s, user_buf, len, flags, ip, port, true);
 }

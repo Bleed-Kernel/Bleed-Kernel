@@ -1,8 +1,13 @@
 #include <net/socket.h>
+#include <net/unix.h>
 #include <syscalls/syscall.h>
 #include <user/errno.h>
 
 static long sock_name(uint64_t fd, uint64_t user_addr, uint64_t user_len, bool peer) {
+    unix_sock_t *u = unix_from_fd((int)fd);
+    if (u)
+        return (!user_addr || !user_len) ? -EFAULT : unix_name(u, peer, (void *)user_addr, (uint32_t *)user_len);
+
     int       err;
     socket_t *s = socket_from_fd((int)fd, &err);
     if (!s)

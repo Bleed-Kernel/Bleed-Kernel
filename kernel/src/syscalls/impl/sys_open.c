@@ -23,13 +23,16 @@ static int open_common(int dirfd, char *path_str, int flags) {
     if (plen < 0)
         return -EFAULT;
 
-    return vfs_open_at(dirfd, kpath, flags);
+    int fd = vfs_open_at(dirfd, kpath, flags & ~O_CLOEXEC);
+    if (fd >= 0 && (flags & O_CLOEXEC))
+        vfs_set_fd_flags(fd, FD_CLOEXEC);
+    return fd;
 }
 
-int sys_open(char *path_str, int flags) {
+long sys_open(char *path_str, int flags) {
     return open_common(AT_FDCWD, path_str, flags);
 }
 
-int sys_openat(int dirfd, char *path_str, int flags) {
+long sys_openat(int dirfd, char *path_str, int flags) {
     return open_common(dirfd, path_str, flags);
 }

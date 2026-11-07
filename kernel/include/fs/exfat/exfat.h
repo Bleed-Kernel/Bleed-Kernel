@@ -147,6 +147,7 @@ typedef struct {
 
     uint32_t bitmap_cluster;
     uint64_t bitmap_size_bytes;
+    uint32_t alloc_hint;
 
     uint16_t *upcase_table;
     size_t    upcase_count;

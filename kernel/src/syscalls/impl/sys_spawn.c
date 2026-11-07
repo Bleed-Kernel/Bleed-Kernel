@@ -40,7 +40,7 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
         return (uint64_t)args_err;
     }
 
-    child = elf_sched(file, args.argc, (const char *const *)args.argv);
+    child = elf_sched_held(file, args.argc, (const char *const *)args.argv);
     if (!child) {
         err = (uint64_t)-EIO;
         goto cleanup;
@@ -54,6 +54,7 @@ uint64_t sys_spawn(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t user
     child->current_directory = parent_cwd;
     if (child->current_directory)
         child->current_directory->shared++;
+    sched_wake_task(child);
 
     serial_printf(LOG_INFO "New Task Created: PID %u\n", (unsigned)child->id);
 

@@ -20,8 +20,10 @@ int user_ptr_valid(uint64_t ptr) {
 static uint64_t *user_page_pte(task_t *task, uintptr_t page, int write) {
     uint64_t *pte = paging_get_page(task->page_map, page, 0);
 
-    // a bit of stack the task hasnt touched yet is still its to be handed
+    // a bit of stack or lazy mmap the task hasnt touched yet is still its to be handed
     if (!pte && paging_handle_stack_fault(task, page))
+        pte = paging_get_page(task->page_map, page, 0);
+    if ((!pte || !(*pte & PTE_PRESENT)) && task_fault_in(task, page, write, 0))
         pte = paging_get_page(task->page_map, page, 0);
     if (!pte || !(*pte & PTE_USER))
         return NULL;

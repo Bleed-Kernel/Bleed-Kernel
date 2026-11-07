@@ -34,3 +34,22 @@ long sys_sigaction(int sig, const sigaction_t *user_act, sigaction_t *user_old) 
 
     return 0;
 }
+
+long sys_sigaltstack(const user_stack_t *user_ss, user_stack_t *user_old) {
+    task_t *task = get_current_task();
+    if (!task)
+        return -ESRCH;
+
+    user_stack_t ss, old;
+    if (user_ss && copy_from_user(task, &ss, user_ss, sizeof(ss)) != 0)
+        return -EFAULT;
+
+    uintptr_t sp = task->context ? task->context->rsp : 0;
+    long rc = signal_set_altstack(task, user_ss ? &ss : NULL, user_old ? &old : NULL, sp);
+    if (rc < 0)
+        return rc;
+
+    if (user_old && copy_to_user(task, user_old, &old, sizeof(old)) != 0)
+        return -EFAULT;
+    return 0;
+}

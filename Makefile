@@ -99,8 +99,8 @@ clean:
 
 .PHONY: distclean
 distclean: clean drivers-clean
-	rm -rf $(DISKS) $(DATA_DIR) $(DATA_IMG) $(DATA_SUM) $(NVME_FILES) limine $(USER_BIN_DIR)
-	rm -rf initrd/lib initrd/include initrd/etc/ssl $(INITRD_BIN)/*
+	rm -rf $(DISKS) usbdisk-*.img $(DATA_DIR) $(DATA_IMG) $(PKG_OUT) $(PKG_STAGE) $(PKG_SUM) $(NVME_FILES) limine $(USER_BIN_DIR)
+	rm -rf initrd/lib initrd/usr/include initrd/usr/lib initrd/etc/ssl $(INITRD_BIN)/*
 	@$(USERPROGS_SH) distclean $(call program_entries,$(ALL_PROGRAMS))
 
 .PHONY: help
@@ -109,7 +109,8 @@ help:
 	@echo "make run [PROFILE]      build then boot it, also run-headless run-ohci run-uefi run-mac"
 	@echo "make runlocal           boot the iso thats already there"
 	@echo "make repack             tar up initrd/ into the iso again, no compiling or internet"
-	@echo "make drivers            build the KMD-* drivers in DRIVERS into initrd/drivers"
+	@echo "make drivers            build the KMD-* drivers in DRIVERS into initrd/lib/modules"
+	@echo "make packages           build BPKGS from their repos into .packages/ (the nvme disk carries them)"
 	@echo "make sdk                the driver sdk as bin/bleed-sdk-<version>.tar.gz, no kernel source needed"
 	@echo "make clean              remove the kernels build output"
 	@echo "make distclean          remove everything built or downloaded"

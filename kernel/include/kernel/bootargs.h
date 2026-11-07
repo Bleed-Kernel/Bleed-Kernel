@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define DEFAULT_SHELL "/initrd/bin/verdict"
-#define DEFAULT_INIT  "/initrd/bin/crime-scene"
+#define DEFAULT_SHELL "/bin/verdict"
+#define DEFAULT_INIT  "/bin/crime-scene"
 
 typedef struct {
     char* key;

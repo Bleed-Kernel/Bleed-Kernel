@@ -137,6 +137,7 @@ void smp_init(void) {
     }
 
     this_cpu()->lapic_id = mp->bsp_lapic_id;
+    __atomic_store_n(&this_cpu()->online, 1, __ATOMIC_RELEASE);
     serial_printf(LOG_INFO "smp: %llu cpus, bsp lapic %u\n", mp->cpu_count, mp->bsp_lapic_id);
 
     boot_regs_save();

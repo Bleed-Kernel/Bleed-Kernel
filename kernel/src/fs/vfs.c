@@ -17,6 +17,8 @@
 #include <devices/devices.h>
 #include <fs/pipe.h>
 #include <net/socket.h>
+#include <net/unix.h>
+#include <fs/epoll.h>
 
 extern const filesystem tempfs;
 
@@ -58,7 +60,8 @@ fd_table_t *vfs_fd_table_clone(const fd_table_t *src) {
 
     for (int fd = 0; fd < MAX_FDS; fd++) {
         file_t *f = src->fds[fd];
-        dst->fds[fd] = f;
+        dst->fds[fd]      = f;
+        dst->fd_flags[fd] = src->fd_flags[fd];
         if (f)
             f->shared++;
     }
@@ -67,7 +70,7 @@ fd_table_t *vfs_fd_table_clone(const fd_table_t *src) {
 }
 
 // let go of one fd's hold on a file, the last one out releases whats behind it
-static void vfs_file_put(file_t *f) {
+void vfs_file_put(file_t *f) {
     f->shared--;
     if (f->shared > 0)
         return;
@@ -76,8 +79,15 @@ static void vfs_file_put(file_t *f) {
         pipe_file_release(f);
     else if (f->type == FD_TYPE_SOCKET)
         socket_file_release(f);
-    else
+    else if (f->type == FD_TYPE_UNIX)
+        unix_file_release(f);
+    else if (f->type == FD_TYPE_EPOLL)
+        epoll_file_release(f);
+    else {
+        if (f->inode && f->inode->ops && f->inode->ops->file_release)
+            f->inode->ops->file_release(f);
         vfs_drop(f->inode);
+    }
     kfree(f);
 }
 
@@ -109,7 +119,8 @@ void vfs_fd_table_drop(fd_table_t *table) {
         if (!f)
             continue;
 
-        table->fds[fd] = NULL;
+        table->fds[fd]      = NULL;
+        table->fd_flags[fd] = 0;
         vfs_file_put(f);
     }
 
@@ -207,7 +218,8 @@ static void dcache_insert(INode_t *inode) {
     if (inode->hashed) return;
 
     size_t b = dcache_hash(inode->parent, inode->name, strlen(inode->name));
-    inode->dcache_next = dcache[b];
+    inode->dcache_next   = dcache[b];
+    inode->dcache_bucket = (uint16_t)b;
     dcache[b] = inode;
     inode->hashed = 1;
 }
@@ -215,7 +227,8 @@ static void dcache_insert(INode_t *inode) {
 static void dcache_remove(INode_t *inode) {
     if (!inode->hashed) return;
 
-    INode_t **link = &dcache[dcache_hash(inode->parent, inode->name, strlen(inode->name))];
+    // the bucket it went in, not one worked out from the name now
+    INode_t **link = &dcache[inode->dcache_bucket];
     while (*link && *link != inode)
         link = &(*link)->dcache_next;
     if (*link)
@@ -290,7 +303,46 @@ void vfs_drop(INode_t* inode){
     }
 }
 
+static int vfs_walk(const path_t* path, INode_t** out_inode, int follow_last, int depth);
+
+// where link (in dir) points, as a ref the caller owns
+static int vfs_follow(INode_t *dir, INode_t *link, INode_t **out, int depth) {
+    if (depth >= VFS_LINK_DEPTH)
+        return -ELOOP;
+    if (!link->ops || !link->ops->readlink)
+        return -EIO;
+
+    char *target = kmalloc(VFS_LINK_MAX);
+    if (!target)
+        return -ENOMEM;
+    long n = link->ops->readlink(link, target, VFS_LINK_MAX - 1);
+    if (n <= 0) {
+        kfree(target);
+        return n < 0 ? (int)n : -ENOENT;
+    }
+    target[n] = '\0';
+
+    // relative targets start from the folder the link is in
+    path_t p = {
+        .root        = vfs_root,
+        .start       = target[0] == '/' ? vfs_root : dir,
+        .data        = target,
+        .data_length = (size_t)n,
+    };
+    int r = vfs_walk(&p, out, 1, depth + 1);
+    kfree(target);
+    return r;
+}
+
 int vfs_lookup(const path_t* path, INode_t** out_inode){
+    return vfs_walk(path, out_inode, 1, 0);
+}
+
+int vfs_lookup_nofollow(const path_t* path, INode_t** out_inode){
+    return vfs_walk(path, out_inode, 0, 0);
+}
+
+static int vfs_walk(const path_t* path, INode_t** out_inode, int follow_last, int depth){
     // cur is always a ref we own, each step trades it for a ref on the next inode
     INode_t* cur = path->start;
     if (!cur) return -ENOENT;
@@ -334,6 +386,19 @@ int vfs_lookup(const path_t* path, INode_t** out_inode){
                 return -ENOENT;
             }
             next = vfs_adopt(cur, next, comp_start, comp_len);
+        }
+
+        // links in the middle are always followed, the last one only when asked. a trailing
+        // slash counts as more path like it does on linux
+        if (next->type == INODE_SYMLINK && (head < head_end || follow_last)) {
+            INode_t *to = NULL;
+            int r = vfs_follow(cur, next, &to, depth);
+            vfs_drop(next);
+            if (r < 0) {
+                vfs_drop(cur);
+                return r;
+            }
+            next = to;
         }
 
         // something is mounted on this directory, carry on from the root of that filesystem
@@ -426,6 +491,8 @@ int vfs_ioctl(int fd, unsigned long request, void* arg) {
 
     INode_t *inode = file->inode;
 
+    if (inode->ops && inode->ops->file_ioctl)
+        return inode->ops->file_ioctl(file, request, arg);
     if (inode->ops && inode->ops->ioctl) {
         return inode->ops->ioctl(inode, request, arg);
     }
@@ -577,11 +644,52 @@ int vfs_open(const char *path_str, int flags){
     return vfs_open_at(AT_FDCWD, path_str, flags);
 }
 
+// linux's /proc/self/fd/N, a new open file on whatever fd N has open
+static int vfs_reopen_fd(fd_table_t *fd_table, const char *num, int flags) {
+    int n = 0;
+    if (!*num)
+        return -ENOENT;
+    for (; *num; num++) {
+        if (*num < '0' || *num > '9' || n > MAX_FDS)
+            return -ENOENT;
+        n = n * 10 + (*num - '0');
+    }
+    file_t *src = n < MAX_FDS ? fd_table->fds[n] : NULL;
+    if (!src)
+        return -ENOENT;
+    if ((src->type != FD_TYPE_FS && src->type != FD_TYPE_DEV) || !src->inode)
+        return -ENXIO;
+
+    int want = flags & O_MODE, have = src->flags & O_MODE;
+    if ((want != O_RDONLY && have == O_RDONLY) || (want != O_WRONLY && have == O_WRONLY))
+        return -EACCES;
+
+    file_t *f = kmalloc(sizeof(*f));
+    if (!f)
+        return -ENOMEM;
+    vfs_hold(src->inode);
+    f->inode  = src->inode;
+    f->type   = src->type;
+    f->offset = 0;
+    f->flags  = flags & (O_MODE | O_APPEND);
+    f->shared = 1;
+
+    int fd = vfs_fd_install(fd_table, f);
+    if (fd >= 0)
+        return fd;
+    kfree(f);
+    vfs_drop(src->inode);
+    return -EMFILE;
+}
+
 int vfs_open_at(int dirfd, const char *path_str, int flags){
     if (!path_str || path_str[0] == '\0')
         return -ENOENT;
     fd_table_t *fd_table = vfs_get_active_fd_table();
     if (!fd_table) return -EMFILE;
+
+    if (!strncmp(path_str, "/proc/self/fd/", 14))
+        return vfs_reopen_fd(fd_table, path_str + 14, flags);
 
     INode_t *base = NULL;
     if (path_str[0] != '/') {
@@ -591,7 +699,12 @@ int vfs_open_at(int dirfd, const char *path_str, int flags){
     path_t path = vfs_path_from_relative(path_str, base);
     INode_t *inode = NULL;
 
-    int l = vfs_lookup(&path, &inode);
+    int l = (flags & O_NOFOLLOW) ? vfs_lookup_nofollow(&path, &inode) : vfs_lookup(&path, &inode);
+    if (l == 0 && inode->type == INODE_SYMLINK) {
+        // only O_NOFOLLOW hands one back, and a link cant be opened
+        vfs_drop(inode);
+        return -ELOOP;
+    }
     if (l < 0){
         if (!(flags & O_CREAT)) return l;
         l = vfs_create(&path, &inode, INODE_FILE);
@@ -698,7 +811,7 @@ long vfs_read(int fd, void *buf, size_t count) {
         if (r < 0)
             return r;
 
-        if (f->type == FD_TYPE_PIPE)
+        if (f->type == FD_TYPE_PIPE || f->type == FD_TYPE_SOCKET || f->type == FD_TYPE_UNIX)
             return 0;
 
         if (is_size_finite)
@@ -745,10 +858,64 @@ long vfs_write(int fd, const void *buf, size_t count){
     return r;
 }
 
+// pread and pwrite, only for real files and the fds offset stays where it was. threads!!!
+static file_t *vfs_positional_file(int fd, int want_write) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS)
+        return NULL;
+    file_t *f = fd_table->fds[fd];
+    if (!f || !f->inode || !f->inode->ops)
+        return NULL;
+    if ((uintptr_t)f->inode < 0xFFFF800000000000ULL || (uintptr_t)f->inode->ops < 0xFFFF800000000000ULL)
+        return NULL;
+    int mode = f->flags & O_MODE;
+    if (want_write ? (mode != O_WRONLY && mode != O_RDWR) : (mode != O_RDONLY && mode != O_RDWR))
+        return NULL;
+    return f;
+}
+
+long vfs_pread(int fd, void *buf, size_t count, size_t offset) {
+    file_t *f = vfs_positional_file(fd, 0);
+    if (!f)
+        return -EBADF;
+    if (f->type != FD_TYPE_FS || f->inode->type != INODE_FILE)
+        return -ESPIPE;
+    if (!f->inode->internal_data)
+        return -EBADF;
+
+    uint64_t filesize = f->inode->ops->size ? f->inode->ops->size(f->inode) : vfs_filesize(f->inode);
+    if (offset >= filesize)
+        return 0;
+    if (count > filesize - offset)
+        count = filesize - offset;
+    return inode_read(f->inode, buf, count, offset);
+}
+
+long vfs_pwrite(int fd, const void *buf, size_t count, size_t offset) {
+    file_t *f = vfs_positional_file(fd, 1);
+    if (!f)
+        return -EBADF;
+    if (f->type != FD_TYPE_FS || f->inode->type != INODE_FILE)
+        return -ESPIPE;
+    return inode_write(f->inode, buf, count, offset);
+}
+
+static int vfs_unlink_from(INode_t *cwd, const char *path_str);
+
 int vfs_unlink(const char *path_str) {
     task_t *task = get_current_task();
-    INode_t *cwd = task ? task->current_directory : NULL;
+    return vfs_unlink_from(task ? task->current_directory : NULL, path_str);
+}
 
+int vfs_unlink_at(int dirfd, const char *path_str) {
+    INode_t *base = NULL;
+    int r = vfs_at_base(dirfd, &base);
+    if (r < 0)
+        return r;
+    return vfs_unlink_from(base, path_str);
+}
+
+static int vfs_unlink_from(INode_t *cwd, const char *path_str) {
     path_t parent_path;
     const char *name = NULL;
     size_t namelen = 0;
@@ -775,6 +942,63 @@ int vfs_unlink(const char *path_str) {
     }
 
     vfs_drop(parent_inode);
+    return r;
+}
+
+// rename onto a name thats taken replaces it, thats how everything saves a file safely
+static int vfs_rename_over(INode_t *parent, const char *oldpath, const char *newpath, INode_t *cwd,
+                           const char *newname, size_t newlen) {
+    INode_t *from = NULL, *to = NULL;
+    path_t fp = vfs_path_from_relative(oldpath, cwd);
+    path_t tp = vfs_path_from_relative(newpath, cwd);
+    int r = vfs_lookup_nofollow(&fp, &from);
+    if (r < 0)
+        return r;
+    r = vfs_lookup_nofollow(&tp, &to);
+    if (r < 0) {
+        vfs_drop(from);
+        return -EEXIST;
+    }
+
+    if (from == to)
+        r = 0;
+    else if (to->type == INODE_DIRECTORY)
+        r = from->type == INODE_DIRECTORY ? -ENOTEMPTY : -EISDIR;
+    else if (from->type == INODE_DIRECTORY)
+        r = -ENOTDIR;
+    else if (!parent->ops->unlink)
+        r = -EEXIST;
+    else
+        r = 1;
+    vfs_drop(from);
+    vfs_drop(to);
+    if (r != 1)
+        return r;
+
+    r = parent->ops->unlink(parent, newname, newlen);
+    if (r < 0)
+        return r;
+    INode_t *victim = dcache_find(parent, newname, newlen);
+    if (victim)
+        dcache_remove(victim);
+    return 1;
+}
+
+// the filesystem rename with the cache entry moved across
+static int vfs_rename_entry(INode_t *parent, const char *oldname, size_t oldlen,
+                            const char *newname, size_t newlen) {
+    INode_t *moved = dcache_find(parent, oldname, oldlen);
+    if (moved)
+        dcache_remove(moved);
+
+    int r = parent->ops->rename(parent, oldname, oldlen, newname, newlen);
+    if (moved && r >= 0 && newlen < sizeof(moved->name)) {
+        memcpy(moved->name, newname, newlen);
+        moved->name[newlen] = '\0';
+        dcache_insert(moved);
+    } else if (moved && r < 0) {
+        dcache_insert(moved);
+    }
     return r;
 }
 
@@ -820,18 +1044,11 @@ int vfs_rename(const char *oldpath, const char *newpath) {
         return -ENOSYS;
     }
 
-    r = old_parent->ops->rename(old_parent, oldname, oldlen, newname, newlen);
-    if (r >= 0) {
-        // the cache is keyed on the name, move the entry over to the new one
-        INode_t *moved = dcache_find(old_parent, oldname, oldlen);
-        if (moved && newlen < sizeof(moved->name)) {
-            dcache_remove(moved);
-            memcpy(moved->name, newname, newlen);
-            moved->name[newlen] = '\0';
-            dcache_insert(moved);
-        } else if (moved) {
-            dcache_remove(moved);
-        }
+    r = vfs_rename_entry(old_parent, oldname, oldlen, newname, newlen);
+    if (r == -EEXIST) {
+        r = vfs_rename_over(old_parent, oldpath, newpath, cwd, newname, newlen);
+        if (r == 1)
+            r = vfs_rename_entry(old_parent, oldname, oldlen, newname, newlen);
     }
 
     vfs_drop(old_parent);
@@ -899,6 +1116,15 @@ int vfs_pipe(int out_fds[2]) {
     return 0;
 }
 
+file_t *vfs_file_get(int fd) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS || !fd_table->fds[fd])
+        return NULL;
+    file_t *f = fd_table->fds[fd];
+    f->shared++;
+    return f;
+}
+
 int vfs_install(file_t *f) {
     fd_table_t *fd_table = vfs_get_active_fd_table();
     if (!fd_table)
@@ -933,8 +1159,62 @@ int vfs_dup2(int oldfd, int newfd) {
     }
 
     src->shared++;
-    fd_table->fds[newfd] = src;
+    fd_table->fds[newfd]      = src;
+    fd_table->fd_flags[newfd] = 0;
     return newfd;
+}
+
+int vfs_dup_from(int oldfd, int lowest) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || oldfd < 0 || oldfd >= MAX_FDS || !fd_table->fds[oldfd])
+        return -EBADF;
+    if (lowest < 0 || lowest >= MAX_FDS)
+        return -EINVAL;
+
+    for (int fd = lowest; fd < MAX_FDS; fd++) {
+        if (!fd_table->fds[fd])
+            return vfs_dup2(oldfd, fd);
+    }
+    return -EMFILE;
+}
+
+int vfs_get_fd_flags(int fd) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS || !fd_table->fds[fd])
+        return -EBADF;
+    return fd_table->fd_flags[fd];
+}
+
+int vfs_set_fd_flags(int fd, int flags) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS || !fd_table->fds[fd])
+        return -EBADF;
+    fd_table->fd_flags[fd] = (uint8_t)(flags & FD_CLOEXEC);
+    return 0;
+}
+
+int vfs_set_nonblock(int fd) {
+    fd_table_t *fd_table = vfs_get_active_fd_table();
+    if (!fd_table || fd < 0 || fd >= MAX_FDS || !fd_table->fds[fd])
+        return -EBADF;
+    file_t *f = fd_table->fds[fd];
+    if (f->type != FD_TYPE_PIPE)
+        return -ENOTTY;
+    pipe_set_nonblock(f);
+    return 0;
+}
+
+void vfs_close_on_exec(fd_table_t *table) {
+    if (!table)
+        return;
+    for (int fd = 0; fd < MAX_FDS; fd++) {
+        file_t *f = table->fds[fd];
+        if (!f || !(table->fd_flags[fd] & FD_CLOEXEC))
+            continue;
+        table->fds[fd]      = NULL;
+        table->fd_flags[fd] = 0;
+        vfs_file_put(f);
+    }
 }
 
 int vfs_dup(int oldfd) {
@@ -957,7 +1237,8 @@ int vfs_close(int fd){
     file_t *f = fd_table->fds[fd];
     if (!f) return -EBADF;
 
-    fd_table->fds[fd] = NULL;
+    fd_table->fds[fd]      = NULL;
+    fd_table->fd_flags[fd] = 0;
     vfs_file_put(f);
 
     return 0;
@@ -1014,6 +1295,13 @@ static void stat_fill(INode_t *inode, user_stat_t *st) {
     case INODE_DEVICE:
         st->mode = STAT_IFCHR | 0666;
         break;
+    case INODE_SYMLINK: {
+        char target[VFS_LINK_MAX];
+        long n = inode->ops && inode->ops->readlink ? inode->ops->readlink(inode, target, sizeof(target)) : 0;
+        st->mode = STAT_IFLNK | 0777;
+        st->size = n > 0 ? n : 0;
+        break;
+    }
     default:
         st->mode = STAT_IFREG | 0755;
         st->size = (int64_t)vfs_filesize(inode);
@@ -1029,7 +1317,7 @@ int vfs_stat(const char *path_str, user_stat_t *st) {
     return vfs_stat_at(AT_FDCWD, path_str, st);
 }
 
-int vfs_stat_at(int dirfd, const char *path_str, user_stat_t *st) {
+static int vfs_stat_flags(int dirfd, const char *path_str, user_stat_t *st, int follow) {
     if (!path_str || !path_str[0])
         return -ENOENT;
 
@@ -1040,7 +1328,7 @@ int vfs_stat_at(int dirfd, const char *path_str, user_stat_t *st) {
     }
     path_t   path  = vfs_path_from_relative(path_str, base);
     INode_t *inode = NULL;
-    int      r     = vfs_lookup(&path, &inode);
+    int      r     = follow ? vfs_lookup(&path, &inode) : vfs_lookup_nofollow(&path, &inode);
     if (r < 0)
         return r;
 
@@ -1049,13 +1337,91 @@ int vfs_stat_at(int dirfd, const char *path_str, user_stat_t *st) {
     return 0;
 }
 
+int vfs_stat_at(int dirfd, const char *path_str, user_stat_t *st) {
+    return vfs_stat_flags(dirfd, path_str, st, 1);
+}
+
+int vfs_lstat_at(int dirfd, const char *path_str, user_stat_t *st) {
+    return vfs_stat_flags(dirfd, path_str, st, 0);
+}
+
+int vfs_symlink_at(const char *target, int dirfd, const char *path_str) {
+    if (!target || !target[0] || strlen(target) >= VFS_LINK_MAX)
+        return target && target[0] ? -ENAMETOOLONG : -ENOENT;
+
+    INode_t *base = NULL;
+    if (path_str[0] != '/') {
+        int b = vfs_at_base(dirfd, &base);
+        if (b < 0) return b;
+    }
+
+    path_t path = vfs_path_from_relative(path_str, base);
+    INode_t *there = NULL;
+    if (vfs_lookup_nofollow(&path, &there) == 0) {
+        vfs_drop(there);
+        return -EEXIST;
+    }
+
+    path_t parent;
+    const char *name;
+    size_t namelen;
+    int r = vfs_path_split(&path, &parent, &name, &namelen);
+    if (r < 0)
+        return r;
+
+    INode_t *dir = NULL;
+    r = vfs_lookup(&parent, &dir);
+    if (r < 0)
+        return r;
+    if (dir->type != INODE_DIRECTORY) {
+        vfs_drop(dir);
+        return -ENOTDIR;
+    }
+    // fat and exfat have nowhere to keep one
+    if (!dir->ops || !dir->ops->symlink) {
+        vfs_drop(dir);
+        return -EPERM;
+    }
+
+    INode_t *link = NULL;
+    r = dir->ops->symlink(dir, name, namelen, target, &link);
+    if (r == 0 && link) {
+        vfs_attach(link, dir, name, namelen);
+        vfs_drop(link);
+    }
+    vfs_drop(dir);
+    return r;
+}
+
+long vfs_readlink_at(int dirfd, const char *path_str, char *out, size_t size) {
+    if (!path_str || !path_str[0])
+        return -ENOENT;
+
+    INode_t *base = NULL;
+    if (path_str[0] != '/') {
+        int b = vfs_at_base(dirfd, &base);
+        if (b < 0) return b;
+    }
+    path_t   path  = vfs_path_from_relative(path_str, base);
+    INode_t *inode = NULL;
+    int      r     = vfs_lookup_nofollow(&path, &inode);
+    if (r < 0)
+        return r;
+
+    long n = -EINVAL;
+    if (inode->type == INODE_SYMLINK && inode->ops && inode->ops->readlink)
+        n = inode->ops->readlink(inode, out, size);
+    vfs_drop(inode);
+    return n;
+}
+
 int vfs_fstat(int fd, user_stat_t *st) {
     fd_table_t *fd_table = vfs_get_active_fd_table();
     if (!fd_table || fd < 0 || fd >= MAX_FDS || !fd_table->fds[fd])
         return -EBADF;
 
     file_t *f = fd_table->fds[fd];
-    if (f->type == FD_TYPE_PIPE || f->type == FD_TYPE_SOCKET) {
+    if (f->type == FD_TYPE_PIPE || f->type == FD_TYPE_SOCKET || f->type == FD_TYPE_UNIX || f->type == FD_TYPE_EPOLL) {
         memset(st, 0, sizeof(*st));
         st->mode    = (f->type == FD_TYPE_PIPE ? STAT_IFIFO : STAT_IFSOCK) | 0600;
         st->nlink   = 1;

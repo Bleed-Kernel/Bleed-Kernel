@@ -346,7 +346,8 @@ long tempfs_write(INode_t* inode, const void* in_buffer, size_t count, size_t of
     tempfs_data_t** previous_next = &tempfs_inode->data;
     tempfs_data_t* data = tempfs_inode->data;
 
-    if (offset > tempfs_inode->capacity) return -EINVAL;
+    // past the end is fine, the chunks walked over come back zeroed and whats after capacity
+    // in the last one is kept zero, so the gap reads as a hole would
 
     // Skip chunks until we reach the right offset
     while (offset >= MAX_FILE_DATA_PER_CHUNK){
@@ -421,7 +422,9 @@ int tempfs_create(INode_t* parent, const char* name, size_t namelen, INode_t** r
         if(!chunk) return -ENOMEM;
     }
 
-    INode_t* file = node_type == INODE_DIRECTORY ? tempfs_create_inode(INODE_DIRECTORY, &dir_ops) : tempfs_create_inode(INODE_FILE, &file_ops);
+    INode_t* file = node_type == INODE_DIRECTORY ? tempfs_create_inode(INODE_DIRECTORY, &dir_ops)
+                  : node_type == INODE_SYMLINK   ? tempfs_create_inode(INODE_SYMLINK, &link_ops)
+                  : tempfs_create_inode(INODE_FILE, &file_ops);
     if (!file)
         return -ENOMEM;
     tempfs_INode_t* file_int = file->internal_data;
@@ -574,10 +577,33 @@ static size_t tempfs_size(INode_t* inode){
     return data->capacity;
 }
 
+// a link to the file
+static int tempfs_symlink(INode_t* dir, const char* name, size_t namelen, const char* target, INode_t** result) {
+    for (size_t i = 0; i < ((tempfs_INode_t *)dir->internal_data)->capacity; i++) {
+        INode_t **slot = tempfs_entry_ptr(dir->internal_data, i);
+        tempfs_INode_t *d = slot && *slot ? (*slot)->internal_data : NULL;
+        if (d && strlen(d->name) == namelen && !memcmp(d->name, name, namelen))
+            return -EEXIST;
+    }
 
-/// @brief mount the root directory of the fs
-/// @param root root node
-/// @return success?
+    INode_t *link = NULL;
+    int r = tempfs_create(dir, name, namelen, &link, INODE_SYMLINK);
+    if (r < 0)
+        return r;
+    size_t len = strlen(target);
+    if (tempfs_write(link, target, len, 0) != (long)len) {
+        vfs_drop(link);
+        tempfs_unlink(dir, name, namelen);
+        return -ENOSPC;
+    }
+    *result = link;
+    return 0;
+}
+
+static long tempfs_readlink(INode_t* inode, char* out, size_t size) {
+    return tempfs_read(inode, out, size, 0);
+}
+
 int tempfs_mount_root(INode_t** root){
     return (*root = tempfs_create_inode(INODE_DIRECTORY, &dir_ops)) ? 0 : -ENOMEM; // out of memory
 }
@@ -590,6 +616,7 @@ const INodeOps_t dir_ops = {
     .rename = tempfs_rename,
     .drop   = tempfs_drop,
     .times  = tempfs_times,
+    .symlink = tempfs_symlink,
 };
 
 const INodeOps_t file_ops = {
@@ -599,6 +626,13 @@ const INodeOps_t file_ops = {
     .drop     = tempfs_drop,
     .size     = tempfs_size,
     .times    = tempfs_times,
+};
+
+const INodeOps_t link_ops = {
+    .drop     = tempfs_drop,
+    .size     = tempfs_size,
+    .times    = tempfs_times,
+    .readlink = tempfs_readlink,
 };
 
 const filesystem tempfs = {

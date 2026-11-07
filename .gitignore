@@ -16,22 +16,23 @@ initrd/bin/*
 
 # put there by programs that need more than their binary, tcc has its headers and libc in these
 initrd/lib/
-initrd/include/
-initrd/include/hlx
+initrd/usr/include/
+initrd/usr/lib/
 
 tools/mksymtab
 initrd/etc/kernel.sym
 initrd/etc/kernel.exports
 initrd/etc/drivers.conf
-initrd/drivers/
-initrd/firmware/
+
 kernel/src/drivers/bleed-sdk
 initrd/proc/version
 
 *.img
 **/*.DS_Store
 .data_img/
-.data_img.sum
+.packages/
+.pkg_stage/
+.packages.sum
 .nvme_files/
 config.local.mk
 initrd/etc/ssl/

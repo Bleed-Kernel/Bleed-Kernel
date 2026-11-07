@@ -33,8 +33,11 @@ long sys_stat(const char *user_path, user_stat_t *user_buf) {
     return stat_out(caller, user_buf, &st);
 }
 
+long sys_lstat(const char *user_path, user_stat_t *user_buf) {
+    return sys_fstatat(AT_FDCWD, user_path, user_buf, AT_SYMLINK_NOFOLLOW);
+}
+
 long sys_fstatat(int dirfd, const char *user_path, user_stat_t *user_buf, int flags) {
-    (void)flags;
     if (!user_path || !user_buf)
         return -EFAULT;
 
@@ -50,7 +53,7 @@ long sys_fstatat(int dirfd, const char *user_path, user_stat_t *user_buf, int fl
         return -EFAULT;
 
     user_stat_t st;
-    int r = vfs_stat_at(dirfd, kpath, &st);
+    int r = (flags & AT_SYMLINK_NOFOLLOW) ? vfs_lstat_at(dirfd, kpath, &st) : vfs_stat_at(dirfd, kpath, &st);
     if (r < 0)
         return r;
     return stat_out(caller, user_buf, &st);

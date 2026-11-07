@@ -1,8 +1,8 @@
 DRIVER_MODULES := kernel/src/drivers
 DRIVER_SRC     ?= $(DRIVER_MODULES)
-KMD_OUT    := initrd/drivers
+KMD_OUT    := initrd/lib/modules
 KMD_CONF   := initrd/etc/drivers.conf
-KMD_FW     := initrd/firmware
+KMD_FW     := initrd/lib/firmware
 
 KMD_MAKE = $(MAKE) -s -C "$(DRIVER_SRC)/KMD-$$d" BLEED_SDK=$(abspath $(SDK_DIR))
 

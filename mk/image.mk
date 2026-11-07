@@ -20,48 +20,54 @@ define build_initrd_tar
 	@sh tools/mkinitrd.sh $(INITRD_ASSETS)
 endef
 
-# DATA_PROGRAMS from the profile go in data.img, an ext2 image labelled BLEEDDATA thats its own
-# download next to the iso. put in the top of any drive the kernel mounts (the usb stick the iso
-# is on) its mounted at /mnt/data (fs/data_image.c), limine never sees it
-DATA_DIR     := .data_img
-DATA_IMG     := data.img
-PROFILE_DATA := $(filter $(DATA_PROGRAMS),$(PROGRAMS))
-ISO_DATA     := $(if $(PACKAGE),$(if $(PROFILE_DATA),$(DATA_IMG)))
+PKG_OUT   := .packages
+PKG_STAGE := .pkg_stage
+PKG_SUM   := .packages.sum
+MKBPKG    := $(firstword $(wildcard $(USERPROG_SRC)/Bleed-BPM/mkbpkg.sh) $(USER_BIN_DIR)/bpm/mkbpkg.sh)
 
-DATA_SUM     := .data_img.sum
+.PHONY: packages
+packages: $(PKG_SUM)
 
-# the copy runs every build but data.img is only touched when whats going in it changed, so the nvme
-# disk that holds it isnt remade for nothing. the staging folder is kept so the game copy is just the changes
+ifeq ($(NO_BUILD),)
+$(PKG_SUM): userprogs
+	@mkdir -p $(PKG_OUT)
+	@$(if $(BPKGS),MKBPKG="$(abspath $(MKBPKG))" PKG_STAGE="$(abspath $(PKG_STAGE))" PKG_ASSETS="$(PKG_ASSETS)" \
+		$(foreach p,$(BPKGS),DESC_$(p)="$(DESC_$(p))" EXEC_$(p)="$(EXEC_$(p))") \
+		$(USERPROGS_SH) bpkg $(abspath $(PKG_OUT)) $(call program_entries,$(BPKGS)),rm -f $(PKG_OUT)/*.bpkg)
+	@# names, sizes and dates, not link counts, the disks hard link these
+	@sum=$$(ls -ln $(PKG_OUT) | grep '\.bpkg$$' | awk '{ $$2 = ""; print }' | cksum); \
+	[ "$$sum" = "$$(cat $@ 2>/dev/null)" ] || echo "$$sum" > $@
+	@echo "[BPKG] packages: $$(cd $(PKG_OUT) && ls *.bpkg 2>/dev/null | tr '\n' ' ')"
+else
+$(PKG_SUM):
+endif
+
+# data.img is the packages as their own download next to the iso, an ext2 image labelled BLEEDDATA.
+# put in the top of any drive the kernel mounts (the usb stick the iso is on) its mounted at
+# /mnt/data (fs/data_image.c), limine never sees it. only made for PACKAGE, the nvme disk has
+# the packages for testing
+DATA_DIR := .data_img
+DATA_IMG := data.img
+ISO_DATA := $(if $(PACKAGE),$(if $(BPKGS),$(DATA_IMG)))
+
 .PHONY: data-img
 data-img: $(DATA_IMG)
 
-ifeq ($(NO_BUILD),)
-$(DATA_IMG): userprogs
-	@mkdir -p $(DATA_DIR)
-	@for d in $(DATA_DIR)/*; do \
-		[ -e "$$d" ] || continue; \
-		case " $(PROFILE_DATA) " in *" $${d##*/} "*) ;; *) rm -rf "$$d" ;; esac; \
-	done
-	@DATA_ASSETS="$(DATA_ASSETS)" $(USERPROGS_SH) disk $(abspath $(DATA_DIR)) $(call program_entries,$(PROFILE_DATA))
-	@sum=$$(cd $(DATA_DIR) && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 cksum | cksum); \
-	if [ -f $(DATA_IMG) ] && [ "$$sum" = "$$(cat $(DATA_SUM) 2>/dev/null)" ]; then \
-		echo "[DATA] $(DATA_IMG) is up to date"; \
-	else \
-		echo "[DATA] $(DATA_IMG)"; \
-		export PATH=$$PATH:/sbin:/usr/sbin:/opt/homebrew/opt/e2fsprogs/sbin:/usr/local/opt/e2fsprogs/sbin; \
-		if ! command -v mkfs.ext2 > /dev/null 2>&1; then \
-			echo "[DATA] ERROR: mkfs.ext2 not found. On macOS: brew install e2fsprogs"; \
-			exit 1; \
-		fi; \
-		rm -f $(DATA_IMG); \
-		size=$$(( $$(du -sm $(DATA_DIR) | cut -f1) * 11 / 10 + $(DATA_SPARE_MB) )); \
-		truncate -s $${size}M $(DATA_IMG) && \
-		mkfs.ext2 -q -F -L BLEEDDATA -d $(DATA_DIR) $(DATA_IMG) && \
-		echo "$$sum" > $(DATA_SUM); \
-	fi
-else
-$(DATA_IMG):
-endif
+# hard links, a copy of the sparse image crawls on macos
+$(DATA_IMG): $(PKG_SUM)
+	@echo "[DATA] $(DATA_IMG)"
+	@rm -rf $(DATA_DIR) && mkdir -p $(DATA_DIR)/bpkg
+	@for f in $(PKG_OUT)/*.bpkg; do [ -e "$$f" ] && { ln "$$f" $(DATA_DIR)/bpkg/ 2>/dev/null || cp "$$f" $(DATA_DIR)/bpkg/; }; done
+	@export PATH=$$PATH:/sbin:/usr/sbin:/opt/homebrew/opt/e2fsprogs/sbin:/usr/local/opt/e2fsprogs/sbin; \
+	if ! command -v mkfs.ext2 > /dev/null 2>&1; then \
+		echo "[DATA] ERROR: mkfs.ext2 not found. On macOS: brew install e2fsprogs"; \
+		exit 1; \
+	fi; \
+	rm -f $(DATA_IMG); \
+	size=$$(( $$(du -sm $(DATA_DIR) | cut -f1) * 11 / 10 + $(DATA_SPARE_MB) )); \
+	truncate -s $${size}M $(DATA_IMG) && \
+	mkfs.ext2 -q -F -L BLEEDDATA -d $(DATA_DIR) $(DATA_IMG)
+	@rm -rf $(DATA_DIR)
 
 define build_iso
 	@rm -rf iso_root

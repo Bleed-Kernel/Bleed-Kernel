@@ -1,3 +1,4 @@
+#include <fs/vfs.h>
 #include <syscalls/syscall.h>
 #include <sched/scheduler.h>
 #include <user/user_copy.h>
@@ -128,8 +129,8 @@ static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t use
         goto done;
     }
 
-    uintptr_t entry = 0;
-    if (elf_load(file, new_cr3, &entry) != 0) {
+    elf_image_t image;
+    if (elf_load(file, new_cr3, &image) != 0) {
         ret = -ENOEXEC;
         goto fail_new_cr3;
     }
@@ -157,13 +158,13 @@ static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t use
     }
     cpu_context_t old_ctx = *ctx;
 
-    ctx->rip = entry;
+    ctx->rip = image.entry;
     ctx->rsp = USER_STACK_TOP;
     ctx->rflags |= 0x200ULL;
     ctx->rax = 0;
 
     if (elf_setup_user_args(task, args.argc, (const char *const *)args.argv,
-                            args.envc, (const char *const *)args.envp) != 0) {
+                            args.envc, (const char *const *)args.envp, &image) != 0) {
         *ctx = old_ctx;
         ret = -EFAULT;
         goto rollback_task;
@@ -173,11 +174,16 @@ static long do_exec(uint64_t user_path_ptr, uint64_t user_argv_ptr, uint64_t use
     task->sig_pending = 0;
     task->sig_blocked = 0;
     task->sig_active_frame = 0;
+    task->sig_altstack_sp    = 0;
+    task->sig_altstack_size  = 0;
+    task->sig_altstack_flags = SS_DISABLE;
     memset(task->sig_handlers, 0, sizeof(task->sig_handlers));
     memset(task->sig_masks, 0, sizeof(task->sig_masks));
     memset(task->sig_flags, 0, sizeof(task->sig_flags));
     memset(task->sig_restorers, 0, sizeof(task->sig_restorers));
     fpu_task_reset(task);
+    vfs_close_on_exec(task->fd_table);
+    vfork_release(task);
     task->fs_base = 0;
     task->clear_child_tid = 0;
     wrmsr(MSR_FS_BASE, 0);

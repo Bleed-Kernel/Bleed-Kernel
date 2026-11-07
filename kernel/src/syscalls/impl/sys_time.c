@@ -5,7 +5,7 @@
 #include <sched/scheduler.h>
 #include <user/errno.h>
 
-int sys_time(struct rtc_time *user_buf) {
+long sys_time(struct rtc_time *user_buf) {
     if (!user_buf)
         return -EFAULT;
 

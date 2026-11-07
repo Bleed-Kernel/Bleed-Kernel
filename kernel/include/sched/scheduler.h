@@ -57,9 +57,19 @@ typedef enum {
     TASK_DEAD
 } task_state_t;
 
+#define UALLOC_LAZY     0x1     // pages come in on first touch, zeroed or read from backing
+#define UALLOC_SHARED   0x2     // backing is a memfd and the pages are its own
+#define UALLOC_NOWRITE  0x4     // shared from a read only fd
+
+struct INode;
+
 typedef struct user_alloc {
     void* vaddr;
     size_t pages;
+    uint32_t prot;      // PROT_* the range was mapped or mprotected with
+    uint32_t flags;
+    struct INode *backing;  // a file or memfd the pages come from, ref held
+    uint64_t offset;        
     struct user_alloc* next;
 } user_alloc_t;
 
@@ -106,6 +116,7 @@ typedef struct task {
     task_group_t    *group;
     struct task     *group_next;
     uint64_t        clear_child_tid;    // zeroed and futex woken when the thread exits
+    struct vfork_done *vfork;           // a vfork child, the parent waits on it till exec or exit
     user_heap_t     *heap;
     fd_table_t      *fd_table;
 
@@ -117,6 +128,7 @@ typedef struct task {
     struct task     *wait_queue;
     struct task     *wait_next;
     uint64_t        wait_target_pid;
+#define WAIT_ANY_CHILD  ((uint64_t)-1)    // wait_target_pid for a wait on any child
 
     uint8_t         on_cpu;         // running, or still being switched out, somewhere
     uint8_t         idle;           // a cpus idle task, never queued
@@ -152,6 +164,9 @@ typedef struct task {
     uint64_t        sig_flags[NSIG];
     uintptr_t       sig_restorers[NSIG];
     uintptr_t       sig_active_frame;
+    uintptr_t       sig_altstack_sp;
+    uint64_t        sig_altstack_size;
+    int             sig_altstack_flags;
 
     uint64_t        fs_base;
 
@@ -169,6 +184,7 @@ typedef struct task {
 typedef void (*task_itteration_fn)(task_t *task, void *userdata);
 
 task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, const char *task_name);
+task_t *sched_create_task_held(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, const char *task_name);
 task_t *sched_fork_from_context(cpu_context_t *parent_ctx);
 extern void sched_bootstrap(void *rsp);
 extern cpu_context_t *sched_tick(cpu_context_t *context);
@@ -210,7 +226,14 @@ void task_munmap(task_t* task, void* addr);
 void* task_mmap_reserve(task_t* task, size_t pages);
 void* task_mmap_reserve_at(task_t* task, uintptr_t addr, size_t pages);
 void task_mmap_release(task_t* task, void* addr);
+int task_fault_in(task_t *task, uintptr_t addr, int write, int exec);
 void sched_free_alloc_list(user_alloc_t *list);
+
+void vfork_release(task_t *task);
+void user_alloc_free(user_alloc_t *a);
+
+// dst gets srcs range and backing, with a ref of its own
+void user_alloc_copy(user_alloc_t *dst, const user_alloc_t *src);
 void sched_init_task_heap(task_t* task);
 void* sched_switch_task(task_t *next_task, void* old_context);
 void* sched_next_context(void* old_context);

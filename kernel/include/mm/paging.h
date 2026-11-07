@@ -17,6 +17,7 @@
 #define PTE_NOFREE          (1ULL << 10)    // frame isnt ram we own (mmio), never freed, copied or cow'd
 #define PTE_SHARED          (1ULL << 11)
 #define PTE_PAT             (1ULL << 12)
+#define PTE_PROTNONE        (1ULL << 52)    // a user page mprotected to PROT_NONE, PTE_USER is off so it faults
 #define PTE_NX              (1ULL << 63)
 
 #define PAGE_KERNEL_RW      (PTE_WRITABLE)

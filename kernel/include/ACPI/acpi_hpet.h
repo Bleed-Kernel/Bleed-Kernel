@@ -6,7 +6,7 @@
 #define femtosecondsPerSecond       1000000000000000
 #define femtosecondsPerMillisecond  1000000000000
 #define femtosecondsPerMicrosecond  1000000000
-#define femtosecondsPerNanosecond   1000
+#define femtosecondsPerNanosecond   1000000
 
 #define HPET_MAINCOUNTER_ENABLE   (1u << 0)
 #define HPET_LEGACY_REPLACEMENT   (1u << 1)
@@ -47,6 +47,9 @@ struct acpi_hpet{
 extern uint64_t femtosecondsPerTick;
 
 uint64_t hpet_read_counter(void);
+
+// we false while the clock is still read off the hpet itself
+bool hpet_tsc_params(uint64_t *tsc_base, uint64_t *counts_base, uint64_t *mult);
 
 uint64_t hpet_get_femtoseconds();
 

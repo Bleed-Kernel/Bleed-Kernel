@@ -16,10 +16,16 @@ uint64_t sys_ioctl(uint64_t fd, uint64_t request, uint64_t arg) {
         return (uint64_t)-EBADF;
 
     file_t* f = caller->fd_table->fds[fd];
-    if (!f || !f->inode || !f->inode->ops->ioctl)
+    if (!f || !f->inode || !f->inode->ops)
         return (uint64_t)-ENOTTY;
 
-    int result = f->inode->ops->ioctl(f->inode, request, (void*)arg);
+    int result;
+    if (f->inode->ops->file_ioctl)
+        result = f->inode->ops->file_ioctl(f, request, (void*)arg);
+    else if (f->inode->ops->ioctl)
+        result = f->inode->ops->ioctl(f->inode, request, (void*)arg);
+    else
+        return (uint64_t)-ENOTTY;
     if (result < 0)
         return (uint64_t)result;
 

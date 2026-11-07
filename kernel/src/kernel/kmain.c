@@ -25,6 +25,7 @@
 #include <fs/vfs_mount.h>
 #include <fs/iso9660/iso9660.h>
 #include <fs/data_image.h>
+#include <fs/packages.h>
 #include <fs/archive/tar.h>
 #include <fonts/psf.h>
 #include <boot/splash_image.h>
@@ -141,7 +142,7 @@ void init_ramdisk(){
     if (bootargs_is("splash", "no")){
         splash_display = true;
     } else if (bootargs_is("splash", "bleed")) {
-        splash_display = display_splash_screen("initrd/boot/splash.bgra", 256, 256);
+        splash_display = display_splash_screen("/boot/splash.bgra", 256, 256);
 
         if (splash_display){
             bconsole_reserve_rows(252);
@@ -154,7 +155,7 @@ void init_ramdisk(){
             splash_display = true;
             BLOG_OK("\t - Firmware (ACPI BGRT) Splash Image");
         } else {
-            splash_display = display_splash_screen("initrd/boot/splash.bgra", 256, 256);
+            splash_display = display_splash_screen("/boot/splash.bgra", 256, 256);
 
             if (splash_display){
                 bconsole_reserve_rows(252);
@@ -169,7 +170,7 @@ void init_ramdisk(){
     if (bootargs_get("ttyfont") != NULL){
         font_init = psf_init(bootargs_get("ttyfont"));
     }else{
-        font_init = psf_init("initrd/fonts/ttyfont.psf");
+        font_init = psf_init("/usr/share/fonts/ttyfont.psf");
     }
 
     if (font_init)
@@ -177,7 +178,7 @@ void init_ramdisk(){
     else
         BLOG_FAIL("\t x PSF Font");
 
-    bool kernel_symtab = stack_trace_load_symbols("initrd/etc/kernel.sym");
+    bool kernel_symtab = stack_trace_load_symbols("/etc/kernel.sym");
     if (kernel_symtab)
         BLOG_OK("\t - Kernel Symbol Table");
     else
@@ -271,7 +272,11 @@ void init_block_devices(){
     if (mount_drive("/mnt/nvme", "nvme0", "nvme0p1"))
         BLOG_OK("\t - NVMe Device Ready");
 
+    if (mount_drive("/mnt/emmc", "mmc0", "mmc0p1"))
+        BLOG_OK("\t - eMMC Device Ready");
+
     data_image_scan();
+    packages_scan();
 
     BLOG_OK("Block Device Probing");
 }

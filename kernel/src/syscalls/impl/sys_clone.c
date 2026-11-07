@@ -3,6 +3,8 @@
 #include <user/user_copy.h>
 #include <user/errno.h>
 
+long vfork_start(task_t *parent, task_t *child);
+
 #define CLONE_VM                0x00000100
 #define CLONE_FS                0x00000200
 #define CLONE_FILES             0x00000400
@@ -21,7 +23,7 @@
 #define CLONE_TID_FLAGS     (CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID | CLONE_CHILD_SETTID)
 #define CLONE_THREAD_OK     (CLONE_THREAD_FLAGS | CLONE_TID_FLAGS | CLONE_SYSVSEM | CLONE_SETTLS | \
                              CLONE_DETACHED | CLONE_EXIT_SIGNAL)
-#define CLONE_FORK_OK       (CLONE_TID_FLAGS | CLONE_EXIT_SIGNAL)
+#define CLONE_FORK_OK       (CLONE_TID_FLAGS | CLONE_EXIT_SIGNAL | CLONE_VFORK | CLONE_VM)
 
 static int put_tid(task_t *task, uint64_t addr, uint64_t tid) {
     uint32_t t = (uint32_t)tid;
@@ -69,6 +71,8 @@ static long clone_fork(task_t *parent, uint64_t flags, uint64_t stack, uint64_t 
     if (flags & CLONE_CHILD_CLEARTID)
         child->clear_child_tid = child_tid;
 
+    if (flags & CLONE_VFORK)
+        return vfork_start(parent, child);
     sched_wake_task(child);
     return (long)child->id;
 }
@@ -84,8 +88,10 @@ long sys_clone(uint64_t flags, uint64_t stack, uint64_t parent_tid, uint64_t chi
     if ((flags & CLONE_THREAD_FLAGS) == CLONE_THREAD_FLAGS)
         return clone_thread(parent, flags, stack, parent_tid, child_tid, tls);
 
-    // TODO: vfork and sharing only some of it, posix_spawn wants CLONE_VM | CLONE_VFORK
-    if (flags & (CLONE_THREAD_FLAGS | CLONE_VFORK))
+    // CLONE_VM | CLONE_VFORK (posix_spawn) gets a copy instead of sharing
+    if ((flags & CLONE_VM) && !(flags & CLONE_VFORK))
+        return -EINVAL;
+    if (flags & (CLONE_THREAD_FLAGS & ~CLONE_VM))
         return -EINVAL;
 
     return clone_fork(parent, flags, stack, parent_tid, child_tid);

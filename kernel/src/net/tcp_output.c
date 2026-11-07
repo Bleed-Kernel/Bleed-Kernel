@@ -3,6 +3,7 @@
 #include <net/ipv4.h>
 #include <drivers/serial/serial.h>
 #include <ACPI/acpi_hpet.h>
+#include <sched/clock.h>
 #include <mm/kalloc.h>
 #include <user/errno.h>
 #include <ansii.h>
@@ -30,7 +31,7 @@ void tcp_arm_rto(tcb_t *t) {
 // rfc 6528, a 4us clock plus a keyed hash of the connection so nobody off path can guess it
 uint32_t tcp_new_iss(uint32_t local_ip, uint16_t local_port, uint32_t remote_ip, uint16_t remote_port) {
     uint32_t tuple[4] = { local_ip, remote_ip, (uint32_t)local_port << 16 | remote_port, 0x7C9A0001 };
-    uint32_t clock    = (uint32_t)(hpet_get_femtoseconds() / 4000000000ull);
+    uint32_t clock    = (uint32_t)(clock_monotonic_ns() / 4000ull);
     return clock + random_keyed32(tuple);
 }
 

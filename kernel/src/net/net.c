@@ -10,6 +10,7 @@
 #include <mm/kalloc.h>
 #include <mm/spinlock.h>
 #include <ACPI/acpi_hpet.h>
+#include <sched/clock.h>
 #include <ansii.h>
 #include <string.h>
 
@@ -104,7 +105,7 @@ uint16_t net_checksum(const void *data, size_t len, uint32_t start) {
 }
 
 uint64_t net_now_ms(void) {
-    return hpet_get_femtoseconds() / femtosecondsPerMillisecond;
+    return clock_monotonic_ns() / 1000000ULL;
 }
 
 void net_kick(void) {

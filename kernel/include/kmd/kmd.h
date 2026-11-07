@@ -12,8 +12,8 @@
 #define KMD_MAGIC           0x444D4B42  // "BKMD"
 #define KMD_ANY             0xFFFFFFFFu
 #define KMD_NAME_MAX        32
-#define KMD_DIR             "/initrd/drivers"
-#define KMD_CONF            "/initrd/etc/drivers.conf"
+#define KMD_DIR             "/lib/modules"
+#define KMD_CONF            "/etc/drivers.conf"
 
 typedef enum {
     KMD_BUS_PCI = 1,

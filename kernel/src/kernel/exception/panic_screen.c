@@ -15,10 +15,10 @@
 
 // these fonts are baked in theyre you can use a simple py script to turn
 // any font into this bpf font
-#define LOGO_PATH       "initrd/boot/splash.bgra"
-#define TITLE_PATH      "initrd/boot/panic-title.bpf"
-#define SUB_PATH        "initrd/boot/panic-sub.bpf"
-#define MONO_PATH       "initrd/boot/panic-mono.bpf"
+#define LOGO_PATH       "/boot/splash.bgra"
+#define TITLE_PATH      "/boot/panic-title.bpf"
+#define SUB_PATH        "/boot/panic-sub.bpf"
+#define MONO_PATH       "/boot/panic-mono.bpf"
 #define LOGO_SIZE       256
 
 #define COL_TITLE       0xC1121F

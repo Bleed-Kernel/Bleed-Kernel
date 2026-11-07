@@ -8,7 +8,9 @@
 #include <user/user_copy.h>
 #include <user/errno.h>
 #include <string.h>
+#include <stddef.h>
 #include <gdt/gdt.h>
+#include <mm/kalloc.h>
 
 #include "priv_scheduler.h"
 
@@ -20,7 +22,42 @@ typedef struct sigframe {
     cpu_context_t saved_ctx;
     sigset_t old_mask;
     uintptr_t prev_frame;
+    user_siginfo_t info;
 } sigframe_t;
+
+// SA_SIGINFO handlers get linuxs rt frame instead, the restorer address sits right under
+// it so rdx is a real ucontext_t and whatever the handler changes in it
+typedef struct linux_sigframe {
+    user_ucontext_t uc;
+    user_siginfo_t  info;
+    uintptr_t       prev_frame;
+} linux_sigframe_t;
+
+// sig_active_frame is 16 aligned, the low bit says which kind it is
+#define FRAME_LINUX 1ULL
+
+enum { G_R8, G_R9, G_R10, G_R11, G_R12, G_R13, G_R14, G_R15, G_RDI, G_RSI, G_RBP, G_RBX,
+       G_RDX, G_RAX, G_RCX, G_RSP, G_RIP, G_EFL, G_CSGSFS, G_ERR, G_TRAPNO, G_OLDMASK, G_CR2 };
+
+static void ctx_to_gregs(const cpu_context_t *c, uint64_t *g) {
+    g[G_R8]  = c->r8;  g[G_R9]  = c->r9;  g[G_R10] = c->r10; g[G_R11] = c->r11;
+    g[G_R12] = c->r12; g[G_R13] = c->r13; g[G_R14] = c->r14; g[G_R15] = c->r15;
+    g[G_RDI] = c->rdi; g[G_RSI] = c->rsi; g[G_RBP] = c->rbp; g[G_RBX] = c->rbx;
+    g[G_RDX] = c->rdx; g[G_RAX] = c->rax; g[G_RCX] = c->rcx; g[G_RSP] = c->rsp;
+    g[G_RIP] = c->rip; g[G_EFL] = c->rflags;
+    g[G_CSGSFS] = c->cs;
+    g[G_ERR]    = c->error;
+    g[G_TRAPNO] = c->vector;
+}
+
+// yum
+static void gregs_to_ctx(const uint64_t *g, cpu_context_t *c) {
+    c->r8  = g[G_R8];  c->r9  = g[G_R9];  c->r10 = g[G_R10]; c->r11 = g[G_R11];
+    c->r12 = g[G_R12]; c->r13 = g[G_R13]; c->r14 = g[G_R14]; c->r15 = g[G_R15];
+    c->rdi = g[G_RDI]; c->rsi = g[G_RSI]; c->rbp = g[G_RBP]; c->rbx = g[G_RBX];
+    c->rdx = g[G_RDX]; c->rax = g[G_RAX]; c->rcx = g[G_RCX]; c->rsp = g[G_RSP];
+    c->rip = g[G_RIP]; c->rflags = g[G_EFL];
+}
 
 static inline int valid_signal(int sig) {
     return sig > 0 && sig < NSIG;
@@ -208,7 +245,92 @@ int signal_set_mask(task_t *task, int how, const sigset_t *set, sigset_t *old) {
 
 #define SIGNAL_RED_ZONE 128
 
-static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) {
+static int on_altstack(task_t *task, uintptr_t sp) {
+    return task->sig_altstack_size && sp > task->sig_altstack_sp &&
+           sp <= task->sig_altstack_sp + task->sig_altstack_size;
+}
+
+static void signal_enter_mask(task_t *task, int sig, sigset_t handler_mask, uint64_t handler_flags) {
+    task->sig_blocked |= handler_mask;
+    if (!(handler_flags & (SA_NODEFER | SA_RESETHAND)))
+        task->sig_blocked |= sig_bit(sig);
+    if (handler_flags & SA_RESETHAND) {
+        task->sig_handlers[sig] = SIG_DFL;
+        task->sig_flags[sig] &= ~(uint64_t)SA_SIGINFO;
+    }
+}
+
+static int signal_setup_linux_frame(task_t *task, cpu_context_t *ctx, int sig, int code, uint64_t addr,
+                                    uintptr_t top) {
+    // ucontext 16 aligned, and the restorer slot under it leaves rsp how a call would
+    uintptr_t frame_addr = (top - sizeof(linux_sigframe_t)) & ~0xFULL;
+    uintptr_t ret_addr_sp = frame_addr - sizeof(uint64_t);
+    if (!user_ptr_valid(frame_addr) || !user_ptr_valid(ret_addr_sp))
+        return -EFAULT;
+
+    // a kilobyte, too much for the 8k kernel stack. the fault path isnt always under the bkl
+    linux_sigframe_t *f = kmalloc(sizeof(*f));
+    if (!f)
+        return -ENOMEM;
+    memset(f, 0, sizeof(*f));
+    ctx_to_gregs(ctx, f->uc.gregs);
+    f->uc.gregs[G_OLDMASK] = task->sig_blocked;
+    f->uc.gregs[G_CR2]     = (sig == SIGSEGV || sig == SIGBUS) ? addr : 0;
+    f->uc.fpregs      = frame_addr + offsetof(linux_sigframe_t, uc.fpregs_mem);
+    f->uc.sigmask[0]  = task->sig_blocked;
+    f->uc.stack.sp    = task->sig_altstack_sp;
+    f->uc.stack.size  = task->sig_altstack_size;
+    f->uc.stack.flags = task->sig_altstack_size ? task->sig_altstack_flags : SS_DISABLE;
+    f->info.signo = sig;
+    f->info.code  = code;
+    f->info.addr  = addr;
+    f->prev_frame = task->sig_active_frame;
+
+    uint64_t ret_addr = (uint64_t)task->sig_restorers[sig];
+    int bad = copy_to_user(task, (void *)frame_addr, f, sizeof(*f)) != 0 ||
+              copy_to_user(task, (void *)ret_addr_sp, &ret_addr, sizeof(ret_addr)) != 0;
+    kfree(f);
+    if (bad)
+        return -EFAULT;
+
+    uintptr_t handler = task->sig_handlers[sig];
+    task->sig_active_frame = frame_addr | FRAME_LINUX;
+    signal_enter_mask(task, sig, task->sig_masks[sig], task->sig_flags[sig]);
+
+    ctx->rip = handler;
+    ctx->rdi = (uint64_t)sig;
+    ctx->rsi = frame_addr + offsetof(linux_sigframe_t, info);
+    ctx->rdx = frame_addr;
+    ctx->rax = 0;
+    ctx->rsp = ret_addr_sp;
+    return 0;
+}
+
+static int signal_return_linux_frame(task_t *task, cpu_context_t *ctx, uintptr_t frame_addr) {
+    // only the registers and the mask come back, no need to read the whole frame
+    uint64_t gregs[UC_NGREG];
+    uint64_t mask, prev;
+    if (copy_from_user(task, gregs, (const void *)(frame_addr + offsetof(linux_sigframe_t, uc.gregs)), sizeof(gregs)) ||
+        copy_from_user(task, &mask, (const void *)(frame_addr + offsetof(linux_sigframe_t, uc.sigmask)), sizeof(mask)) ||
+        copy_from_user(task, &prev, (const void *)(frame_addr + offsetof(linux_sigframe_t, prev_frame)), sizeof(prev)))
+        return -EFAULT;
+
+    cpu_context_t back = *ctx;
+    gregs_to_ctx(gregs, &back);
+    if (!user_ptr_valid(back.rip))
+        return -EFAULT;
+
+    back.cs     = USER_CS;
+    back.ss     = USER_SS;
+    back.rflags = (back.rflags & RFLAGS_USER_MASK) | RFLAGS_IF;
+
+    *ctx = back;
+    task->sig_blocked = mask & ~(sig_bit(SIGKILL) | sig_bit(SIGSTOP));
+    task->sig_active_frame = prev;
+    return 0;
+}
+
+static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig, int code, uint64_t addr) {
     uintptr_t handler = task->sig_handlers[sig];
     uintptr_t restorer = task->sig_restorers[sig];
     sigset_t handler_mask = task->sig_masks[sig];
@@ -217,10 +339,20 @@ static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) 
     if (handler == SIG_DFL || handler == SIG_IGN || restorer < 2)
         return -EINVAL;
 
-    // whatever stack the task is on, it doesnt have to be the main one. copy_to_user
-    // still says no if its not mapped
-    uintptr_t frame_addr = (ctx->rsp - SIGNAL_RED_ZONE - sizeof(sigframe_t)) & ~0xFULL;
-    if (!user_ptr_valid(frame_addr) || !user_ptr_valid(ctx->rsp))
+    // SA_ONSTACK goes to the alt stack, how a stack overflow still gets its handler run.
+    // otherwise whatever stack the task is on, copy_to_user still says no if its not mapped
+    uintptr_t top = ctx->rsp - SIGNAL_RED_ZONE;
+    if ((handler_flags & SA_ONSTACK) && !(task->sig_altstack_flags & SS_DISABLE) &&
+        task->sig_altstack_size && !on_altstack(task, ctx->rsp))
+        top = task->sig_altstack_sp + task->sig_altstack_size;
+    else if (!user_ptr_valid(ctx->rsp))
+        return -EFAULT;
+
+    if (handler_flags & SA_SIGINFO)
+        return signal_setup_linux_frame(task, ctx, sig, code, addr, top);
+
+    uintptr_t frame_addr = (top - sizeof(sigframe_t)) & ~0xFULL;
+    if (!user_ptr_valid(frame_addr))
         return -EFAULT;
 
     sigframe_t frame;
@@ -228,6 +360,9 @@ static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) 
     frame.saved_ctx = *ctx;
     frame.old_mask = task->sig_blocked;
     frame.prev_frame = task->sig_active_frame;
+    frame.info.signo = sig;
+    frame.info.code  = code;
+    frame.info.addr  = addr;
 
     if (copy_to_user(task, (void *)frame_addr, &frame, sizeof(frame)) != 0)
         return -EFAULT;
@@ -241,10 +376,7 @@ static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) 
         return -EFAULT;
 
     task->sig_active_frame = frame_addr;
-
-    task->sig_blocked |= handler_mask;
-    if (!(handler_flags & SA_NODEFER))
-        task->sig_blocked |= sig_bit(sig);
+    signal_enter_mask(task, sig, handler_mask, handler_flags);
 
     // rsi is the frame so a handler can read and change the context it came from
     ctx->rip = handler;
@@ -254,7 +386,7 @@ static int signal_setup_user_handler(task_t *task, cpu_context_t *ctx, int sig) 
     return 0;
 }
 
-int signal_deliver_fault(task_t *task, cpu_context_t *ctx, int sig) {
+int signal_deliver_fault(task_t *task, cpu_context_t *ctx, int sig, int code, uint64_t addr) {
     if (!task || !ctx || !valid_signal(sig))
         return -EINVAL;
 
@@ -265,12 +397,48 @@ int signal_deliver_fault(task_t *task, cpu_context_t *ctx, int sig) {
     if (task->sig_active_frame || (task->sig_blocked & sig_bit(sig)))
         return -EINVAL;
 
-    return signal_setup_user_handler(task, ctx, sig);
+    return signal_setup_user_handler(task, ctx, sig, code, addr);
+}
+
+int signal_set_altstack(task_t *task, const user_stack_t *ss, user_stack_t *old, uintptr_t sp) {
+    if (old) {
+        old->sp    = task->sig_altstack_sp;
+        old->size  = task->sig_altstack_size;
+        old->flags = task->sig_altstack_size ? task->sig_altstack_flags : SS_DISABLE;
+        if (on_altstack(task, sp))
+            old->flags = SS_ONSTACK;
+        old->pad = 0;
+    }
+    if (!ss)
+        return 0;
+
+    if (on_altstack(task, sp))
+        return -EPERM;
+    if (ss->flags & ~(SS_DISABLE | SS_ONSTACK))
+        return -EINVAL;
+    if (ss->flags & SS_DISABLE) {
+        task->sig_altstack_sp    = 0;
+        task->sig_altstack_size  = 0;
+        task->sig_altstack_flags = SS_DISABLE;
+        return 0;
+    }
+    if (ss->size < MINSIGSTKSZ)
+        return -ENOMEM;
+    if (!user_ptr_valid(ss->sp) || !user_ptr_valid(ss->sp + ss->size - 1))
+        return -EFAULT;
+
+    task->sig_altstack_sp    = ss->sp;
+    task->sig_altstack_size  = ss->size;
+    task->sig_altstack_flags = 0;
+    return 0;
 }
 
 int signal_handle_sigreturn(task_t *task, cpu_context_t *ctx) {
     if (!task || !ctx || !task->sig_active_frame)
         return -EINVAL;
+
+    if (task->sig_active_frame & FRAME_LINUX)
+        return signal_return_linux_frame(task, ctx, task->sig_active_frame & ~FRAME_LINUX);
 
     sigframe_t frame;
     if (copy_from_user(task, &frame, (const void *)task->sig_active_frame, sizeof(frame)) != 0)
@@ -316,7 +484,7 @@ void signal_deliver_pending(task_t *task, cpu_context_t *ctx) {
         if (default_action != -1)
             return;
 
-        if (signal_setup_user_handler(task, ctx, sig) < 0) {
+        if (signal_setup_user_handler(task, ctx, sig, SI_USER, 0) < 0) {
             task->exit_signal = sig;
             task->exit_code = 128 + sig;
             exit();

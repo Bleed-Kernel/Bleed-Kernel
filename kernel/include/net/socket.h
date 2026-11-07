@@ -87,6 +87,10 @@ int  socket_accept(socket_t *s, int flags, uint32_t *ip, uint16_t *port);
 long socket_sendto(socket_t *s, const void *user_buf, size_t len, int flags, bool to_given, uint32_t ip, uint16_t port);
 long socket_recvfrom(socket_t *s, void *user_buf, size_t len, int flags, uint32_t *ip, uint16_t *port);
 
+// the same with kernel buffers, for sendmsg and recvmsg gathering several
+long socket_send_kernel(socket_t *s, const void *buf, size_t len, int flags, bool to_given, uint32_t ip, uint16_t port);
+long socket_recv_kernel(socket_t *s, void *buf, size_t len, int flags, uint32_t *ip, uint16_t *port);
+
 void socket_name(socket_t *s, bool peer, uint32_t *ip, uint16_t *port);
 int  socket_setopt(socket_t *s, int level, int name, const void *val, size_t len);
 int  socket_getopt(socket_t *s, int level, int name, void *val, size_t *len);

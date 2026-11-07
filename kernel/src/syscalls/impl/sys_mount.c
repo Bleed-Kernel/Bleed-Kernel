@@ -6,7 +6,7 @@
 #include <user/errno.h>
 #include <user/user_copy.h>
 
-int sys_mount(const char *user_source,
+long sys_mount(const char *user_source,
               const char *user_target,
               const char *user_fstype,
               unsigned long mountflags,

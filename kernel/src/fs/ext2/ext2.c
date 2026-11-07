@@ -18,6 +18,7 @@
 
 static const INodeOps_t ext2_dir_ops;
 static const INodeOps_t ext2_file_ops;
+static const INodeOps_t ext2_link_ops;
 
 #define EXT2_READ_RUN   64
 
@@ -139,59 +140,112 @@ static uint32_t ext2_get_data_block(ext2_fs_t *fs, const ext2_disk_inode_t *di,
     return ext2_map_entry(fs, ind_blk, rem1 % ptrs_per_block);
 }
 
-// alloc a new data block on the fs, returns block number or 0 on failure.
-static uint32_t ext2_alloc_block(ext2_fs_t *fs) {
-    for (uint32_t g = 0; g < fs->num_groups; g++) {
-        ext2_bgd_t bgd;
-        if (ext2_read_bgd(fs, g, &bgd) < 0) continue;
-        if (bgd.bg_free_blocks_count == 0) continue;
+// a write allocating block after block used to read and write the bitmap
+#define BM_NONE UINT32_MAX
 
-        uint8_t *bitmap = kmalloc(fs->block_size);
-        if (!bitmap) return 0;
-        ext2_read_block(fs, bgd.bg_block_bitmap, bitmap);
+static void ext2_alloc_flush(ext2_fs_t *fs) {
+    if (fs->bm_group != BM_NONE && fs->bm_dirty) {
+        ext2_bgd_t bgd;
+        if (ext2_read_bgd(fs, fs->bm_group, &bgd) == 0) {
+            ext2_write_block(fs, bgd.bg_block_bitmap, fs->bm_buf);
+            bgd.bg_free_blocks_count = fs->bm_free;
+            ext2_write_bgd(fs, fs->bm_group, &bgd);
+        }
+        fs->bm_dirty = false;
+    }
+    if (fs->sb_dirty) {
+        ext2_write_bytes(fs, EXT2_SUPERBLOCK_OFFSET, &fs->sb, sizeof(fs->sb));
+        fs->sb_dirty = false;
+    }
+}
+
+// group g's bitmap into the cache, writing out whatever was there
+static bool ext2_alloc_load(ext2_fs_t *fs, uint32_t g) {
+    if (fs->bm_group == g)
+        return true;
+    ext2_alloc_flush(fs);
+    fs->bm_group = BM_NONE;
+
+    ext2_bgd_t bgd;
+    if (!fs->bm_buf)
+        fs->bm_buf = kmalloc(fs->block_size);
+    if (!fs->bm_buf || ext2_read_bgd(fs, g, &bgd) < 0 || ext2_read_block(fs, bgd.bg_block_bitmap, fs->bm_buf) < 0)
+        return false;
+    fs->bm_group = g;
+    fs->bm_free  = bgd.bg_free_blocks_count;
+    fs->bm_next  = 0;
+    return true;
+}
+
+// alloc a new data block on the fs, returns block number or 0 on failure. zero says to clear
+// it on disk, a file block thats about to be written whole doesnt need it. the caller runs
+// ext2_alloc_flush once its done allocating
+static uint32_t ext2_alloc_block_z(ext2_fs_t *fs, bool zero) {
+    for (uint32_t n = 0; n < fs->num_groups; n++) {
+        uint32_t g = (fs->alloc_group + n) % fs->num_groups;
+
+        if (g == fs->bm_group) {
+            if (fs->bm_free == 0) continue;
+        } else {
+            ext2_bgd_t bgd;
+            if (ext2_read_bgd(fs, g, &bgd) < 0 || bgd.bg_free_blocks_count == 0) continue;
+            if (!ext2_alloc_load(fs, g)) return 0;
+        }
 
         uint32_t blocks_in_group = fs->blocks_per_group;
-        
         // its possible for the last group to be smaller
         if ((g + 1) * fs->blocks_per_group > fs->sb.s_blocks_count)
             blocks_in_group = fs->sb.s_blocks_count - g * fs->blocks_per_group;
 
-        for (uint32_t bit = 0; bit < blocks_in_group; bit++) {
-            if (!(bitmap[bit / 8] & (1u << (bit % 8)))) {
-                bitmap[bit / 8] |= (1u << (bit % 8));
-                ext2_write_block(fs, bgd.bg_block_bitmap, bitmap);
-                kfree(bitmap);
+        uint8_t *bitmap = fs->bm_buf;
+        for (uint32_t i = 0; i < blocks_in_group; i++) {
+            uint32_t bit = (fs->bm_next + i) % blocks_in_group;
+            if (bitmap[bit / 8] & (1u << (bit % 8)))
+                continue;
 
-                bgd.bg_free_blocks_count--;
-                ext2_write_bgd(fs, g, &bgd);
+            bitmap[bit / 8] |= (1u << (bit % 8));
+            fs->bm_free--;
+            fs->bm_next  = bit + 1;
+            fs->bm_dirty = true;
+            fs->sb.s_free_blocks_count--;
+            fs->sb_dirty = true;
+            fs->alloc_group = g;
 
-                // update sprblk count
-                fs->sb.s_free_blocks_count--;
-                ext2_write_bytes(fs, EXT2_SUPERBLOCK_OFFSET, &fs->sb,
-                                 sizeof(fs->sb));
-
-                uint32_t blk = fs->first_data_block
-                             + g * fs->blocks_per_group + bit;
-
-                // Zero the new block 
-                uint8_t *zero = kmalloc(fs->block_size);
-                if (zero) {
-                    memset(zero, 0, fs->block_size);
-                    ext2_write_block(fs, blk, zero);
-                    kfree(zero);
-                }
-                return blk;
+            uint32_t blk = fs->first_data_block + g * fs->blocks_per_group + bit;
+            uint8_t *zeros = zero ? kmalloc(fs->block_size) : NULL;
+            if (zeros) {
+                memset(zeros, 0, fs->block_size);
+                ext2_write_block(fs, blk, zeros);
+                kfree(zeros);
             }
+            return blk;
         }
-        kfree(bitmap);
+        // the descriptor said there was room but the bitmap had none
+        fs->bm_free = 0;
     }
     return 0;
+}
+
+static uint32_t ext2_alloc_block(ext2_fs_t *fs) {
+    return ext2_alloc_block_z(fs, true);
 }
 
 static void ext2_free_block(ext2_fs_t *fs, uint32_t blk) {
     if (!blk) return;
     uint32_t g   = (blk - fs->first_data_block) / fs->blocks_per_group;
     uint32_t bit = (blk - fs->first_data_block) % fs->blocks_per_group;
+
+    // freed from the cached group
+    if (g == fs->bm_group) {
+        fs->bm_buf[bit / 8] &= ~(1u << (bit % 8));
+        fs->bm_free++;
+        fs->bm_dirty = true;
+        fs->sb.s_free_blocks_count++;
+        fs->sb_dirty = true;
+        ext2_alloc_flush(fs);
+        return;
+    }
+    ext2_alloc_flush(fs);
 
     ext2_bgd_t bgd;
     if (ext2_read_bgd(fs, g, &bgd) < 0) return;
@@ -213,11 +267,14 @@ static void ext2_free_block(ext2_fs_t *fs, uint32_t blk) {
 // Set the logical block "logical_block" of inode to physical block "phys". Allocates indirect blocks as required. Returns 0 on success
 static int ext2_set_data_block(ext2_fs_t *fs, ext2_disk_inode_t *di,
                                 uint32_t ino, uint32_t logical_block, uint32_t phys) {
+    (void)ino;
     uint32_t ptrs_per_block = fs->block_size / 4;
+    uint32_t sectors        = fs->block_size / 512;
 
     if (logical_block < 12) {
         di->i_block[logical_block] = phys;
-        return ext2_write_disk_inode(fs, ino, di);
+        di->i_blocks += sectors;
+        return 0;
     }
     logical_block -= 12;
 
@@ -225,7 +282,7 @@ static int ext2_set_data_block(ext2_fs_t *fs, ext2_disk_inode_t *di,
         if (!di->i_block[12]) {
             di->i_block[12] = ext2_alloc_block(fs);
             if (!di->i_block[12]) return -EIO;
-            ext2_write_disk_inode(fs, ino, di);
+            di->i_blocks += sectors;
         }
         uint32_t *ind = kmalloc(fs->block_size);
         if (!ind) return -ENOMEM;
@@ -233,6 +290,7 @@ static int ext2_set_data_block(ext2_fs_t *fs, ext2_disk_inode_t *di,
         ind[logical_block] = phys;
         ext2_write_block(fs, di->i_block[12], ind);
         kfree(ind);
+        di->i_blocks += sectors;
         return 0;
     }
     logical_block -= ptrs_per_block;
@@ -241,7 +299,7 @@ static int ext2_set_data_block(ext2_fs_t *fs, ext2_disk_inode_t *di,
         if (!di->i_block[13]) {
             di->i_block[13] = ext2_alloc_block(fs);
             if (!di->i_block[13]) return -EIO;
-            ext2_write_disk_inode(fs, ino, di);
+            di->i_blocks += sectors;
         }
         uint32_t idx1 = logical_block / ptrs_per_block;
         uint32_t idx2 = logical_block % ptrs_per_block;
@@ -253,6 +311,7 @@ static int ext2_set_data_block(ext2_fs_t *fs, ext2_disk_inode_t *di,
             dind[idx1] = ext2_alloc_block(fs);
             if (!dind[idx1]) { kfree(dind); return -EIO; }
             ext2_write_block(fs, di->i_block[13], dind);
+            di->i_blocks += sectors;
         }
         uint32_t ind_blk = dind[idx1];
         kfree(dind);
@@ -263,6 +322,7 @@ static int ext2_set_data_block(ext2_fs_t *fs, ext2_disk_inode_t *di,
         ind[idx2] = phys;
         ext2_write_block(fs, ind_blk, ind);
         kfree(ind);
+        di->i_blocks += sectors;
         return 0;
     }
 
@@ -391,6 +451,9 @@ static INode_t *ext2_make_vfs_inode(ext2_fs_t *fs, uint32_t ino,
     if (mode_type == EXT2_S_IFDIR) {
         inode->type = INODE_DIRECTORY;
         inode->ops  = &ext2_dir_ops;
+    } else if (mode_type == EXT2_S_IFLNK) {
+        inode->type = INODE_SYMLINK;
+        inode->ops  = &ext2_link_ops;
     } else {
         inode->type = INODE_FILE;
         inode->ops  = &ext2_file_ops;
@@ -465,21 +528,23 @@ static long ext2_write(INode_t *inode, const void *buf, size_t count, size_t off
     uint8_t *block_buf = kmalloc(fs->block_size);
     if (!block_buf) return -ENOMEM;
 
-    size_t total = 0;
+    size_t total  = 0;
+    bool   mapped = false;      // blocks were added, the inode has to go back out
     while (total < count) {
         uint32_t logical = (uint32_t)((offset + total) / fs->block_size);
         size_t   boff    = (offset + total) % fs->block_size;
         uint32_t phys    = ext2_get_data_block(fs, di, logical);
+        bool     fresh   = false;
 
         if (!phys) {
-            phys = ext2_alloc_block(fs);
+            phys  = ext2_alloc_block_z(fs, false);
+            fresh = true;
             if (!phys) break;
+            mapped = true;
             if (ext2_set_data_block(fs, di, ei->ino, logical, phys) < 0) {
                 ext2_free_block(fs, phys);
                 break;
             }
-            // reread cause ext2_set_data_block may have updated it
-            ext2_read_disk_inode(fs, ei->ino, di);
         }
 
         size_t avail = fs->block_size - boff;
@@ -488,7 +553,10 @@ static long ext2_write(INode_t *inode, const void *buf, size_t count, size_t off
 
         // partial block
         if (boff != 0 || chunk < fs->block_size) {
-            if (ext2_read_block(fs, phys, block_buf) < 0) break;
+            if (fresh)
+                memset(block_buf, 0, fs->block_size);
+            else if (ext2_read_block(fs, phys, block_buf) < 0)
+                break;
         }
         memcpy(block_buf + boff, (const uint8_t *)buf + total, chunk);
         if (ext2_write_block(fs, phys, block_buf) < 0) break;
@@ -496,9 +564,10 @@ static long ext2_write(INode_t *inode, const void *buf, size_t count, size_t off
     }
 
     kfree(block_buf);
+    ext2_alloc_flush(fs);
 
     uint32_t now = (uint32_t)clock_now();
-    int dirty = di->i_mtime != now;
+    int dirty = di->i_mtime != now || mapped;
     di->i_mtime = di->i_ctime = now;
 
     // Update inode size if we extended the file 
@@ -507,7 +576,6 @@ static long ext2_write(INode_t *inode, const void *buf, size_t count, size_t off
         di->i_size = (uint32_t)new_end;
         // Update upper 32 bits too (rev1 large files) 
         di->i_dir_acl = (uint32_t)(new_end >> 32);
-        di->i_blocks  = (uint32_t)(((uint64_t)new_end + 511) / 512);
         dirty = 1;
     }
     if (dirty) {
@@ -543,12 +611,14 @@ static int ext2_truncate(INode_t *inode, size_t new_size) {
         uint32_t have_blocks = (uint32_t)((di->i_size + fs->block_size - 1) / fs->block_size);
         for (uint32_t lb = keep_blocks; lb < have_blocks; lb++) {
             uint32_t phys = ext2_get_data_block(fs, di, lb);
-            if (phys) ext2_free_block(fs, phys);
+            if (phys) {
+                ext2_free_block(fs, phys);
+                di->i_blocks -= fs->block_size / 512;
+            }
             // Clear the map entry
             if (lb < 12) di->i_block[lb] = 0;
         }
         di->i_size   = (uint32_t)new_size;
-        di->i_blocks = (uint32_t)((new_size + 511) / 512);
     } else {
         // write 0 byte at the end
         uint8_t z = 0;
@@ -770,10 +840,12 @@ static int ext2_dir_add_entry(ext2_fs_t *fs, ext2_disk_inode_t *parent_di,
             if (!phys) { kfree(block_buf); return -EIO; }
             if (ext2_set_data_block(fs, parent_di, parent_ino, lb, phys) < 0) {
                 ext2_free_block(fs, phys);
+                ext2_alloc_flush(fs);
                 kfree(block_buf);
                 return -EIO;
             }
-            ext2_read_disk_inode(fs, parent_ino, parent_di);
+            ext2_alloc_flush(fs);
+            ext2_write_disk_inode(fs, parent_ino, parent_di);
             memset(block_buf, 0, fs->block_size);
         } else {
             if (ext2_read_block(fs, phys, block_buf) < 0) {
@@ -800,7 +872,6 @@ static int ext2_dir_add_entry(ext2_fs_t *fs, ext2_disk_inode_t *parent_di,
                 uint32_t new_size = (lb + 1) * fs->block_size;
                 if (new_size > file_size) {
                     parent_di->i_size   = new_size;
-                    parent_di->i_blocks = (uint32_t)((new_size + 511) / 512);
                     ext2_write_disk_inode(fs, parent_ino, parent_di);
                 }
                 inserted = true;
@@ -837,8 +908,17 @@ static int ext2_dir_add_entry(ext2_fs_t *fs, ext2_disk_inode_t *parent_di,
     return inserted ? 0 : -1;
 }
 
+static int ext2_make_child(INode_t *parent, const char *name, size_t namelen,
+                           INode_t **result, inode_type node_type);
+
 static int ext2_create(INode_t *parent, const char *name, size_t namelen,
                         INode_t **result, inode_type node_type) {
+    if (node_type == INODE_SYMLINK) return -EINVAL;
+    return ext2_make_child(parent, name, namelen, result, node_type);
+}
+
+static int ext2_make_child(INode_t *parent, const char *name, size_t namelen,
+                           INode_t **result, inode_type node_type) {
     if (namelen > 255) return -ENAMETOOLONG;
 
     ext2_inode_t     *pei = parent->internal_data;
@@ -851,7 +931,8 @@ static int ext2_create(INode_t *parent, const char *name, size_t namelen,
     // Initialise the on-disk inode 
     ext2_disk_inode_t new_di;
     memset(&new_di, 0, sizeof(new_di));
-    new_di.i_mode        = is_dir ? (EXT2_S_IFDIR | 0755) : (EXT2_S_IFREG | 0644);
+    bool is_link = (node_type == INODE_SYMLINK);
+    new_di.i_mode        = is_dir ? (EXT2_S_IFDIR | 0755) : is_link ? (EXT2_S_IFLNK | 0777) : (EXT2_S_IFREG | 0644);
     new_di.i_links_count = is_dir ? 2 : 1; // dir: self + parent's entry 
     new_di.i_atime = new_di.i_ctime = new_di.i_mtime = (uint32_t)clock_now();
     if (ext2_write_disk_inode(fs, new_ino, &new_di) < 0) {
@@ -860,7 +941,7 @@ static int ext2_create(INode_t *parent, const char *name, size_t namelen,
     }
 
     // Add the entry in the parent directory 
-    uint8_t ft = is_dir ? EXT2_FT_DIR : EXT2_FT_REG_FILE;
+    uint8_t ft = is_dir ? EXT2_FT_DIR : is_link ? EXT2_FT_SYMLINK : EXT2_FT_REG_FILE;
     if (ext2_dir_add_entry(fs, &pei->disk, pei->ino,
                            new_ino, name, (uint8_t)namelen, ft) < 0) {
         ext2_free_inode(fs, new_ino, is_dir);
@@ -973,16 +1054,23 @@ static int ext2_unlink(INode_t *dir, const char *name, size_t namelen) {
     ext2_write_block(fs, uc.phys_block, block_buf);
     kfree(block_buf);
 
-    target_di.i_links_count--;
+    // an empty dir is only held by this entry and its own ., both go together
+    if (target_is_dir)
+        target_di.i_links_count = 0;
+    else
+        target_di.i_links_count--;
     if (target_is_dir) {
         ei->disk.i_links_count--;
         ext2_write_disk_inode(fs, ei->ino, &ei->disk);
     }
     if (target_di.i_links_count == 0) {
-        ext2_free_inode_blocks(fs, &target_di);
+        // a fast symlink keeps its target in i_block, those arent block numbers
+        bool fast_link = (target_di.i_mode & EXT2_S_IFMT) == EXT2_S_IFLNK && target_di.i_blocks == 0;
+        if (!fast_link)
+            ext2_free_inode_blocks(fs, &target_di);
         memset(target_di.i_block, 0, sizeof(target_di.i_block));
         target_di.i_size   = 0;
-        target_di.i_dtime  = 1; // non-zero marks deleted 
+        target_di.i_dtime  = (uint32_t)clock_now();
         ext2_write_disk_inode(fs, uc.found_ino, &target_di);
         ext2_free_inode(fs, uc.found_ino, target_is_dir);
     } else {
@@ -1052,6 +1140,52 @@ static int ext2_rename(INode_t *dir, const char *oldname, size_t oldlen,
                               target_ino, newname, (uint8_t)newlen, ft);
 }
 
+// targets shorter than i_block live in it
+#define EXT2_FAST_LINK_MAX  sizeof(((ext2_disk_inode_t *)0)->i_block)
+
+static long ext2_readlink(INode_t *inode, char *out, size_t size) {
+    ext2_inode_t      *ei = inode->internal_data;
+    ext2_disk_inode_t *di = &ei->disk;
+    size_t len = di->i_size;
+
+    if (di->i_blocks == 0 && len < EXT2_FAST_LINK_MAX) {
+        if (len > size) len = size;
+        memcpy(out, (const char *)di->i_block, len);
+        return (long)len;
+    }
+    return ext2_read(inode, out, len < size ? len : size, 0);
+}
+
+static int ext2_symlink(INode_t *dir, const char *name, size_t namelen, const char *target, INode_t **result) {
+    ext2_fs_t *fs = ((ext2_inode_t *)dir->internal_data)->fs;
+
+    // vfs_symlink_at already made sure the name is free
+    INode_t *link = NULL;
+    int r = ext2_make_child(dir, name, namelen, &link, INODE_SYMLINK);
+    if (r < 0)
+        return r;
+
+    ext2_inode_t *ei  = link->internal_data;
+    size_t        len = strlen(target);
+    if (len < EXT2_FAST_LINK_MAX) {
+        memcpy(ei->disk.i_block, target, len);
+        ei->disk.i_size = (uint32_t)len;
+        ext2_write_disk_inode(fs, ei->ino, &ei->disk);
+    } else if (ext2_write(link, target, len, 0) != (long)len) {
+        *result = link;
+        return -ENOSPC;
+    }
+    *result = link;
+    return 0;
+}
+
+static const INodeOps_t ext2_link_ops = {
+    .readlink = ext2_readlink,
+    .size     = ext2_size,
+    .drop     = ext2_drop,
+    .times    = ext2_times,
+};
+
 static const INodeOps_t ext2_dir_ops = {
     .lookup  = ext2_lookup,
     .readdir = ext2_readdir,
@@ -1062,6 +1196,7 @@ static const INodeOps_t ext2_dir_ops = {
     .times   = ext2_times,
     .statfs  = ext2_statfs,
     .label   = ext2_label,
+    .symlink = ext2_symlink,
 };
 
 static const INodeOps_t ext2_file_ops = {
@@ -1113,6 +1248,7 @@ int ext2_mount(INode_t *dev_inode, INode_t **root) {
     ext2_fs_t *fs = kmalloc(sizeof(*fs));
     if (!fs) return -ENOMEM;
     memset(fs, 0, sizeof(*fs));
+    fs->bm_group = BM_NONE;
 
     fs->dev              = dev_inode;
     fs->block_size       = 1024u << sb.s_log_block_size;

@@ -11,11 +11,18 @@
 #define O_WRONLY 0x1
 #define O_RDWR   0x2
 #define O_MODE   0x3
-#define O_CREAT  0x4
-#define O_TRUNC  0x8
-#define O_APPEND 0x10
-#define O_DIRECTORY 0x80
-#define O_EXCL      0x400   // with O_CREAT, fail if its already there
+// linux values
+#define O_CREAT     0x40
+#define O_EXCL      0x80    // with O_CREAT, fail if its already there
+#define O_NOCTTY    0x100
+#define O_TRUNC     0x200
+#define O_APPEND    0x400
+#define O_NONBLOCK  0x800
+#define O_DIRECTORY 0x10000
+#define O_NOFOLLOW  0x20000
+#define O_CLOEXEC   0x80000
+
+#define FD_CLOEXEC  1
 
 #define AT_FDCWD (-100)
 
@@ -33,15 +40,24 @@ typedef struct INode INode_t;
 typedef enum {
     INODE_DIRECTORY,
     INODE_FILE,
-    INODE_DEVICE
+    INODE_DEVICE,
+    INODE_SYMLINK
 } inode_type;
+
+#define AT_SYMLINK_NOFOLLOW 0x100
+#define VFS_LINK_DEPTH      8
+#define VFS_LINK_MAX        1024
 
 typedef enum {
     FD_TYPE_FS,
     FD_TYPE_DEV,
     FD_TYPE_PIPE,
-    FD_TYPE_SOCKET
+    FD_TYPE_SOCKET,
+    FD_TYPE_UNIX,
+    FD_TYPE_EPOLL
 } fd_type_t;
+
+struct file;
 
 typedef struct INodeOps{
     int    (*create)  (INode_t* parent, const char* name, size_t namelen, INode_t** result, inode_type node_type);
@@ -60,6 +76,15 @@ typedef struct INodeOps{
     void   (*times)   (INode_t* inode, int64_t *atime, int64_t *mtime, int64_t *ctime);
     int    (*statfs)  (INode_t* root, uint64_t *block_size, uint64_t *total, uint64_t *free);
     int    (*label)   (INode_t* root, char *out, size_t size);    // the volumes name, -ENOENT if it hasnt got one
+
+    // for a device that keeps something per open (the audio card has a stream for each)
+    // clsoed when the last ref is used
+    int    (*file_ioctl)  (struct file* file, unsigned long request, void* arg);
+    void   (*file_release)(struct file* file);
+
+    // a symlink called name in dir pointing at target, and reading one back (length, no nul)
+    int    (*symlink) (INode_t* dir, const char* name, size_t namelen, const char* target, INode_t** result);
+    long   (*readlink)(INode_t* inode, char* out, size_t size);
 } INodeOps_t;
 
 /*
@@ -80,6 +105,7 @@ typedef struct INode {
     struct  INode* dcache_next; // next in the dentry cache bucket
     uint8_t attached;           // we hold a ref on parent
     uint8_t hashed;             // findable in the dentry cache
+    uint16_t dcache_bucket;     // the bucket we went in, a filesystem can rename us in place
 } INode_t;
 
 typedef struct file {
@@ -93,6 +119,7 @@ typedef struct file {
 
 typedef struct fd_table{
     file_t *fds[MAX_FDS];
+    uint8_t fd_flags[MAX_FDS];
     int refs;   // threads share one
 }fd_table_t;
 
@@ -141,6 +168,9 @@ void vfs_drop(INode_t* inode);
 /// @return 0 or a negative errno
 int vfs_lookup(const path_t* path, INode_t** inode);
 
+/// @brief vfs_lookup but a symlink at the end of the path is handed back instead of followed
+int vfs_lookup_nofollow(const path_t* path, INode_t** inode);
+
 long vfs_read_exact(INode_t *inode, void *out_buffer, size_t exact_count, size_t offset);
 
 int vfs_create(const path_t* path, INode_t** result, inode_type node_type);
@@ -154,19 +184,41 @@ path_t vfs_parent_path(const path_t* path);
 int vfs_stat(const char *path_str, user_stat_t *st);
 int vfs_stat_at(int dirfd, const char *path_str, user_stat_t *st);
 int vfs_fstat(int fd, user_stat_t *st);
+int vfs_lstat_at(int dirfd, const char *path_str, user_stat_t *st);
+
+int  vfs_symlink_at(const char *target, int dirfd, const char *path_str);
+long vfs_readlink_at(int dirfd, const char *path_str, char *out, size_t size);
 
 int vfs_open(const char *path_str, int flags);
 int vfs_open_at(int dirfd, const char *path_str, int flags);
 long vfs_read(int fd, void *buf, size_t count);
 long vfs_write(int fd, const void *buf, size_t count);
+long vfs_pread(int fd, void *buf, size_t count, size_t offset);
+long vfs_pwrite(int fd, const void *buf, size_t count, size_t offset);
 int vfs_unlink(const char *path_str);
+int vfs_unlink_at(int dirfd, const char *path_str);
 int vfs_rename(const char *oldpath, const char *newpath);
 int vfs_mkdir(const char *path_str);
 int vfs_pipe(int out_fds[2]);
 
 int vfs_install(file_t *f);
+
+// the file behind fd with a ref taken on it, NULL if theres none
+file_t *vfs_file_get(int fd);
+
+// give back a ref, the last one closes whatever it is
+void vfs_file_put(file_t *f);
 int vfs_dup2(int oldfd, int newfd);
 int vfs_dup(int oldfd);
+
+// the lowest free fd at or above lowest pointing at the same file
+int vfs_dup_from(int oldfd, int lowest);
+
+// FD_CLOEXEC and friends, -EBADF if fd isnt open
+int vfs_get_fd_flags(int fd);
+int vfs_set_fd_flags(int fd, int flags);
+void vfs_close_on_exec(fd_table_t *table);
+int vfs_set_nonblock(int fd);
 int vfs_chdir(const char *path_str);
 
 // put a task back at the root, letting go of wherever it was

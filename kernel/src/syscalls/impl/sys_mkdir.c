@@ -4,7 +4,7 @@
 #include <user/errno.h>
 #include <user/user_copy.h>
 
-int sys_mkdir(const char *user_path, int mode) {
+long sys_mkdir(const char *user_path, int mode) {
     (void)mode;
 
     if (!user_path)

@@ -105,6 +105,7 @@ typedef struct audio_stream {
     bool        used;
     bool        running;
     uint64_t    pid;
+    void       *file;
     uint8_t     prio;
     paddr_t     ring_phys;
     uint8_t    *ring;

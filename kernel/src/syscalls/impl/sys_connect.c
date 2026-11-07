@@ -1,4 +1,5 @@
 #include <net/socket.h>
+#include <net/unix.h>
 #include <syscalls/syscall.h>
 #include <user/user_copy.h>
 #include <sched/scheduler.h>
@@ -7,6 +8,10 @@
 #define AF_UNSPEC 0
 
 long sys_connect(uint64_t fd, uint64_t user_addr, uint64_t len) {
+    unix_sock_t *u = unix_from_fd((int)fd);
+    if (u)
+        return unix_connect(u, (const void *)user_addr, len);
+
     int       err;
     socket_t *s = socket_from_fd((int)fd, &err);
     if (!s)

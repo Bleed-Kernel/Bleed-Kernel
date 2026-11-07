@@ -10,6 +10,8 @@
 #include <sched/scheduler.h>
 #include <mm/spinlock.h>
 #include <cpu/irq.h>
+#include <cpu/cpuid.h>
+#include <kernel/bootargs.h>
 
 #define HPET_FREQUENCY          1000
 
@@ -36,6 +38,20 @@ uint64_t femtosecondsPerTick = 0;
 static bool hpet_counter_32 = false;
 static volatile uint64_t hpet_extended = 0;
 
+// reading the hpet is a trip out to the chipset, and in a vm its a trap into the emulator that
+// holds up every other cpu too
+static bool              tsc_clock;
+static uint64_t          tsc_base, tsc_counts_base, tsc_mult;
+static volatile uint64_t tsc_last;
+
+#define TSC_CALIBRATE_MS 20
+
+static inline uint64_t rdtsc_ordered(void) {
+    uint32_t lo, hi;
+    asm volatile("lfence; rdtsc" : "=a"(lo), "=d"(hi) :: "memory");
+    return ((uint64_t)hi << 32) | lo;
+}
+
 static inline uint64_t hpet_read64(size_t off) {
     return *(volatile uint64_t *)(hpet_base + off);
 }
@@ -52,6 +68,59 @@ static void hpet_keepup(void *ctx) {
         ticks = 0;
         hpet_read_counter();
     }
+}
+
+// an invariant tsc runs at one rate whatever the cpu is doing. a vm's always does, the
+// emulator gives it the host clock. anything else (a core 2 stops it in deep c states) stays
+// on the hpet, and no-tsc on the command line keeps it there too
+static void tsc_calibrate(void) {
+    if (bootargs_has("no-tsc"))
+        return;
+
+    uint32_t a, b, c, d;
+    cpuid(1, &a, &b, &c, &d);
+    bool hypervisor = c & (1u << 31);
+    cpuid(0x80000000, &a, &b, &c, &d);
+    bool invariant = false;
+    if (a >= 0x80000007) {
+        cpuid(0x80000007, &a, &b, &c, &d);
+        invariant = d & (1u << 8);
+    }
+    if (!invariant && !hypervisor) {
+        serial_printf(LOG_INFO "TSC: not invariant, the clock stays on the HPET\n");
+        return;
+    }
+
+    uint64_t want = TSC_CALIBRATE_MS * (femtosecondsPerMillisecond / femtosecondsPerTick);
+    uint64_t h0 = hpet_read_counter(), t0 = rdtsc_ordered();
+    uint64_t h1;
+    while ((h1 = hpet_read_counter()) - h0 < want)
+        asm volatile("pause");
+    uint64_t t1 = rdtsc_ordered();
+    if (t1 <= t0 || h1 <= h0) {
+        serial_printf(LOG_WARN "TSC: didnt move, the clock stays on the HPET\n");
+        return;
+    }
+
+    // a 20ms count shifted 32 fits in 64 bits for any hpet up to a few ghz
+    tsc_mult        = ((h1 - h0) << 32) / (t1 - t0);
+    tsc_base        = t1;
+    tsc_counts_base = h1;
+    tsc_last        = h1;
+    __atomic_store_n(&tsc_clock, true, __ATOMIC_RELEASE);
+
+    uint64_t mhz = (t1 - t0) * femtosecondsPerMicrosecond / ((h1 - h0) * femtosecondsPerTick);
+    serial_printf(LOG_OK "TSC: %llu MHz%s, keeping time with it instead of the HPET\n",
+                  (unsigned long long)mhz, invariant ? "" : " (vm)");
+}
+
+bool hpet_tsc_params(uint64_t *base, uint64_t *counts_base, uint64_t *mult) {
+    if (!__atomic_load_n(&tsc_clock, __ATOMIC_ACQUIRE))
+        return false;
+    *base        = tsc_base;
+    *counts_base = tsc_counts_base;
+    *mult        = tsc_mult;
+    return true;
 }
 
 void acpi_init_hpet(void){
@@ -85,8 +154,10 @@ void acpi_init_hpet(void){
         tick_register(hpet_keepup, NULL);
 
     // not all manufacturers will actually allow you to tick off the HPET
-    if (lapic_timer_start(HPET_FREQUENCY) == 0)
+    if (lapic_timer_start(HPET_FREQUENCY) == 0) {
+        tsc_calibrate();
         return;
+    }
 
     serial_printf(LOG_WARN "LAPIC timer unavailable, ticking off HPET timer 0\n");
 
@@ -98,6 +169,7 @@ void acpi_init_hpet(void){
     hpet_write64(HPET_REG_T0_COMPARATOR, (femtosecondsPerSecond / femtosecondsPerTick) / HPET_FREQUENCY);
 
     hpet_write64(HPET_REG_CONFIG, hpet_read64(HPET_REG_CONFIG) | HPET_MAINCOUNTER_ENABLE | HPET_LEGACY_REPLACEMENT);
+    tsc_calibrate();
 }
 
 void wait_fs(uint64_t femtoseconds) {
@@ -157,6 +229,22 @@ uint64_t hpet_get_femtoseconds(){
 }
 
 uint64_t hpet_read_counter(void) {
+    if (tsc_clock) {
+        uint64_t now  = tsc_counts_base +
+                        (uint64_t)(((unsigned __int128)(rdtsc_ordered() - tsc_base) * tsc_mult) >> 32);
+        // cpus whose tscs are a hair apart must not take time backwards between them
+        uint64_t last = __atomic_load_n(&tsc_last, __ATOMIC_RELAXED);
+        while (now > last) {
+            if (__atomic_compare_exchange_n(&tsc_last, &last, now, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+                return now;
+        }
+        return last;
+    }
+
+    // the clock gets asked before acpi has found the hpet, its still the start of time then
+    if (!hpet_base)
+        return 0;
+
     uint64_t raw = hpet_read64(HPET_REG_MAIN_COUNTER);
     if (!hpet_counter_32)
         return raw;

@@ -4,7 +4,7 @@
 #include <sched/scheduler.h>
 #include <user/errno.h>
 
-int sys_meminfo(system_memory_info_t *user_buf) {
+long sys_meminfo(system_memory_info_t *user_buf) {
     if (!user_buf)
         return -EFAULT;
 

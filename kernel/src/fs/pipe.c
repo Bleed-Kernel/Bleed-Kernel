@@ -306,6 +306,14 @@ int pipe_create_file_pair(file_t **out_read, file_t **out_write) {
     return 0;
 }
 
+void pipe_set_nonblock(file_t *f) {
+    pipe_state_t *state = (pipe_state_t *)f->inode->internal_data;
+    if ((f->flags & O_MODE) == O_WRONLY)
+        state->write_nonblock = 1;
+    else
+        state->nonblock = 1;
+}
+
 void pipe_file_release(file_t *f) {
     if (!f || f->type != FD_TYPE_PIPE || !f->inode)
         return;

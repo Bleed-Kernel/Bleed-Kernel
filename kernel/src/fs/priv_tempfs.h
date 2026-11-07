@@ -27,6 +27,7 @@ typedef struct tempfs_INode{
 
 extern const INodeOps_t dir_ops;
 extern const INodeOps_t file_ops;
+extern const INodeOps_t link_ops;
 extern const filesystem tempfs;
 
 /// @brief Create a new inode, store operations inside

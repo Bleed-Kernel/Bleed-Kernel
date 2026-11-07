@@ -21,6 +21,7 @@
 #define EXT2_FT_UNKNOWN  0
 #define EXT2_FT_REG_FILE 1
 #define EXT2_FT_DIR      2
+#define EXT2_FT_SYMLINK  7
 
 // Block group descriptor table starts at block 1
 typedef struct __attribute__((packed)) {
@@ -115,6 +116,15 @@ typedef struct {
     uint32_t  inode_size;           // bytes per on-disk inode     
     uint32_t  first_data_block;     // 0 for bs>1024, 1 for bs==1024 
     uint32_t  num_groups;
+    uint32_t  alloc_group;
+
+    // the block bitmap of one group kept while a write allocates from it
+    uint8_t  *bm_buf;
+    uint32_t  bm_group;
+    uint32_t  bm_next;
+    uint32_t  bm_free;
+    bool      bm_dirty;
+    bool      sb_dirty;
     uint32_t  total_inodes;
     // cached superblock copy 
     ext2_superblock_t sb;

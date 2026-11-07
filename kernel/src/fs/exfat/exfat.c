@@ -65,15 +65,6 @@ static int exfat_write_fat(exfat_fs_t *fs, uint32_t cluster, uint32_t value) {
 }
 
 // assumed contiguous on disk
-static bool exfat_bitmap_get(exfat_fs_t *fs, uint32_t cluster) {
-    uint32_t idx        = cluster - EXFAT_FIRST_DATA_CLUSTER;
-    uint64_t byte_off    = (uint64_t)exfat_cluster_to_lba(fs, fs->bitmap_cluster) * fs->bytes_per_sector
-                           + idx / 8;
-    uint8_t b = 0;
-    exfat_abs_read(fs, byte_off, &b, 1);
-    return (b >> (idx % 8)) & 1;
-}
-
 static void exfat_bitmap_set(exfat_fs_t *fs, uint32_t cluster, bool used) {
     uint32_t idx     = cluster - EXFAT_FIRST_DATA_CLUSTER;
     uint64_t byte_off = (uint64_t)exfat_cluster_to_lba(fs, fs->bitmap_cluster) * fs->bytes_per_sector
@@ -85,10 +76,49 @@ static void exfat_bitmap_set(exfat_fs_t *fs, uint32_t cluster, bool used) {
     exfat_abs_write(fs, byte_off, &b, 1);
 }
 
-static uint32_t exfat_alloc_cluster(exfat_fs_t *fs, uint32_t prev) {
-    for (uint32_t c = EXFAT_FIRST_DATA_CLUSTER; c < fs->cluster_count + EXFAT_FIRST_DATA_CLUSTER; c++) {
-        if (exfat_bitmap_get(fs, c)) continue;
+// the bitmap is read 512 bytes at a time from where the last free cluster was, it used to
+// be a disk read per cluster from the start every time and a big file took hours
+static uint32_t exfat_find_free(exfat_fs_t *fs) {
+    uint64_t base  = (uint64_t)exfat_cluster_to_lba(fs, fs->bitmap_cluster) * fs->bytes_per_sector;
+    uint32_t total = fs->cluster_count;
+    uint8_t  buf[512];
+    uint32_t have  = UINT32_MAX;     // byte index buf starts at
 
+    uint32_t idx = fs->alloc_hint < total ? fs->alloc_hint : 0;
+    for (uint32_t looked = 0; looked < total; ) {
+        uint32_t byte = idx / 8;
+        if (have == UINT32_MAX || byte < have || byte >= have + sizeof(buf)) {
+            have = byte - byte % sizeof(buf);
+            uint32_t len = (uint32_t)sizeof(buf);
+            if ((uint64_t)have + len > fs->bitmap_size_bytes)
+                len = (uint32_t)(fs->bitmap_size_bytes - have);
+            memset(buf, 0xFF, sizeof(buf));
+            if (exfat_abs_read(fs, base + have, buf, len) < 0)
+                return 0;
+        }
+
+        uint8_t b = buf[byte - have];
+        if (b == 0xFF && idx % 8 == 0) {
+            uint32_t step = total - idx < 8 ? total - idx : 8;
+            idx += step;
+            looked += step;
+        } else {
+            if (!((b >> (idx % 8)) & 1)) {
+                fs->alloc_hint = idx + 1;
+                return idx + EXFAT_FIRST_DATA_CLUSTER;
+            }
+            idx++;
+            looked++;
+        }
+        if (idx >= total)
+            idx = 0;
+    }
+    return 0;
+}
+
+static uint32_t exfat_alloc_cluster(exfat_fs_t *fs, uint32_t prev) {
+    uint32_t c = exfat_find_free(fs);
+    if (c) {
         exfat_bitmap_set(fs, c, true);
         exfat_write_fat(fs, c, EXFAT_CLUSTER_EOF);
         if (prev != 0)
@@ -99,10 +129,8 @@ static uint32_t exfat_alloc_cluster(exfat_fs_t *fs, uint32_t prev) {
         uint32_t lba = exfat_cluster_to_lba(fs, c);
         for (uint32_t s = 0; s < fs->sectors_per_cluster; s++)
             exfat_write_bytes(fs, lba + s, 0, zero, fs->bytes_per_sector);
-
-        return c;
     }
-    return 0;
+    return c;
 }
 
 // free cluster run
@@ -489,15 +517,9 @@ static long exfat_write(INode_t *inode, const void *buf, size_t count, size_t of
         if (fi->no_fat_chain)
             exfat_chain_ify(fi);
 
-        uint32_t cur = fi->first_cluster;
-        uint32_t prev = cur;
-        uint32_t count_existing = 1;
-        while (count_existing < have_clusters) {
-            prev = cur;
-            cur  = exfat_read_fat(fs, cur);
-            count_existing++;
-        }
-        prev = cur;
+        // the last cluster, from the hint the last write left instead of the start of the chain
+        uint32_t prev = exfat_file_cluster_at(fi, (uint64_t)(have_clusters - 1) * fs->bytes_per_cluster);
+        if (prev < EXFAT_FIRST_DATA_CLUSTER) return -EIO;
 
         while (have_clusters < needed_clusters) {
             uint32_t nc = exfat_alloc_cluster(fs, prev);

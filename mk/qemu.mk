@@ -9,8 +9,9 @@ qemu_audio_pick    = $(or $(firstword $(foreach d,$(1),$(filter $(d),$(QEMU_AUDI
 
 ifeq ($(UNAME_S),Darwin)
 # coreaudio only keeps 4 buffers of ~11ms by default, less than qemu stalls for when the
-# window is busy (moving the mouse)
-QEMU_AUDIODEV ?= coreaudio,out.buffer-count=10
+# window is busy (moving the mouse). qemu mixes for 44.1k unless told, and a mac output thats
+# sat at 48k (airpods, most built in speakers) plays that 9% fast. the guest card is 48k too
+QEMU_AUDIODEV ?= coreaudio,out.buffer-count=10,out.frequency=48000
 else ifneq ($(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)),)
 QEMU_AUDIODEV ?= $(call qemu_audio_pick,dsound sdl)
 else
@@ -22,6 +23,11 @@ else ifeq ($(AUDIO),ac97)
 QEMU_AUDIO := -audiodev $(QEMU_AUDIODEV),id=snd0 -device AC97,audiodev=snd0
 else
 $(error AUDIO=$(AUDIO) isnt a thing, use AUDIO=ac97 or AUDIO=hda)
+endif
+
+ifneq ($(EMMC),)
+QEMU_EMMC := -device sdhci-pci,sd-spec-version=3,id=sdhci -drive file=$(EMMC_DISK),format=raw,if=none,id=emmc0 \
+             -device emmc,drive=emmc0
 endif
 
 QEMU_NET ?= -nic user,model=e1000,hostfwd=udp::27015-:27015
@@ -89,12 +95,9 @@ define run_qemu
 		-m $(MEMSZ) \
 		$$serial \
 		-smp 4 \
-		-drive format=raw,file=$(IDE_DISK) \
-		-device ich9-ahci,id=ahci \
-		-drive file=$(SATA_DISK),format=raw,if=none,id=sata0 \
-		-device ide-hd,drive=sata0,bus=ahci.0 \
 		-drive file=$(NVME_DISK),format=raw,if=none,id=nvm0 \
 		-device nvme,serial=bleed-nvme-1,drive=nvm0 \
+		$(QEMU_EMMC) \
 		$(QEMU_AUDIO) \
 		$(QEMU_NET) \
 		$(QEMU_USB) \

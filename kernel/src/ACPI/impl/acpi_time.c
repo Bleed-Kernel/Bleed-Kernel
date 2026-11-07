@@ -1,4 +1,5 @@
 #include <ACPI/acpi_time.h>
+#include <sched/clock.h>
 #include <ACPI/acpi.h>
 #include <ACPI/acpi_hpet.h>
 
@@ -102,17 +103,5 @@ uint32_t clock_to_dos(int64_t t) {
 
 // the rtc only ticks whole seconds and is slow to read
 int64_t clock_now(void) {
-    static int64_t  base;
-    static uint64_t base_fs;
-    uint64_t fs = hpet_get_femtoseconds();
-
-    if (!base_fs) {
-        struct rtc_time t;
-        rtc_get_time(&t);
-        base    = clock_from_civil(t.year, t.mon, t.day, t.hour, t.min, t.sec);
-        base_fs = fs;
-        return base;
-    }
-
-    return base + (int64_t)((fs - base_fs) / 1000000000000000ULL);
+    return (int64_t)(clock_realtime_ns() / 1000000000ULL);
 }

@@ -128,6 +128,20 @@ int tar_extract(const void* tar_data, size_t tar_size){
         // root is pinned so this is a no-op when the entry lives at the top level
         vfs_drop(parent);
 
+        // a link, linkname is where it points
+        if (header->typeflag == '2') {
+            char target[sizeof(header->linkname) + 1];
+            memcpy(target, header->linkname, sizeof(header->linkname));
+            target[sizeof(header->linkname)] = '\0';
+            char abs[258];
+            snprintf(abs, sizeof(abs), "%s%s", full_path[0] == '/' ? "" : "/", full_path);
+            int lr = vfs_symlink_at(target, AT_FDCWD, abs);
+            if (lr < 0 && lr != -EEXIST)
+                kprintf(LOG_ERROR "Tar: cant link %s -> %s (%d)\n", full_path, target, lr);
+            offset += TAR_BLOCK_SIZE;
+            continue;
+        }
+
         path_t final_path = vfs_path_from_abs(full_path);
 
         INode_t* inode = NULL;

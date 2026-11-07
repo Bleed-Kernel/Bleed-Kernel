@@ -49,7 +49,7 @@ static void process_exit(task_t *current_task) {
 
         (void)vmm_unmap_free_pages(current_task->page_map, alloc->vaddr, alloc->pages);
 
-        kfree(alloc);
+        user_alloc_free(alloc);
         alloc = next;
     }
     if (g)
@@ -93,7 +93,7 @@ static void process_exit(task_t *current_task) {
         // SIGCHLD only lands on one thread, it might not be the one sat in waitpid
         if (parent->group) {
             for (task_t *t = parent->group->threads; t; t = t->group_next) {
-                if (t->wait_target_pid == leader->id)
+                if (t->wait_target_pid == leader->id || t->wait_target_pid == WAIT_ANY_CHILD)
                     sched_wake_task(t);
             }
         }
@@ -119,6 +119,7 @@ void thread_exit(void) {
     task_t       *current_task = get_current_task();
     task_group_t *g            = current_task->group;
 
+    vfork_release(current_task);
     if (!g || g->live <= 1) {
         if (g)
             g->live = 0;

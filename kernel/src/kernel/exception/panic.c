@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <ansii.h>
 #include <mm/cow.h>
+#include <mm/userspace/mmap.h>
+#include <exec/elf_load.h>
 #include <cpu/features/fpu.h>
 #include <sched/scheduler.h>
 #include <sched/signal.h>
@@ -74,10 +76,41 @@ static int exception_signal(uint64_t vector) {
     }
 }
 
+static void print_user_addr(task_t *task, uint64_t addr) {
+    const char *name;
+    uint64_t    off;
+    if (task_addr_file(task, addr, &name, &off))
+        serial_printf("  %p %s+%p\n", addr, name, off);
+    else if (addr >= ELF_INTERP_BASE && addr < ELF_INTERP_BASE + 0x1000000000ULL)
+        serial_printf("  %p libc.so+%p\n", addr, addr - ELF_INTERP_BASE);
+    else if (addr >= ELF_DYN_BASE && addr < ELF_INTERP_BASE)
+        serial_printf("  %p %s+%p\n", addr, task->name, addr - ELF_DYN_BASE);
+    else
+        serial_printf("  %p\n", addr);
+}
+
+// follows the rbp chain, most of what runs here keeps frame pointers
+static void print_user_trace(task_t *task, uint64_t rip, uint64_t rbp) {
+    serial_printf(" backtrace:\n");
+    print_user_addr(task, rip);
+    for (int i = 0; i < 24 && rbp && !(rbp & 7); i++) {
+        uint64_t frame[2];
+        if (copy_from_user(task, frame, (const void *)rbp, sizeof(frame)) != 0 || !frame[1])
+            break;
+        print_user_addr(task, frame[1]);
+        if (frame[0] <= rbp)
+            break;
+        rbp = frame[0];
+    }
+}
+
 void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
     uint64_t cr2 = 0;
     __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
     if (sf->vector == 14 && paging_handle_cow_fault(task, cr2, sf->error_code))
+        return sf;
+    if (sf->vector == 14 && !(sf->error_code & 0x1) &&
+        task_fault_in(task, cr2, (sf->error_code & 0x2) != 0, (sf->error_code & 0x10) != 0))
         return sf;
     if (sf->vector == 14 && !(sf->error_code & 0x1) && paging_handle_stack_fault(task, cr2))
         return sf;
@@ -86,7 +119,13 @@ void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
 
     // a task with a handler gets to deal with it
     int sig = exception_signal(sf->vector);
-    if (sig && signal_deliver_fault(task, (cpu_context_t *)sf, sig) == 0)
+    int      code = SI_USER;
+    uint64_t addr = sf->rip;
+    if (sf->vector == 14) {
+        code = ((sf->error_code & 0x1) || task_addr_mapped(task, cr2)) ? SEGV_ACCERR : SEGV_MAPERR;
+        addr = cr2;
+    }
+    if (sig && signal_deliver_fault(task, (cpu_context_t *)sf, sig, code, addr) == 0)
         return sf;
 
     if (sf->vector == 14)
@@ -101,6 +140,7 @@ void *ke_user_program_exception(struct isr_stackframe *sf, task_t *task){
                   " r9  %p r10 %p r11 %p r12 %p\n r13 %p r14 %p r15 %p rflags %p\n",
                   sf->rax, sf->rbx, sf->rcx, sf->rdx, sf->rsi, sf->rdi, sf->rbp, sf->r8,
                   sf->r9, sf->r10, sf->r11, sf->r12, sf->r13, sf->r14, sf->r15, sf->rflags);
+    print_user_trace(task, sf->rip, sf->rbp);
 
     kprintf("%s[ERROR]%s %s (%llu) has crashed and the task was killed [%s]\n", 
         RED_FG, 

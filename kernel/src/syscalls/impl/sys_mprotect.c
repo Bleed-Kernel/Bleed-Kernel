@@ -4,9 +4,7 @@
 #include <user/user_copy.h>
 #include <user/errno.h>
 
-#define PROT_READ   0x1
-#define PROT_WRITE  0x2
-#define PROT_EXEC   0x4
+#include <mm/userspace/mmap.h>
 
 long sys_mprotect(uint64_t addr, uint64_t len, uint64_t prot) {
     task_t *task = get_current_task();
@@ -15,9 +13,6 @@ long sys_mprotect(uint64_t addr, uint64_t len, uint64_t prot) {
     if (addr & (PAGE_SIZE - 1))
         return -EINVAL;
     if (prot & ~(uint64_t)(PROT_READ | PROT_WRITE | PROT_EXEC))
-        return -EINVAL;
-    // no way to make a user page unreadable without it looking like a kernel one
-    if (!prot)
         return -EINVAL;
     if (!len)
         return 0;
@@ -28,6 +23,13 @@ long sys_mprotect(uint64_t addr, uint64_t len, uint64_t prot) {
     end = PAGE_ALIGN_UP(end);
     if (!user_ptr_valid(addr) || !user_ptr_valid(end - 1))
         return -ENOMEM;
+
+    long r = task_vma_protect(task, addr, end - addr, (int)prot);
+    if (r != -ENOMEM)
+        return r;
+
+    if (!prot)
+        return -EINVAL;
 
     // all or nothing, check every page is there before touching any
     for (uint64_t page = addr; page < end; page += PAGE_SIZE) {

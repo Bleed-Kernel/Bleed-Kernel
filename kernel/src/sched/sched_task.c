@@ -108,7 +108,7 @@ static void child_unlink(task_t *child) {
 void sched_free_alloc_list(user_alloc_t *list) {
     while (list) {
         user_alloc_t *next = list->next;
-        kfree(list);
+        user_alloc_free(list);
         list = next;
     }
 }
@@ -124,8 +124,7 @@ static user_alloc_t *clone_user_alloc_list(const user_alloc_t *src) {
             return NULL;
         }
 
-        node->vaddr = src->vaddr;
-        node->pages = src->pages;
+        user_alloc_copy(node, src);
         node->next = NULL;
 
         if (!head)
@@ -303,7 +302,7 @@ void task_group_put(task_t *task) {
     kfree(g);
 }
 
-task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, const char *task_name) {
+static task_t *create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, const char *task_name, int ready) {
     task_t *task = kmalloc(sizeof(task_t));
     if (!task) ke_panic(NULL, "Failed to allocate task");
     memset(task, 0, sizeof(task_t));
@@ -332,7 +331,7 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
         strncpy(task->name, task_name, sizeof(task->name) - 1);
         task->name[sizeof(task->name) - 1] = '\0';
     }
-    task->state = TASK_READY;
+    task->state = ready ? TASK_READY : TASK_BLOCKED;
     task->quantum_remaining = QUANTUM;
     task->prio_base = parent ? parent->prio_base : PRIO_DEFAULT;
     task->page_map = cr3;
@@ -379,6 +378,16 @@ task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss
     irq_restore(flags);
 
     return task;
+}
+
+task_t *sched_create_task(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, const char *task_name) {
+    return create_task(cr3, entry, cs, ss, task_name, 1);
+}
+
+// for a task whose context isnt finished yet, it sits blocked until sched_wake_task. a ready
+// one could run and go into a syscall first, and then the rest of the setup lands on that frame
+task_t *sched_create_task_held(uint64_t cr3, uint64_t entry, uint64_t cs, uint64_t ss, const char *task_name) {
+    return create_task(cr3, entry, cs, ss, task_name, 0);
 }
 
 void itterate_each_task(task_itteration_fn fn, void *userdata) {
@@ -466,6 +475,9 @@ task_t *sched_fork_from_context(cpu_context_t *parent_ctx) {
     child->sig_pending = 0;
     child->sig_blocked = parent->sig_blocked;
     child->sig_active_frame = 0;
+    child->sig_altstack_sp    = parent->sig_altstack_sp;
+    child->sig_altstack_size  = parent->sig_altstack_size;
+    child->sig_altstack_flags = parent->sig_altstack_flags;
 
     memcpy(child->sig_handlers, parent->sig_handlers, sizeof(child->sig_handlers));
     memcpy(child->sig_masks, parent->sig_masks, sizeof(child->sig_masks));
@@ -565,6 +577,9 @@ task_t *sched_clone_thread(cpu_context_t *parent_ctx, uint64_t stack, uint64_t t
     t->task_privilege    = parent->task_privilege;
     t->fs_base           = tls;
     t->sig_blocked       = parent->sig_blocked;
+    t->sig_altstack_sp    = 0;
+    t->sig_altstack_size  = 0;
+    t->sig_altstack_flags = SS_DISABLE;
 
     // the caller fills in the tid pointers first, then wakes it
     t->state = TASK_BLOCKED;

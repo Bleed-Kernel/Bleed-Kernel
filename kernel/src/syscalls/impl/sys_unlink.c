@@ -4,7 +4,7 @@
 #include <user/errno.h>
 #include <user/user_copy.h>
 
-int sys_unlink(const char *user_path) {
+long sys_unlink(const char *user_path) {
     if (!user_path)
         return -EFAULT;
 
@@ -22,5 +22,36 @@ int sys_unlink(const char *user_path) {
         return -EFAULT;
 
     int r = vfs_unlink(kpath);
+    return r < 0 ? r : 0;
+}
+
+#define AT_REMOVEDIR 0x200
+
+// its the flag that decides if theres an error
+long sys_unlinkat(int dirfd, const char *user_path, int flags) {
+    if (!user_path)
+        return -EFAULT;
+    if (flags & ~AT_REMOVEDIR)
+        return -EINVAL;
+
+    char kpath[256];
+    memset(kpath, 0, sizeof(kpath));
+    long plen = copy_user_path(get_current_task(), user_path, kpath, sizeof(kpath));
+    if (plen == -2)
+        return -E2BIG;
+    if (plen < 0)
+        return -EFAULT;
+
+    user_stat_t st;
+    int r = vfs_stat_at(dirfd, kpath, &st);
+    if (r < 0)
+        return r;
+    bool dir = (st.mode & STAT_IFMT) == STAT_IFDIR;
+    if ((flags & AT_REMOVEDIR) && !dir)
+        return -ENOTDIR;
+    if (!(flags & AT_REMOVEDIR) && dir)
+        return -EISDIR;
+
+    r = vfs_unlink_at(dirfd, kpath);
     return r < 0 ? r : 0;
 }

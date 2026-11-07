@@ -34,6 +34,7 @@
 #define EPIPE    32
 #define EDOM     33
 #define ERANGE   34
+#define ELOOP    40
 #define ENAMETOOLONG 36
 #define ENOSYS   38
 #define ENOTEMPTY 39
@@ -53,6 +54,7 @@
 #define ENOBUFS         105
 #define EISCONN         106
 #define ENOTCONN        107
+#define ETOOMANYREFS    109
 #define ETIMEDOUT       110
 #define ECONNRESET      104
 #define ECONNREFUSED    111

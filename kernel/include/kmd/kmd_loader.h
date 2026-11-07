@@ -3,7 +3,7 @@
 #include <kmd/kmd.h>
 #include <exec/elf.h>
 
-#define KMD_EXPORTS         "/initrd/etc/kernel.exports"
+#define KMD_EXPORTS         "/etc/kernel.exports"
 #define KMD_DEPS_MAX        8
 #define KMD_DEPTH_MAX       8       // a depends chain longer than this is a loop
 #define KMD_TEXT_MAX        2048    // the most /dev/kmd will say
